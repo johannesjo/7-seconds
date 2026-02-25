@@ -92,8 +92,8 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
   }
 
   // Clamp to map bounds
-  newX = clamp(newX, 0, MAP_WIDTH);
-  newY = clamp(newY, 0, MAP_HEIGHT);
+  newX = clamp(newX, unit.radius, MAP_WIDTH - unit.radius);
+  newY = clamp(newY, unit.radius, MAP_HEIGHT - unit.radius);
 
   unit.pos.x = newX;
   unit.pos.y = newY;

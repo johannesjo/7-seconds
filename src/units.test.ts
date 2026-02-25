@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createUnit, createArmy, moveUnit, findTarget, applyDamage } from './units';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { Unit } from './types';
+
 
 describe('createUnit', () => {
   it('creates a scout with correct stats', () => {
@@ -50,18 +50,18 @@ describe('createArmy', () => {
 
 describe('moveUnit', () => {
   it('moves unit toward its target', () => {
-    const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
-    unit.moveTarget = { x: 100, y: 0 };
+    const unit = createUnit('s1', 'scout', 'blue', { x: 100, y: 100 });
+    unit.moveTarget = { x: 300, y: 100 };
     moveUnit(unit, 1, []);
-    expect(unit.pos.x).toBeGreaterThan(0);
-    expect(unit.pos.y).toBeCloseTo(0, 1);
+    expect(unit.pos.x).toBeGreaterThan(100);
+    expect(unit.pos.y).toBeCloseTo(100, 1);
   });
 
   it('does not move past its target', () => {
-    const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
-    unit.moveTarget = { x: 10, y: 0 };
+    const unit = createUnit('s1', 'scout', 'blue', { x: 100, y: 100 });
+    unit.moveTarget = { x: 110, y: 100 };
     moveUnit(unit, 1, []);
-    expect(unit.pos.x).toBeCloseTo(10, 1);
+    expect(unit.pos.x).toBeCloseTo(110, 1);
   });
 
   it('does nothing without a target', () => {
