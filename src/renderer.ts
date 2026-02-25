@@ -159,6 +159,10 @@ export class Renderer {
     this.app.stage.addChild(this.projectileGraphics);
   }
 
+  get stage() {
+    return this.app.stage;
+  }
+
   get ticker() {
     return this.app.ticker;
   }

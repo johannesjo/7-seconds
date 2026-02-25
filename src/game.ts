@@ -1,126 +1,130 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, AiResponse, AiUnitOrder } from './types';
-import { MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { AI_POLL_INTERVAL_MS, ARMY_COMPOSITION } from './constants';
-import { createArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles } from './units';
-// import { generateObstacles } from './battlefield'; // obstacles disabled
-import { AiCommander } from './ai-commander';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase } from './types';
+import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS } from './constants';
+import { createArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint } from './units';
+import { generateObstacles } from './battlefield';
+import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
 
-function describeDirection(x: number, y: number): string {
-  const horizontal = x < MAP_WIDTH * 0.33 ? 'left' : x > MAP_WIDTH * 0.66 ? 'right' : 'center';
-  const vertical = y < MAP_HEIGHT * 0.33 ? 'top' : y > MAP_HEIGHT * 0.66 ? 'bottom' : 'mid';
-  if (vertical === 'mid') return `→ ${horizontal}`;
-  if (horizontal === 'center') return `→ ${vertical}`;
-  return `→ ${vertical}-${horizontal}`;
-}
-
-export interface AiStatus {
-  blue: string;
-  red: string;
-}
-
-export type GameEventCallback = (event: 'update' | 'end', data?: BattleResult) => void;
+export type GameEventCallback = (
+  event: 'update' | 'end' | 'phase-change',
+  data?: BattleResult | { phase: TurnPhase; timeLeft?: number },
+) => void;
 
 export class GameEngine {
   private units: Unit[] = [];
   private obstacles: Obstacle[] = [];
   private projectiles: Projectile[] = [];
-  private blueCommander: AiCommander | null = null;
-  private redCommander: AiCommander | null = null;
   private renderer: Renderer;
   private running = false;
   private speedMultiplier = 1;
   private elapsedTime = 0;
-  private lastAiPoll = 0;
+  private roundTimer = 0;
   private onEvent: GameEventCallback;
-  private aiReady = false;
-  private aiPolling = false;
-  private _aiStatus: AiStatus = { blue: 'Waiting...', red: 'Waiting...' };
+  private pathDrawer: PathDrawer | null = null;
+  private _phase: TurnPhase = 'blue-planning';
 
   constructor(renderer: Renderer, onEvent: GameEventCallback) {
     this.renderer = renderer;
     this.onEvent = onEvent;
   }
 
-  async startBattle(bluePrompt: string, redPrompt: string, obstacles?: Obstacle[]): Promise<{ blueAi: boolean; redAi: boolean }> {
+  get phase(): TurnPhase {
+    return this._phase;
+  }
+
+  startBattle(): void {
     this.units = [...createArmy('blue'), ...createArmy('red')];
-    this.obstacles = []; // obstacles disabled (was: obstacles ?? generateObstacles())
+    this.obstacles = generateObstacles();
     this.projectiles = [];
     this.elapsedTime = 0;
-    this.lastAiPoll = -AI_POLL_INTERVAL_MS; // trigger immediate first poll
+    this.roundTimer = 0;
     this.running = true;
-    this.aiReady = false;
 
-    // this.renderer.renderObstacles(this.obstacles); // obstacles disabled
+    this.pathDrawer = new PathDrawer(this.renderer.stage);
 
-    // Init AI commanders
-    this.blueCommander = new AiCommander('blue', bluePrompt);
-    this.redCommander = new AiCommander('red', redPrompt);
+    // Render initial state
+    this.renderer.renderObstacles(this.obstacles);
+    this.renderer.renderUnits(this.units);
 
-    const [blueOk, redOk] = await Promise.all([
-      this.blueCommander.init(),
-      this.redCommander.init(),
-    ]);
-
-    if (!blueOk || !redOk) {
-      this.running = false;
-      return { blueAi: blueOk, redAi: redOk };
-    }
-
-    this.aiReady = true;
-
-    // Start game loop
+    // Start ticker for rendering during planning
     this.renderer.ticker.add(this.tick, this);
 
-    return { blueAi: blueOk, redAi: redOk };
+    this.setPhase('blue-planning');
+  }
+
+  /** Called by the UI "Done" button to end the current planning phase. */
+  confirmPlan(): void {
+    if (this._phase === 'blue-planning') {
+      this.setPhase('cover');
+      setTimeout(() => {
+        this.setPhase('red-planning');
+      }, COVER_SCREEN_DURATION_MS);
+    } else if (this._phase === 'red-planning') {
+      this.setPhase('playing');
+    }
+  }
+
+  private setPhase(phase: TurnPhase): void {
+    this._phase = phase;
+
+    if (phase === 'blue-planning') {
+      this.pathDrawer?.clearPaths('blue');
+      this.pathDrawer?.enable('blue', this.units);
+    } else if (phase === 'cover') {
+      this.pathDrawer?.disable();
+    } else if (phase === 'red-planning') {
+      this.pathDrawer?.clearPaths('red');
+      this.pathDrawer?.enable('red', this.units);
+    } else if (phase === 'playing') {
+      this.pathDrawer?.disable();
+      this.pathDrawer?.clearGraphics();
+      this.roundTimer = ROUND_DURATION_S;
+    }
+
+    this.onEvent('phase-change', { phase });
   }
 
   private tick = (ticker: { deltaMS: number }): void => {
     if (!this.running) return;
 
+    // Always render units (even during planning)
+    this.renderer.renderUnits(this.units);
+
+    if (this._phase !== 'playing') return;
+
     const rawDt = ticker.deltaMS / 1000;
     const dt = rawDt * this.speedMultiplier;
     this.elapsedTime += dt;
+    this.roundTimer -= dt;
 
-    // AI polling (skip if previous poll still in progress)
-    if (this.aiReady && !this.aiPolling && (this.elapsedTime - this.lastAiPoll) * 1000 >= AI_POLL_INTERVAL_MS) {
-      this.lastAiPoll = this.elapsedTime;
-      this.aiPolling = true;
-      this.pollAi().finally(() => { this.aiPolling = false; });
-    }
-
-    // Movement
+    // Advance waypoints and move
     for (const unit of this.units) {
       if (!unit.alive) continue;
-      moveUnit(unit, dt, []); // obstacles disabled
+      advanceWaypoint(unit);
+      moveUnit(unit, dt, this.obstacles);
     }
     separateUnits(this.units);
 
-    // Combat — fire projectiles
+    // Combat — auto-target nearest enemy, fire projectiles
     for (const unit of this.units) {
       if (!unit.alive) continue;
 
-      const target = findTarget(unit, this.units, unit.attackTargetId);
+      const target = findTarget(unit, this.units, null);
       if (target && isInRange(unit, target)) {
         const projectile = tryFireProjectile(unit, target, dt);
         if (projectile) {
           this.projectiles.push(projectile);
         }
       } else {
-        // Tick cooldown even when not firing so it's ready when in range
         unit.fireTimer = Math.max(0, unit.fireTimer - dt);
       }
     }
 
-    // Update projectiles (move, hit detection, cleanup)
     this.projectiles = updateProjectiles(this.projectiles, this.units, dt);
-
-    // Render
-    this.renderer.renderUnits(this.units);
     this.renderer.renderProjectiles(this.projectiles);
 
-    // HUD update
-    this.onEvent('update');
+    // HUD update with time left
+    this.onEvent('update', { phase: 'playing', timeLeft: Math.max(0, this.roundTimer) });
 
     // Win condition
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
@@ -128,63 +132,22 @@ export class GameEngine {
 
     if (blueAlive === 0 || redAlive === 0) {
       this.endBattle(blueAlive === 0 ? 'red' : 'blue');
+      return;
+    }
+
+    // Round over → back to planning
+    if (this.roundTimer <= 0) {
+      this.projectiles = [];
+      this.renderer.renderProjectiles([]);
+      this.setPhase('blue-planning');
     }
   };
-
-  private async pollAi(): Promise<void> {
-    if (!this.blueCommander || !this.redCommander) return;
-
-    this._aiStatus = { blue: 'Thinking...', red: 'Thinking...' };
-
-    const [blueOrders, redOrders] = await Promise.all([
-      this.blueCommander.getOrders(this.units, this.obstacles),
-      this.redCommander.getOrders(this.units, this.obstacles),
-    ]);
-
-    // Apply orders and summarize
-    this._aiStatus.blue = this.applyAndSummarize(blueOrders, 'blue');
-    this._aiStatus.red = this.applyAndSummarize(redOrders, 'red');
-  }
-
-  private applyAndSummarize(response: AiResponse, team: Team): string {
-    const attacking: string[] = [];
-    const moving: string[] = [];
-
-    for (const order of response.orders) {
-      const unit = this.units.find(u => u.id === order.id && u.alive);
-      if (!unit) continue;
-
-      unit.moveTarget = { x: order.move_to[0], y: order.move_to[1] };
-      unit.attackTargetId = order.attack;
-
-      if (order.attack) {
-        attacking.push(order.id);
-      } else {
-        moving.push(order.id);
-      }
-    }
-
-    const parts: string[] = [];
-    if (attacking.length > 0) parts.push(`${attacking.length} attacking`);
-    if (moving.length > 0) parts.push(`${moving.length} moving`);
-
-    // Summarize general direction
-    const targets = response.orders
-      .filter(o => this.units.find(u => u.id === o.id && u.alive))
-      .map(o => o.move_to);
-    if (targets.length > 0) {
-      const avgX = targets.reduce((s, t) => s + t[0], 0) / targets.length;
-      const avgY = targets.reduce((s, t) => s + t[1], 0) / targets.length;
-      const dir = describeDirection(avgX, avgY);
-      parts.push(dir);
-    }
-
-    return parts.join(', ') || 'No orders';
-  }
 
   private endBattle(winner: Team): void {
     this.running = false;
     this.renderer.ticker.remove(this.tick, this);
+    this.pathDrawer?.disable();
+    this.pathDrawer?.clearGraphics();
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
@@ -198,17 +161,10 @@ export class GameEngine {
       redKilled: armySize - blueAlive,
       duration: this.elapsedTime,
     });
-
-    this.blueCommander?.destroy();
-    this.redCommander?.destroy();
   }
 
   setSpeed(multiplier: number): void {
     this.speedMultiplier = multiplier;
-  }
-
-  get aiStatus(): AiStatus {
-    return this._aiStatus;
   }
 
   getAliveCount(): { blue: number; red: number } {
@@ -221,7 +177,7 @@ export class GameEngine {
   stop(): void {
     this.running = false;
     this.renderer.ticker.remove(this.tick, this);
-    this.blueCommander?.destroy();
-    this.redCommander?.destroy();
+    this.pathDrawer?.destroy();
+    this.pathDrawer = null;
   }
 }

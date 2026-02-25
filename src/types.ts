@@ -1,6 +1,7 @@
 export type UnitType = 'scout' | 'soldier' | 'tank';
 export type Team = 'blue' | 'red';
 export type GamePhase = 'prompt' | 'battle' | 'result';
+export type TurnPhase = 'blue-planning' | 'cover' | 'red-planning' | 'playing';
 
 export interface Vec2 {
   x: number;
@@ -30,6 +31,7 @@ export interface Unit {
   range: number;
   radius: number;
   moveTarget: Vec2 | null;
+  waypoints: Vec2[];
   attackTargetId: string | null;
   alive: boolean;
   fireCooldown: number;

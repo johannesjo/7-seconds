@@ -17,7 +17,7 @@
     .screen { display: none; width: 100%; height: 100%; }
     .screen.active { display: flex; }
 
-    /* Prompt Screen — overlay on top of battlefield */
+    /* Start Screen — overlay on top of battlefield */
     #prompt-screen {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -34,38 +34,13 @@
       letter-spacing: 4px;
       text-transform: uppercase;
     }
-    .prompt-container {
-      display: flex;
-      gap: 32px;
-      width: 100%;
-      max-width: 1000px;
+    #prompt-screen p {
+      font-size: 16px;
+      opacity: 0.7;
+      max-width: 500px;
+      text-align: center;
+      line-height: 1.5;
     }
-    .prompt-side {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .prompt-side label {
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-    }
-    .prompt-side.blue label { color: #4a9eff; }
-    .prompt-side.red label { color: #ff4a4a; }
-    .prompt-side textarea {
-      width: 100%;
-      height: 200px;
-      background: #1a1a2e;
-      border: 1px solid #333;
-      color: #eee;
-      padding: 12px;
-      font-family: inherit;
-      font-size: 14px;
-      resize: none;
-      border-radius: 4px;
-    }
-    .prompt-side textarea:focus { outline: none; border-color: #555; }
     #battle-btn {
       padding: 16px 48px;
       font-size: 20px;
@@ -99,13 +74,10 @@
       z-index: 10;
       font-size: 14px;
     }
-    .ai-status {
-      font-size: 11px;
-      opacity: 0.7;
-      max-width: 200px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    #round-timer {
+      font-size: 20px;
+      font-weight: bold;
+      font-variant-numeric: tabular-nums;
     }
     .speed-controls button {
       background: #2a2a4a;
@@ -116,6 +88,63 @@
       font-size: 12px;
     }
     .speed-controls button.active { background: #4a4a7a; border-color: #88f; }
+
+    /* Planning overlay */
+    #planning-overlay {
+      display: none;
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      z-index: 12;
+      pointer-events: none;
+    }
+    #planning-overlay.active { display: flex; }
+    #planning-label {
+      font-size: 24px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    }
+    #planning-instructions {
+      font-size: 13px;
+      opacity: 0.7;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #confirm-btn {
+      padding: 12px 36px;
+      font-size: 16px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 2px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    #confirm-btn:hover { background: #3a3a5a; border-color: #777; }
+
+    /* Cover screen */
+    #cover-screen {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.85);
+      z-index: 16;
+      font-size: 36px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    #cover-screen.active { display: flex; }
 
     /* Result Screen */
     #result-screen {
@@ -141,69 +170,38 @@
       cursor: pointer;
     }
     #result-screen button:hover { background: #3a3a5a; }
-
-    /* Loading */
-    #loading-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.8);
-      align-items: center;
-      justify-content: center;
-      z-index: 30;
-      font-size: 24px;
-    }
-    #loading-overlay.active { display: flex; flex-direction: column; gap: 16px; }
-    #loading-bar-container {
-      width: 400px;
-      height: 8px;
-      background: #333;
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    #loading-bar {
-      width: 0%;
-      height: 100%;
-      background: #4a9eff;
-      transition: width 0.3s ease;
-    }
   </style>
 </head>
 <body>
   <div id="prompt-screen" class="screen active">
     <h1>Prompt Wars</h1>
-    <p id="ai-status" style="font-size: 12px; opacity: 0.6;"></p>
-    <div class="prompt-container">
-      <div class="prompt-side blue">
-        <label>Blue Commander</label>
-        <textarea id="blue-prompt" placeholder="Write your battle strategy...&#10;&#10;Example: Send scouts to flank from the left. Soldiers hold the center and focus fire on the weakest enemy. Tanks push aggressively up the right side."></textarea>
-      </div>
-      <div class="prompt-side red">
-        <label>Red Commander</label>
-        <textarea id="red-prompt" placeholder="Write your battle strategy...&#10;&#10;Example: Group all units together and push through the center. Tanks in front, soldiers behind, scouts guard the flanks."></textarea>
-      </div>
-    </div>
-    <button id="battle-btn">Battle!</button>
+    <p>Draw paths for your units, then watch them fight. Blue plans first, then Red.</p>
+    <button id="battle-btn">Start Game</button>
   </div>
 
   <div id="battle-screen" class="screen">
     <div id="battle-hud">
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <span id="blue-count" style="color:#4a9eff">Blue: 6</span>
-        <span id="blue-ai-status" class="ai-status" style="color:#4a9eff"></span>
+      <span id="blue-count" style="color:#4a9eff">Blue: 5</span>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span id="round-timer"></span>
+        <div class="speed-controls">
+          <button data-speed="1" class="active">1x</button>
+          <button data-speed="2">2x</button>
+          <button data-speed="3">3x</button>
+        </div>
       </div>
-      <div class="speed-controls">
-        <button data-speed="1" class="active">1x</button>
-        <button data-speed="2">2x</button>
-        <button data-speed="3">3x</button>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:2px;text-align:right">
-        <span id="red-count" style="color:#ff4a4a">Red: 6</span>
-        <span id="red-ai-status" class="ai-status" style="color:#ff4a4a"></span>
-      </div>
+      <span id="red-count" style="color:#ff4a4a">Red: 5</span>
     </div>
     <div id="pixi-container"></div>
+
+    <div id="planning-overlay">
+      <span id="planning-label">Blue Planning</span>
+      <span id="planning-instructions">Click a unit, drag to draw a path. Repeat for each unit.</span>
+      <button id="confirm-btn">Done</button>
+    </div>
   </div>
+
+  <div id="cover-screen">Pass device to Red</div>
 
   <div id="result-screen" class="screen">
     <h2 id="winner-text">Blue Wins!</h2>
@@ -211,13 +209,6 @@
     <div class="buttons">
       <button id="rematch-btn">Rematch</button>
       <button id="new-battle-btn">New Battle</button>
-    </div>
-  </div>
-
-  <div id="loading-overlay">
-    <div id="loading-text">Loading AI model...</div>
-    <div id="loading-bar-container">
-      <div id="loading-bar"></div>
     </div>
   </div>
 

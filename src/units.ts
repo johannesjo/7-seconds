@@ -15,6 +15,7 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
     range: stats.range,
     radius: stats.radius,
     moveTarget: null,
+    waypoints: [],
     attackTargetId: null,
     alive: true,
     fireCooldown: stats.fireCooldown,
@@ -42,6 +43,21 @@ export function createArmy(team: Team): Unit[] {
   }
 
   return units;
+}
+
+/** Pop the next waypoint into moveTarget when the current one is reached. */
+export function advanceWaypoint(unit: Unit): void {
+  if (!unit.alive) return;
+
+  const atTarget = !unit.moveTarget ||
+    (Math.abs(unit.pos.x - unit.moveTarget.x) < 2 &&
+     Math.abs(unit.pos.y - unit.moveTarget.y) < 2);
+
+  if (atTarget) {
+    unit.moveTarget = unit.waypoints.length > 0
+      ? unit.waypoints.shift()!
+      : null;
+  }
 }
 
 function distance(a: Vec2, b: Vec2): number {
