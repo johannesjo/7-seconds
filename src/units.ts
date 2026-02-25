@@ -111,6 +111,41 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
   unit.pos.y = newY;
 }
 
+/** Push overlapping units apart so they don't stack on the same spot. */
+export function separateUnits(units: Unit[]): void {
+  const alive = units.filter(u => u.alive);
+  for (let i = 0; i < alive.length; i++) {
+    for (let j = i + 1; j < alive.length; j++) {
+      const a = alive[i];
+      const b = alive[j];
+      const dx = b.pos.x - a.pos.x;
+      const dy = b.pos.y - a.pos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const minDist = a.radius + b.radius;
+
+      if (dist < minDist && dist > 0.01) {
+        const overlap = (minDist - dist) / 2;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        a.pos.x -= nx * overlap;
+        a.pos.y -= ny * overlap;
+        b.pos.x += nx * overlap;
+        b.pos.y += ny * overlap;
+
+        // Keep within bounds
+        a.pos.x = clamp(a.pos.x, a.radius, MAP_WIDTH - a.radius);
+        a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
+        b.pos.x = clamp(b.pos.x, b.radius, MAP_WIDTH - b.radius);
+        b.pos.y = clamp(b.pos.y, b.radius, MAP_HEIGHT - b.radius);
+      } else if (dist <= 0.01) {
+        // Exactly overlapping — nudge apart with small random offset
+        a.pos.x -= 1;
+        b.pos.x += 1;
+      }
+    }
+  }
+}
+
 export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null): Unit | null {
   const enemies = allUnits.filter(u => u.alive && u.team !== attacker.team);
   if (enemies.length === 0) return null;

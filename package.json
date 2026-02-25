@@ -17,6 +17,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@mlc-ai/web-llm": "^0.2.81",
     "pixi.js": "^8.16.0"
   },
   "devDependencies": {

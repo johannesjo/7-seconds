@@ -1,44 +1,47 @@
+import { CreateMLCEngine, MLCEngine } from '@mlc-ai/web-llm';
 import { Unit, Team, Obstacle, AiResponse, AiUnitOrder } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
-const SYSTEM_PROMPT = `You are an AI commander in a real-time strategy battle game.
+const MODEL_ID = 'SmolLM2-360M-Instruct-q4f32_1-MLC';
 
-MAP: ${MAP_WIDTH}x${MAP_HEIGHT} pixels. (0,0) is top-left.
-Your team spawns on the {side} side.
+const SYSTEM_PROMPT = `RTS game. Map: ${MAP_WIDTH}x${MAP_HEIGHT}px. You control {side} team.
+Units have id, pos [x,y], hp. You MUST give an order for EVERY alive unit. Strategy: {userPrompt}
+Reply ONLY with JSON: {"orders":[{"id":"unit_id","move_to":[x,y],"attack":"enemy_id_or_null"}]}`;
 
-UNIT TYPES:
-- scout: very fast (180 px/s), 30 HP, 5 damage/s, melee
-- soldier: medium speed (120 px/s), 60 HP, 10 damage/s, 80px range
-- tank: slow (60 px/s), 120 HP, 20 damage/s, melee
+// --- Shared WebLLM engine singleton ---
 
-You receive the game state as JSON and MUST respond with a JSON object containing orders for each of your alive units.
+let sharedEngine: MLCEngine | null = null;
+let engineReady = false;
+let engineLoading = false;
+let onProgress: ((progress: { text: string; progress: number }) => void) | null = null;
 
-Response format:
-{"orders":[{"id":"unit_id","move_to":[x,y],"attack":"enemy_id_or_null"}]}
+export function setProgressCallback(cb: (progress: { text: string; progress: number }) => void): void {
+  onProgress = cb;
+}
 
-YOUR COMMANDER'S STRATEGY:
-{userPrompt}
+async function getEngine(): Promise<MLCEngine | null> {
+  if (engineReady && sharedEngine) return sharedEngine;
+  if (engineLoading) return null; // loading in progress, caller should wait
 
-Follow your commander's strategy. Be tactical. Respond ONLY with valid JSON.`;
-
-const ORDER_SCHEMA = {
-  type: 'object',
-  properties: {
-    orders: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          move_to: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 },
-          attack: { type: ['string', 'null'] },
-        },
-        required: ['id', 'move_to'],
+  engineLoading = true;
+  try {
+    sharedEngine = await CreateMLCEngine(MODEL_ID, {
+      initProgressCallback: (progress) => {
+        onProgress?.({ text: progress.text, progress: progress.progress });
       },
-    },
-  },
-  required: ['orders'],
-};
+    });
+    engineReady = true;
+    return sharedEngine;
+  } catch (err) {
+    console.warn('WebLLM init failed:', err);
+    sharedEngine = null;
+    return null;
+  } finally {
+    engineLoading = false;
+  }
+}
+
+// --- Pure functions (unchanged, used by tests) ---
 
 /** Serialize game state to JSON for a given team's perspective. */
 export function serializeState(units: Unit[], obstacles: Obstacle[], forTeam: Team): string {
@@ -47,7 +50,7 @@ export function serializeState(units: Unit[], obstacles: Obstacle[], forTeam: Te
 
   return JSON.stringify({
     map: { width: MAP_WIDTH, height: MAP_HEIGHT },
-    obstacles: obstacles.map(o => ({ x: o.x, y: o.y, w: o.w, h: o.h })),
+    // obstacles disabled: obstacles.map(o => ({ x: o.x, y: o.y, w: o.w, h: o.h })),
     my_units: myUnits.map(u => ({
       id: u.id, type: u.type, pos: [Math.round(u.pos.x), Math.round(u.pos.y)], hp: u.hp, max_hp: u.maxHp,
     })),
@@ -113,11 +116,28 @@ export function fallbackOrders(units: Unit[], team: Team): AiResponse {
   };
 }
 
-/** Wraps the Chrome Prompt API to issue orders each tick. Falls back to simple behavior. */
+/** Fill in orders for any alive units the AI didn't include. */
+function backfillOrders(aiResponse: AiResponse, units: Unit[], team: Team): AiResponse {
+  const myUnits = units.filter(u => u.alive && u.team === team);
+  const orderedIds = new Set(aiResponse.orders.map(o => o.id));
+  const missing = myUnits.filter(u => !orderedIds.has(u.id));
+
+  if (missing.length === 0) return aiResponse;
+
+  const fb = fallbackOrders(units, team);
+  const missingOrders = fb.orders.filter(o => !orderedIds.has(o.id));
+
+  return { orders: [...aiResponse.orders, ...missingOrders] };
+}
+
+// --- AiCommander class ---
+
+/** Uses WebLLM (primary) or Chrome AI (fallback) to issue orders each tick. */
 export class AiCommander {
-  private session: LanguageModelSession | null = null;
+  private engine: MLCEngine | null = null;
   private team: Team;
   private userPrompt: string;
+  private systemPrompt = '';
 
   constructor(team: Team, userPrompt: string) {
     this.team = team;
@@ -125,56 +145,53 @@ export class AiCommander {
   }
 
   async init(): Promise<boolean> {
-    try {
-      if (typeof LanguageModel === 'undefined') {
-        console.warn('LanguageModel API not available');
-        return false;
-      }
+    // Build system prompt (needed for both backends)
+    const side = this.team === 'blue' ? 'LEFT' : 'RIGHT';
+    this.systemPrompt = SYSTEM_PROMPT
+      .replace('{side}', side)
+      .replace('{userPrompt}', this.userPrompt);
 
-      const availability = await LanguageModel.availability();
-      if (availability === 'unavailable') {
-        console.warn('Language model unavailable');
-        return false;
-      }
-
-      const side = this.team === 'blue' ? 'LEFT' : 'RIGHT';
-      const systemContent = SYSTEM_PROMPT
-        .replace('{side}', side)
-        .replace('{userPrompt}', this.userPrompt);
-
-      this.session = await LanguageModel.create({
-        initialPrompts: [
-          { role: 'system', content: systemContent },
-        ],
-      });
-
+    // Try WebLLM first
+    const engine = await getEngine();
+    if (engine) {
+      this.engine = engine;
+      console.log(`[${this.team}] WebLLM engine ready`);
       return true;
-    } catch (err) {
-      console.warn('Failed to create AI session:', err);
-      return false;
     }
+
+    console.warn(`[${this.team}] WebLLM unavailable, using fallback`);
+    return false;
   }
 
   async getOrders(units: Unit[], obstacles: Obstacle[]): Promise<AiResponse> {
-    if (!this.session) {
-      return fallbackOrders(units, this.team);
+    if (!this.engine) {
+      throw new Error(`[${this.team}] AI engine not initialized`);
     }
 
-    try {
-      const stateJson = serializeState(units, obstacles, this.team);
-      const raw = await this.session.prompt(stateJson, {
-        responseConstraint: ORDER_SCHEMA,
-      });
-      const parsed = parseAiResponse(raw);
-      return parsed ?? fallbackOrders(units, this.team);
-    } catch (err) {
-      console.warn('AI prompt failed:', err);
-      return fallbackOrders(units, this.team);
+    const stateJson = serializeState(units, obstacles, this.team);
+
+    const response = await this.engine.chat.completions.create({
+      messages: [
+        { role: 'system', content: this.systemPrompt },
+        { role: 'user', content: stateJson },
+      ],
+      max_tokens: 512,
+    });
+
+    const raw = response.choices[0].message.content ?? '';
+    console.log(`[${this.team}] AI responded:`, raw.substring(0, 200));
+
+    const parsed = parseAiResponse(raw);
+    if (!parsed) {
+      console.warn(`[${this.team}] Failed to parse AI response, skipping`);
+      return { orders: [] };
     }
+
+    return backfillOrders(parsed, units, this.team);
   }
 
   destroy(): void {
-    this.session?.destroy();
-    this.session = null;
+    // Shared engine persists — don't destroy it
+    this.engine = null;
   }
 }

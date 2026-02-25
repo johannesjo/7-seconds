@@ -10,7 +10,7 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
 };
 
 export const ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
-  { type: 'soldier', count: 10 },
+  { type: 'soldier', count: 6 },
 ];
 
 export const AI_POLL_INTERVAL_MS = 1500;

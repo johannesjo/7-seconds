@@ -99,6 +99,14 @@
       z-index: 10;
       font-size: 14px;
     }
+    .ai-status {
+      font-size: 11px;
+      opacity: 0.7;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .speed-controls button {
       background: #2a2a4a;
       color: #eee;
@@ -145,7 +153,20 @@
       z-index: 30;
       font-size: 24px;
     }
-    #loading-overlay.active { display: flex; }
+    #loading-overlay.active { display: flex; flex-direction: column; gap: 16px; }
+    #loading-bar-container {
+      width: 400px;
+      height: 8px;
+      background: #333;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    #loading-bar {
+      width: 0%;
+      height: 100%;
+      background: #4a9eff;
+      transition: width 0.3s ease;
+    }
   </style>
 </head>
 <body>
@@ -167,13 +188,19 @@
 
   <div id="battle-screen" class="screen">
     <div id="battle-hud">
-      <span id="blue-count" style="color:#4a9eff">Blue: 10</span>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <span id="blue-count" style="color:#4a9eff">Blue: 6</span>
+        <span id="blue-ai-status" class="ai-status" style="color:#4a9eff"></span>
+      </div>
       <div class="speed-controls">
         <button data-speed="1" class="active">1x</button>
         <button data-speed="2">2x</button>
         <button data-speed="3">3x</button>
       </div>
-      <span id="red-count" style="color:#ff4a4a">Red: 10</span>
+      <div style="display:flex;flex-direction:column;gap:2px;text-align:right">
+        <span id="red-count" style="color:#ff4a4a">Red: 6</span>
+        <span id="red-ai-status" class="ai-status" style="color:#ff4a4a"></span>
+      </div>
     </div>
     <div id="pixi-container"></div>
   </div>
@@ -187,7 +214,12 @@
     </div>
   </div>
 
-  <div id="loading-overlay">Commanders are planning...</div>
+  <div id="loading-overlay">
+    <div id="loading-text">Loading AI model...</div>
+    <div id="loading-bar-container">
+      <div id="loading-bar"></div>
+    </div>
+  </div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

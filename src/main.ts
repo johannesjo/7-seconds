@@ -1,8 +1,10 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
-import { generateObstacles } from './battlefield';
+// import { generateObstacles } from './battlefield'; // obstacles disabled
 import { createArmy } from './units';
-import { BattleResult, Obstacle } from './types';
+import { setProgressCallback } from './ai-commander';
+import { BattleResult } from './types';
+import { ARMY_COMPOSITION } from './constants';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -23,14 +25,18 @@ const resultStatsEl = document.getElementById('result-stats')!;
 const rematchBtn = document.getElementById('rematch-btn')!;
 const newBattleBtn = document.getElementById('new-battle-btn')!;
 
+const loadingTextEl = document.getElementById('loading-text')!;
+const loadingBarEl = document.getElementById('loading-bar')!;
 const pixiContainer = document.getElementById('pixi-container')!;
+const blueAiStatusEl = document.getElementById('blue-ai-status')!;
+const redAiStatusEl = document.getElementById('red-ai-status')!;
 
 // State
 let renderer: Renderer | null = null;
 let engine: GameEngine | null = null;
 let lastBluePrompt = '';
 let lastRedPrompt = '';
-let currentObstacles: Obstacle[] = [];
+// let currentObstacles: Obstacle[] = []; // obstacles disabled
 
 function showScreen(screen: 'prompt' | 'battle' | 'result') {
   promptScreen.classList.toggle('active', screen === 'prompt');
@@ -43,6 +49,9 @@ function onGameEvent(event: 'update' | 'end', data?: BattleResult) {
     const counts = engine.getAliveCount();
     blueCountEl.textContent = `Blue: ${counts.blue}`;
     redCountEl.textContent = `Red: ${counts.red}`;
+    const ai = engine.aiStatus;
+    blueAiStatusEl.textContent = ai.blue;
+    redAiStatusEl.textContent = ai.red;
   }
 
   if (event === 'end' && data) {
@@ -51,8 +60,8 @@ function onGameEvent(event: 'update' | 'end', data?: BattleResult) {
     winnerTextEl.style.color = color;
     resultStatsEl.innerHTML = [
       `Duration: ${data.duration.toFixed(1)}s`,
-      `Blue survivors: ${data.blueAlive}/10`,
-      `Red survivors: ${data.redAlive}/10`,
+      `Blue survivors: ${data.blueAlive}/${ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0)}`,
+      `Red survivors: ${data.redAlive}/${ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0)}`,
     ].join('<br>');
     showScreen('result');
   }
@@ -67,8 +76,8 @@ async function initRenderer(): Promise<void> {
 
 function showPreview(): void {
   if (!renderer) return;
-  currentObstacles = generateObstacles();
-  renderer.renderObstacles(currentObstacles);
+  // currentObstacles = generateObstacles(); // obstacles disabled
+  // renderer.renderObstacles(currentObstacles); // obstacles disabled
   // Show spawn positions as ghost units
   const preview = [...createArmy('blue'), ...createArmy('red')];
   renderer.renderUnits(preview);
@@ -76,6 +85,13 @@ function showPreview(): void {
 
 async function startBattle(bluePrompt: string, redPrompt: string) {
   loadingOverlay.classList.add('active');
+  loadingTextEl.textContent = 'Loading AI model...';
+  loadingBarEl.style.width = '0%';
+
+  setProgressCallback((progress) => {
+    loadingTextEl.textContent = progress.text;
+    loadingBarEl.style.width = `${Math.round(progress.progress * 100)}%`;
+  });
 
   engine?.stop();
   await initRenderer();
@@ -87,8 +103,22 @@ async function startBattle(bluePrompt: string, redPrompt: string) {
   // Reset speed buttons
   speedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.speed === '1'));
 
-  await engine.startBattle(bluePrompt, redPrompt, currentObstacles);
+  const result = await engine.startBattle(bluePrompt, redPrompt, []); // obstacles disabled
   loadingOverlay.classList.remove('active');
+
+  if (!result.blueAi || !result.redAi) {
+    engine.stop();
+    engine = null;
+    loadingTextEl.textContent = 'WebGPU not available — cannot start battle';
+    loadingBarEl.style.width = '0%';
+    loadingOverlay.classList.add('active');
+    setTimeout(() => {
+      loadingOverlay.classList.remove('active');
+      showPreview();
+      showScreen('prompt');
+    }, 2000);
+    return;
+  }
 }
 
 // Event listeners
@@ -118,23 +148,12 @@ newBattleBtn.addEventListener('click', () => {
 });
 
 // Check AI availability
-(async () => {
+(() => {
   const statusEl = document.getElementById('ai-status')!;
-  try {
-    if (typeof LanguageModel === 'undefined') {
-      statusEl.textContent = 'Chrome AI not available — using fallback AI (units will chase nearest enemy)';
-      return;
-    }
-    const availability = await LanguageModel.availability();
-    if (availability === 'unavailable') {
-      statusEl.textContent = 'Language model unavailable — using fallback AI';
-    } else if (availability === 'downloadable') {
-      statusEl.textContent = 'Language model needs to download — first battle may be slow';
-    } else {
-      statusEl.textContent = 'Chrome AI ready';
-    }
-  } catch {
-    statusEl.textContent = 'Could not check AI status — using fallback AI';
+  if (!navigator.gpu) {
+    statusEl.textContent = 'WebGPU not available — using fallback AI (units will chase nearest enemy)';
+  } else {
+    statusEl.textContent = 'WebLLM ready (model downloads on first battle)';
   }
 })();
 

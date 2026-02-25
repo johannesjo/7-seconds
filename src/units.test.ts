@@ -26,19 +26,19 @@ describe('createUnit', () => {
 });
 
 describe('createArmy', () => {
-  it('creates 10 units for blue team on the left side', () => {
+  it('creates 6 units for blue team on the left side', () => {
     const units = createArmy('blue');
-    expect(units).toHaveLength(10);
-    expect(units.filter(u => u.type === 'soldier')).toHaveLength(10);
+    expect(units).toHaveLength(6);
+    expect(units.filter(u => u.type === 'soldier')).toHaveLength(6);
     units.forEach(u => {
       expect(u.team).toBe('blue');
       expect(u.pos.x).toBeLessThan(MAP_WIDTH / 3);
     });
   });
 
-  it('creates 10 units for red team on the right side', () => {
+  it('creates 6 units for red team on the right side', () => {
     const units = createArmy('red');
-    expect(units).toHaveLength(10);
+    expect(units).toHaveLength(6);
     units.forEach(u => {
       expect(u.team).toBe('red');
       expect(u.pos.x).toBeGreaterThan(MAP_WIDTH * 2 / 3);

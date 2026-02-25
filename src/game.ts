@@ -1,9 +1,23 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile } from './types';
-import { AI_POLL_INTERVAL_MS } from './constants';
-import { createArmy, moveUnit, findTarget, isInRange, tryFireProjectile, updateProjectiles } from './units';
-import { generateObstacles } from './battlefield';
+import { Unit, Obstacle, Team, BattleResult, Projectile, AiResponse, AiUnitOrder } from './types';
+import { MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { AI_POLL_INTERVAL_MS, ARMY_COMPOSITION } from './constants';
+import { createArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles } from './units';
+// import { generateObstacles } from './battlefield'; // obstacles disabled
 import { AiCommander } from './ai-commander';
 import { Renderer } from './renderer';
+
+function describeDirection(x: number, y: number): string {
+  const horizontal = x < MAP_WIDTH * 0.33 ? 'left' : x > MAP_WIDTH * 0.66 ? 'right' : 'center';
+  const vertical = y < MAP_HEIGHT * 0.33 ? 'top' : y > MAP_HEIGHT * 0.66 ? 'bottom' : 'mid';
+  if (vertical === 'mid') return `→ ${horizontal}`;
+  if (horizontal === 'center') return `→ ${vertical}`;
+  return `→ ${vertical}-${horizontal}`;
+}
+
+export interface AiStatus {
+  blue: string;
+  red: string;
+}
 
 export type GameEventCallback = (event: 'update' | 'end', data?: BattleResult) => void;
 
@@ -20,22 +34,24 @@ export class GameEngine {
   private lastAiPoll = 0;
   private onEvent: GameEventCallback;
   private aiReady = false;
+  private aiPolling = false;
+  private _aiStatus: AiStatus = { blue: 'Waiting...', red: 'Waiting...' };
 
   constructor(renderer: Renderer, onEvent: GameEventCallback) {
     this.renderer = renderer;
     this.onEvent = onEvent;
   }
 
-  async startBattle(bluePrompt: string, redPrompt: string, obstacles?: Obstacle[]): Promise<void> {
+  async startBattle(bluePrompt: string, redPrompt: string, obstacles?: Obstacle[]): Promise<{ blueAi: boolean; redAi: boolean }> {
     this.units = [...createArmy('blue'), ...createArmy('red')];
-    this.obstacles = obstacles ?? generateObstacles();
+    this.obstacles = []; // obstacles disabled (was: obstacles ?? generateObstacles())
     this.projectiles = [];
     this.elapsedTime = 0;
     this.lastAiPoll = -AI_POLL_INTERVAL_MS; // trigger immediate first poll
     this.running = true;
     this.aiReady = false;
 
-    this.renderer.renderObstacles(this.obstacles);
+    // this.renderer.renderObstacles(this.obstacles); // obstacles disabled
 
     // Init AI commanders
     this.blueCommander = new AiCommander('blue', bluePrompt);
@@ -46,12 +62,17 @@ export class GameEngine {
       this.redCommander.init(),
     ]);
 
-    if (!blueOk) console.warn('Blue AI using fallback');
-    if (!redOk) console.warn('Red AI using fallback');
+    if (!blueOk || !redOk) {
+      this.running = false;
+      return { blueAi: blueOk, redAi: redOk };
+    }
+
     this.aiReady = true;
 
     // Start game loop
     this.renderer.ticker.add(this.tick, this);
+
+    return { blueAi: blueOk, redAi: redOk };
   }
 
   private tick = (ticker: { deltaMS: number }): void => {
@@ -61,17 +82,19 @@ export class GameEngine {
     const dt = rawDt * this.speedMultiplier;
     this.elapsedTime += dt;
 
-    // AI polling
-    if (this.aiReady && (this.elapsedTime - this.lastAiPoll) * 1000 >= AI_POLL_INTERVAL_MS) {
+    // AI polling (skip if previous poll still in progress)
+    if (this.aiReady && !this.aiPolling && (this.elapsedTime - this.lastAiPoll) * 1000 >= AI_POLL_INTERVAL_MS) {
       this.lastAiPoll = this.elapsedTime;
-      this.pollAi();
+      this.aiPolling = true;
+      this.pollAi().finally(() => { this.aiPolling = false; });
     }
 
     // Movement
     for (const unit of this.units) {
       if (!unit.alive) continue;
-      moveUnit(unit, dt, this.obstacles);
+      moveUnit(unit, dt, []); // obstacles disabled
     }
+    separateUnits(this.units);
 
     // Combat — fire projectiles
     for (const unit of this.units) {
@@ -111,27 +134,52 @@ export class GameEngine {
   private async pollAi(): Promise<void> {
     if (!this.blueCommander || !this.redCommander) return;
 
+    this._aiStatus = { blue: 'Thinking...', red: 'Thinking...' };
+
     const [blueOrders, redOrders] = await Promise.all([
       this.blueCommander.getOrders(this.units, this.obstacles),
       this.redCommander.getOrders(this.units, this.obstacles),
     ]);
 
-    // Apply orders
-    for (const order of blueOrders.orders) {
+    // Apply orders and summarize
+    this._aiStatus.blue = this.applyAndSummarize(blueOrders, 'blue');
+    this._aiStatus.red = this.applyAndSummarize(redOrders, 'red');
+  }
+
+  private applyAndSummarize(response: AiResponse, team: Team): string {
+    const attacking: string[] = [];
+    const moving: string[] = [];
+
+    for (const order of response.orders) {
       const unit = this.units.find(u => u.id === order.id && u.alive);
-      if (unit) {
-        unit.moveTarget = { x: order.move_to[0], y: order.move_to[1] };
-        unit.attackTargetId = order.attack;
+      if (!unit) continue;
+
+      unit.moveTarget = { x: order.move_to[0], y: order.move_to[1] };
+      unit.attackTargetId = order.attack;
+
+      if (order.attack) {
+        attacking.push(order.id);
+      } else {
+        moving.push(order.id);
       }
     }
 
-    for (const order of redOrders.orders) {
-      const unit = this.units.find(u => u.id === order.id && u.alive);
-      if (unit) {
-        unit.moveTarget = { x: order.move_to[0], y: order.move_to[1] };
-        unit.attackTargetId = order.attack;
-      }
+    const parts: string[] = [];
+    if (attacking.length > 0) parts.push(`${attacking.length} attacking`);
+    if (moving.length > 0) parts.push(`${moving.length} moving`);
+
+    // Summarize general direction
+    const targets = response.orders
+      .filter(o => this.units.find(u => u.id === o.id && u.alive))
+      .map(o => o.move_to);
+    if (targets.length > 0) {
+      const avgX = targets.reduce((s, t) => s + t[0], 0) / targets.length;
+      const avgY = targets.reduce((s, t) => s + t[1], 0) / targets.length;
+      const dir = describeDirection(avgX, avgY);
+      parts.push(dir);
     }
+
+    return parts.join(', ') || 'No orders';
   }
 
   private endBattle(winner: Team): void {
@@ -140,13 +188,14 @@ export class GameEngine {
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
+    const armySize = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
 
     this.onEvent('end', {
       winner,
       blueAlive,
       redAlive,
-      blueKilled: 10 - redAlive,
-      redKilled: 10 - blueAlive,
+      blueKilled: armySize - redAlive,
+      redKilled: armySize - blueAlive,
       duration: this.elapsedTime,
     });
 
@@ -156,6 +205,10 @@ export class GameEngine {
 
   setSpeed(multiplier: number): void {
     this.speedMultiplier = multiplier;
+  }
+
+  get aiStatus(): AiStatus {
+    return this._aiStatus;
   }
 
   getAliveCount(): { blue: number; red: number } {
