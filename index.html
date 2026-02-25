@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prompt Wars</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #111;
+      color: #eee;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+    .screen { display: none; width: 100%; height: 100%; }
+    .screen.active { display: flex; }
+
+    /* Prompt Screen */
+    #prompt-screen {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      padding: 32px;
+    }
+    #prompt-screen h1 {
+      font-size: 48px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+    .prompt-container {
+      display: flex;
+      gap: 32px;
+      width: 100%;
+      max-width: 1000px;
+    }
+    .prompt-side {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .prompt-side label {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .prompt-side.blue label { color: #4a9eff; }
+    .prompt-side.red label { color: #ff4a4a; }
+    .prompt-side textarea {
+      width: 100%;
+      height: 200px;
+      background: #1a1a2e;
+      border: 1px solid #333;
+      color: #eee;
+      padding: 12px;
+      font-family: inherit;
+      font-size: 14px;
+      resize: none;
+      border-radius: 4px;
+    }
+    .prompt-side textarea:focus { outline: none; border-color: #555; }
+    #battle-btn {
+      padding: 16px 48px;
+      font-size: 20px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 2px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #battle-btn:hover { background: #3a3a5a; border-color: #777; }
+
+    /* Battle Screen */
+    #battle-screen {
+      position: relative;
+      flex-direction: column;
+      align-items: center;
+    }
+    #battle-hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.6);
+      z-index: 10;
+      font-size: 14px;
+    }
+    .speed-controls button {
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #444;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .speed-controls button.active { background: #4a4a7a; border-color: #88f; }
+
+    /* Result Screen */
+    #result-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: rgba(0,0,0,0.75);
+      z-index: 20;
+    }
+    #result-screen h2 { font-size: 64px; letter-spacing: 4px; }
+    #result-screen .stats { font-size: 18px; opacity: 0.8; }
+    #result-screen .buttons { display: flex; gap: 16px; margin-top: 16px; }
+    #result-screen button {
+      padding: 12px 32px;
+      font-size: 16px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #result-screen button:hover { background: #3a3a5a; }
+
+    /* Loading */
+    #loading-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8);
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+      font-size: 24px;
+    }
+    #loading-overlay.active { display: flex; }
+  </style>
+</head>
+<body>
+  <div id="prompt-screen" class="screen active">
+    <h1>Prompt Wars</h1>
+    <div class="prompt-container">
+      <div class="prompt-side blue">
+        <label>Blue Commander</label>
+        <textarea id="blue-prompt" placeholder="Write your battle strategy...&#10;&#10;Example: Send scouts to flank from the left. Soldiers hold the center and focus fire on the weakest enemy. Tanks push aggressively up the right side."></textarea>
+      </div>
+      <div class="prompt-side red">
+        <label>Red Commander</label>
+        <textarea id="red-prompt" placeholder="Write your battle strategy...&#10;&#10;Example: Group all units together and push through the center. Tanks in front, soldiers behind, scouts guard the flanks."></textarea>
+      </div>
+    </div>
+    <button id="battle-btn">Battle!</button>
+  </div>
+
+  <div id="battle-screen" class="screen">
+    <div id="battle-hud">
+      <span id="blue-count" style="color:#4a9eff">Blue: 10</span>
+      <div class="speed-controls">
+        <button data-speed="1" class="active">1x</button>
+        <button data-speed="2">2x</button>
+        <button data-speed="3">3x</button>
+      </div>
+      <span id="red-count" style="color:#ff4a4a">Red: 10</span>
+    </div>
+    <div id="pixi-container"></div>
+  </div>
+
+  <div id="result-screen" class="screen">
+    <h2 id="winner-text">Blue Wins!</h2>
+    <div class="stats" id="result-stats"></div>
+    <div class="buttons">
+      <button id="rematch-btn">Rematch</button>
+      <button id="new-battle-btn">New Battle</button>
+    </div>
+  </div>
+
+  <div id="loading-overlay">Commanders are planning...</div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
