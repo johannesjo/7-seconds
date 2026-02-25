@@ -116,14 +116,14 @@ export class GameEngine {
     for (const unit of redUnits) {
       const waypoints: { x: number; y: number }[] = [];
       const steps = 2 + Math.floor(Math.random() * 2); // 2-3 waypoints
-      const targetX = MAP_WIDTH * 0.15; // Head toward blue spawn side
-      const stepX = (unit.pos.x - targetX) / steps;
+      const targetY = MAP_HEIGHT * 0.85; // Head toward blue spawn side (bottom)
+      const stepY = (targetY - unit.pos.y) / steps;
 
       for (let i = 1; i <= steps; i++) {
-        const spreadY = (Math.random() - 0.5) * MAP_HEIGHT * 0.3;
+        const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.3;
         waypoints.push({
-          x: Math.max(20, unit.pos.x - stepX * i),
-          y: Math.max(20, Math.min(MAP_HEIGHT - 20, unit.pos.y + spreadY)),
+          x: Math.max(20, Math.min(MAP_WIDTH - 20, unit.pos.x + spreadX)),
+          y: Math.min(MAP_HEIGHT - 20, unit.pos.y + stepY * i),
         });
       }
       unit.waypoints = waypoints;

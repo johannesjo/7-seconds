@@ -14,19 +14,19 @@ export function generateObstacles(): Obstacle[] {
 
   for (let i = 0; i < pairCount; i++) {
     const w = randomInRange(40, 100);
-    const h = randomInRange(60, 160);
-    const x = randomInRange(MAP_WIDTH * 0.25, MAP_WIDTH * 0.45 - w);
-    const y = randomInRange(50, MAP_HEIGHT - 50 - h);
+    const h = randomInRange(40, 100);
+    const x = randomInRange(50, MAP_WIDTH - 50 - w);
+    const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
 
     obstacles.push({ x, y, w, h });
-    obstacles.push({ x: MAP_WIDTH - x - w, y, w, h });
+    obstacles.push({ x, y: MAP_HEIGHT - y - h, w, h });
   }
 
   if (hasCenter || obstacles.length < 3) {
-    const w = randomInRange(40, 80);
-    const h = randomInRange(60, 140);
-    const x = (MAP_WIDTH - w) / 2;
-    const y = randomInRange(50, MAP_HEIGHT - 50 - h);
+    const w = randomInRange(60, 140);
+    const h = randomInRange(40, 80);
+    const x = randomInRange(50, MAP_WIDTH - 50 - w);
+    const y = (MAP_HEIGHT - h) / 2;
     obstacles.push({ x, y, w, h });
   }
 

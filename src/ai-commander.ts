@@ -96,7 +96,7 @@ export function fallbackOrders(units: Unit[], team: Team): AiResponse {
 
   return {
     orders: myUnits.map(u => {
-      const targetX = team === 'blue' ? MAP_WIDTH * 0.7 : MAP_WIDTH * 0.3;
+      const targetY = team === 'blue' ? MAP_HEIGHT * 0.3 : MAP_HEIGHT * 0.7;
       const nearestEnemy = enemyUnits.length > 0
         ? enemyUnits.reduce((nearest, e) => {
             const dCurr = Math.hypot(u.pos.x - nearest.pos.x, u.pos.y - nearest.pos.y);
@@ -109,7 +109,7 @@ export function fallbackOrders(units: Unit[], team: Team): AiResponse {
         id: u.id,
         move_to: nearestEnemy
           ? [Math.round(nearestEnemy.pos.x), Math.round(nearestEnemy.pos.y)] as [number, number]
-          : [targetX, u.pos.y] as [number, number],
+          : [u.pos.x, targetY] as [number, number],
         attack: nearestEnemy?.id ?? null,
       };
     }),
@@ -146,7 +146,7 @@ export class AiCommander {
 
   async init(): Promise<boolean> {
     // Build system prompt (needed for both backends)
-    const side = this.team === 'blue' ? 'LEFT' : 'RIGHT';
+    const side = this.team === 'blue' ? 'BOTTOM' : 'TOP';
     this.systemPrompt = SYSTEM_PROMPT
       .replace('{side}', side)
       .replace('{userPrompt}', this.userPrompt);

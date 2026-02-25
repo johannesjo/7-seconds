@@ -79,14 +79,15 @@ describe('parseAiResponse', () => {
 describe('fallbackOrders', () => {
   it('orders all units toward the center of the map', () => {
     const units = [
-      createUnit('blue_scout_0', 'scout', 'blue', { x: 100, y: 200 }),
-      createUnit('blue_tank_0', 'tank', 'blue', { x: 100, y: 400 }),
+      createUnit('blue_scout_0', 'scout', 'blue', { x: 100, y: 600 }),
+      createUnit('blue_tank_0', 'tank', 'blue', { x: 100, y: 700 }),
     ];
 
     const orders = fallbackOrders(units, 'blue');
     expect(orders.orders).toHaveLength(2);
     orders.orders.forEach(o => {
-      expect(o.move_to[0]).toBeGreaterThan(100);
+      // Blue units should move toward top (lower y)
+      expect(o.move_to[1]).toBeLessThan(600);
     });
   });
 });

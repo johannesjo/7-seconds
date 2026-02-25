@@ -51,15 +51,15 @@ export class Renderer {
 
   private drawSpawnZones(): void {
     const zones = new Graphics();
-    const zoneWidth = MAP_WIDTH * 0.15;
+    const zoneHeight = MAP_HEIGHT * 0.15;
 
-    // Blue spawn zone (left)
-    zones.rect(0, 0, zoneWidth, MAP_HEIGHT);
-    zones.fill({ color: 0x4a9eff, alpha: 0.05 });
-
-    // Red spawn zone (right)
-    zones.rect(MAP_WIDTH - zoneWidth, 0, zoneWidth, MAP_HEIGHT);
+    // Red spawn zone (top)
+    zones.rect(0, 0, MAP_WIDTH, zoneHeight);
     zones.fill({ color: 0xff4a4a, alpha: 0.05 });
+
+    // Blue spawn zone (bottom)
+    zones.rect(0, MAP_HEIGHT - zoneHeight, MAP_WIDTH, zoneHeight);
+    zones.fill({ color: 0x4a9eff, alpha: 0.05 });
 
     this.app.stage.addChild(zones);
   }

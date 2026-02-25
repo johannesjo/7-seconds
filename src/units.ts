@@ -36,14 +36,15 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
 export function createArmy(team: Team): Unit[] {
   const units: Unit[] = [];
   const isBlue = team === 'blue';
-  const baseX = isBlue ? MAP_WIDTH * 0.15 : MAP_WIDTH * 0.85;
+  const baseY = isBlue ? MAP_HEIGHT * 0.85 : MAP_HEIGHT * 0.15;
+  const totalUnits = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
+  const spacing = MAP_WIDTH / (totalUnits + 1);
   let index = 0;
 
   for (const { type, count } of ARMY_COMPOSITION) {
     for (let i = 0; i < count; i++) {
-      const spacing = MAP_HEIGHT / 12;
-      const yOffset = (index - 4.5) * spacing;
-      const pos = { x: baseX, y: MAP_HEIGHT / 2 + yOffset };
+      const x = spacing * (index + 1);
+      const pos = { x, y: baseY };
       units.push(createUnit(`${team}_${type}_${i}`, type, team, pos));
       index++;
     }
@@ -106,22 +107,23 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
   const moveX = (dx / dist) * Math.min(step, dist);
   const moveY = (dy / dist) * Math.min(step, dist);
 
-  // Track velocity for projectile prediction
-  unit.vel = { x: (dx / dist) * unit.speed, y: (dy / dist) * unit.speed };
+  const oldX = unit.pos.x;
+  const oldY = unit.pos.y;
 
-  let newX = unit.pos.x + moveX;
-  let newY = unit.pos.y + moveY;
+  let newX = oldX + moveX;
+  let newY = oldY + moveY;
 
   // Obstacle avoidance
   const blocked = obstacles.some(o => rectContainsCircle(o, { x: newX, y: newY }, unit.radius));
   if (blocked) {
-    const hBlocked = obstacles.some(o => rectContainsCircle(o, { x: newX, y: unit.pos.y }, unit.radius));
-    const vBlocked = obstacles.some(o => rectContainsCircle(o, { x: unit.pos.x, y: newY }, unit.radius));
+    const hBlocked = obstacles.some(o => rectContainsCircle(o, { x: newX, y: oldY }, unit.radius));
+    const vBlocked = obstacles.some(o => rectContainsCircle(o, { x: oldX, y: newY }, unit.radius));
     if (!hBlocked) {
-      newY = unit.pos.y;
+      newY = oldY;
     } else if (!vBlocked) {
-      newX = unit.pos.x;
+      newX = oldX;
     } else {
+      unit.vel = { x: 0, y: 0 };
       return;
     }
   }
@@ -132,6 +134,11 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
 
   unit.pos.x = newX;
   unit.pos.y = newY;
+
+  // Velocity from actual displacement (accurate for prediction)
+  unit.vel = dt > 0
+    ? { x: (newX - oldX) / dt, y: (newY - oldY) / dt }
+    : { x: 0, y: 0 };
 }
 
 /** Push overlapping units apart so they don't stack on the same spot. */
@@ -207,16 +214,18 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number): Project
 
   unit.fireTimer = unit.fireCooldown;
 
-  // Predict where the target will be when the projectile arrives
-  const dx = target.pos.x - unit.pos.x;
-  const dy = target.pos.y - unit.pos.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const flightTime = dist / unit.projectileSpeed;
+  // Iterative prediction: refine flight time twice for accuracy at long range
+  let predictedX = target.pos.x;
+  let predictedY = target.pos.y;
+  for (let iter = 0; iter < 2; iter++) {
+    const pdx = predictedX - unit.pos.x;
+    const pdy = predictedY - unit.pos.y;
+    const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+    const flightTime = pdist / unit.projectileSpeed;
+    predictedX = target.pos.x + target.vel.x * flightTime;
+    predictedY = target.pos.y + target.vel.y * flightTime;
+  }
 
-  const predictedX = target.pos.x + target.vel.x * flightTime;
-  const predictedY = target.pos.y + target.vel.y * flightTime;
-
-  // Calculate velocity toward predicted position
   const pdx = predictedX - unit.pos.x;
   const pdy = predictedY - unit.pos.y;
   const pdist = Math.sqrt(pdx * pdx + pdy * pdy);

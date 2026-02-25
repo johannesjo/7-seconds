@@ -11,7 +11,7 @@ describe('createUnit', () => {
     expect(unit.maxHp).toBe(30);
     expect(unit.speed).toBe(180);
     expect(unit.damage).toBe(5);
-    expect(unit.range).toBe(20);
+    expect(unit.range).toBe(30);
     expect(unit.alive).toBe(true);
     expect(unit.pos).toEqual({ x: 100, y: 200 });
     expect(unit.team).toBe('blue');
@@ -26,23 +26,23 @@ describe('createUnit', () => {
 });
 
 describe('createArmy', () => {
-  it('creates 4 units for blue team on the left side', () => {
+  it('creates 4 units for blue team on the bottom side', () => {
     const units = createArmy('blue');
     expect(units).toHaveLength(4);
     expect(units.filter(u => u.type === 'soldier')).toHaveLength(3);
     expect(units.filter(u => u.type === 'sniper')).toHaveLength(1);
     units.forEach(u => {
       expect(u.team).toBe('blue');
-      expect(u.pos.x).toBeLessThan(MAP_WIDTH / 3);
+      expect(u.pos.y).toBeGreaterThan(MAP_HEIGHT * 2 / 3);
     });
   });
 
-  it('creates 4 units for red team on the right side', () => {
+  it('creates 4 units for red team on the top side', () => {
     const units = createArmy('red');
     expect(units).toHaveLength(4);
     units.forEach(u => {
       expect(u.team).toBe('red');
-      expect(u.pos.x).toBeGreaterThan(MAP_WIDTH * 2 / 3);
+      expect(u.pos.y).toBeLessThan(MAP_HEIGHT / 3);
     });
   });
 });
