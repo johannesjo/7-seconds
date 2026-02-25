@@ -1,0 +1,122 @@
+import { describe, it, expect } from 'vitest';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage } from './units';
+import { MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { Unit } from './types';
+
+describe('createUnit', () => {
+  it('creates a scout with correct stats', () => {
+    const unit = createUnit('scout_1', 'scout', 'blue', { x: 100, y: 200 });
+    expect(unit.type).toBe('scout');
+    expect(unit.hp).toBe(30);
+    expect(unit.maxHp).toBe(30);
+    expect(unit.speed).toBe(180);
+    expect(unit.damage).toBe(5);
+    expect(unit.range).toBe(20);
+    expect(unit.alive).toBe(true);
+    expect(unit.pos).toEqual({ x: 100, y: 200 });
+    expect(unit.team).toBe('blue');
+  });
+
+  it('creates a tank with correct stats', () => {
+    const unit = createUnit('tank_1', 'tank', 'red', { x: 500, y: 300 });
+    expect(unit.hp).toBe(120);
+    expect(unit.speed).toBe(60);
+    expect(unit.damage).toBe(20);
+  });
+});
+
+describe('createArmy', () => {
+  it('creates 10 units for blue team on the left side', () => {
+    const units = createArmy('blue');
+    expect(units).toHaveLength(10);
+    expect(units.filter(u => u.type === 'scout')).toHaveLength(4);
+    expect(units.filter(u => u.type === 'soldier')).toHaveLength(4);
+    expect(units.filter(u => u.type === 'tank')).toHaveLength(2);
+    units.forEach(u => {
+      expect(u.team).toBe('blue');
+      expect(u.pos.x).toBeLessThan(MAP_WIDTH / 3);
+    });
+  });
+
+  it('creates 10 units for red team on the right side', () => {
+    const units = createArmy('red');
+    expect(units).toHaveLength(10);
+    units.forEach(u => {
+      expect(u.team).toBe('red');
+      expect(u.pos.x).toBeGreaterThan(MAP_WIDTH * 2 / 3);
+    });
+  });
+});
+
+describe('moveUnit', () => {
+  it('moves unit toward its target', () => {
+    const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
+    unit.moveTarget = { x: 100, y: 0 };
+    moveUnit(unit, 1, []);
+    expect(unit.pos.x).toBeGreaterThan(0);
+    expect(unit.pos.y).toBeCloseTo(0, 1);
+  });
+
+  it('does not move past its target', () => {
+    const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
+    unit.moveTarget = { x: 10, y: 0 };
+    moveUnit(unit, 1, []);
+    expect(unit.pos.x).toBeCloseTo(10, 1);
+  });
+
+  it('does nothing without a target', () => {
+    const unit = createUnit('s1', 'scout', 'blue', { x: 50, y: 50 });
+    moveUnit(unit, 1, []);
+    expect(unit.pos).toEqual({ x: 50, y: 50 });
+  });
+});
+
+describe('findTarget', () => {
+  it('returns nearest enemy of preferred type', () => {
+    const attacker = createUnit('s1', 'scout', 'blue', { x: 100, y: 100 });
+    const enemy1 = createUnit('e1', 'soldier', 'red', { x: 200, y: 100 });
+    const enemy2 = createUnit('e2', 'soldier', 'red', { x: 300, y: 100 });
+    const allUnits = [attacker, enemy1, enemy2];
+
+    const target = findTarget(attacker, allUnits, 'e1');
+    expect(target).toBe(enemy1);
+  });
+
+  it('falls back to nearest enemy if preferred target is dead', () => {
+    const attacker = createUnit('s1', 'scout', 'blue', { x: 100, y: 100 });
+    const enemy1 = createUnit('e1', 'soldier', 'red', { x: 200, y: 100 });
+    enemy1.alive = false;
+    const enemy2 = createUnit('e2', 'soldier', 'red', { x: 300, y: 100 });
+    const allUnits = [attacker, enemy1, enemy2];
+
+    const target = findTarget(attacker, allUnits, 'e1');
+    expect(target).toBe(enemy2);
+  });
+
+  it('returns null when no enemies alive', () => {
+    const attacker = createUnit('s1', 'scout', 'blue', { x: 100, y: 100 });
+    const target = findTarget(attacker, [attacker], null);
+    expect(target).toBeNull();
+  });
+});
+
+describe('applyDamage', () => {
+  it('reduces HP', () => {
+    const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
+    applyDamage(unit, 10);
+    expect(unit.hp).toBe(20);
+  });
+
+  it('marks unit as dead when HP reaches 0', () => {
+    const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
+    applyDamage(unit, 30);
+    expect(unit.hp).toBe(0);
+    expect(unit.alive).toBe(false);
+  });
+
+  it('does not go below 0 HP', () => {
+    const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
+    applyDamage(unit, 999);
+    expect(unit.hp).toBe(0);
+  });
+});
