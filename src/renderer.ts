@@ -130,8 +130,7 @@ export class Renderer {
       shape.circle(0, 0, unit.radius);
       shape.fill(color);
     } else if (unit.type === 'soldier') {
-      const r = unit.radius;
-      shape.rect(-r, -r, r * 2, r * 2);
+      shape.circle(0, 0, unit.radius);
       shape.fill(color);
     } else {
       // Tank: hexagon
