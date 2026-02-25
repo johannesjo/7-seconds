@@ -71,7 +71,17 @@ function onGameEvent(
     redCountEl.textContent = `Red: ${counts.red}`;
 
     if (data && 'timeLeft' in data && data.timeLeft !== undefined) {
-      roundTimerEl.textContent = `${Math.ceil(data.timeLeft)}s`;
+      const timeLeft = data.timeLeft;
+      roundTimerEl.textContent = `${Math.ceil(timeLeft)}s`;
+
+      if (timeLeft <= 3) {
+        roundTimerEl.style.color = '#ff4444';
+        const pulse = 1 + 0.1 * Math.sin(Date.now() / 150);
+        roundTimerEl.style.transform = `scale(${pulse})`;
+      } else {
+        roundTimerEl.style.color = '';
+        roundTimerEl.style.transform = '';
+      }
     }
   }
 

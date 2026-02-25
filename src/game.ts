@@ -1,5 +1,5 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase } from './types';
-import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS } from './constants';
+import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint } from './units';
 import { generateObstacles } from './battlefield';
 import { PathDrawer } from './path-drawer';
@@ -40,7 +40,7 @@ export class GameEngine {
     this.roundTimer = 0;
     this.running = true;
 
-    this.pathDrawer = new PathDrawer(this.renderer.stage);
+    this.pathDrawer = new PathDrawer(this.renderer.stage, this.renderer.canvas);
 
     // Render initial state
     this.renderer.renderObstacles(this.obstacles);
@@ -79,6 +79,7 @@ export class GameEngine {
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
       this.roundTimer = ROUND_DURATION_S;
+      this.renderer.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
     }
 
     this.onEvent('phase-change', { phase });
@@ -120,8 +121,22 @@ export class GameEngine {
       }
     }
 
-    this.projectiles = updateProjectiles(this.projectiles, this.units, dt);
+    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt);
+    this.projectiles = aliveProjectiles;
+
+    // Trigger effects for hits
+    const fx = this.renderer.effects;
+    for (const hit of hits) {
+      fx?.addImpactBurst(hit.pos, hit.team);
+      const unitGfx = this.renderer.getUnitContainer(hit.targetId);
+      if (unitGfx) fx?.addHitFlash(unitGfx);
+      if (hit.killed) fx?.addKillText(hit.pos, hit.team);
+    }
+
     this.renderer.renderProjectiles(this.projectiles);
+
+    // Update effects
+    this.renderer.effects?.update(dt);
 
     // HUD update with time left
     this.onEvent('update', { phase: 'playing', timeLeft: Math.max(0, this.roundTimer) });
@@ -148,6 +163,7 @@ export class GameEngine {
     this.renderer.ticker.remove(this.tick, this);
     this.pathDrawer?.disable();
     this.pathDrawer?.clearGraphics();
+    this.renderer.effects?.clear();
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
@@ -179,5 +195,6 @@ export class GameEngine {
     this.renderer.ticker.remove(this.tick, this);
     this.pathDrawer?.destroy();
     this.pathDrawer = null;
+    this.renderer.effects?.clear();
   }
 }

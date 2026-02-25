@@ -1,4 +1,11 @@
 import { Unit, UnitType, Team, Vec2, Obstacle, Projectile } from './types';
+
+export interface ProjectileHit {
+  pos: Vec2;
+  targetId: string;
+  killed: boolean;
+  team: Team;
+}
 import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): Unit {
@@ -228,8 +235,13 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number): Project
   };
 }
 
-export function updateProjectiles(projectiles: Projectile[], units: Unit[], dt: number): Projectile[] {
+export function updateProjectiles(
+  projectiles: Projectile[],
+  units: Unit[],
+  dt: number,
+): { alive: Projectile[]; hits: ProjectileHit[] } {
   const alive: Projectile[] = [];
+  const hits: ProjectileHit[] = [];
 
   for (const p of projectiles) {
     // Move projectile
@@ -238,6 +250,11 @@ export function updateProjectiles(projectiles: Projectile[], units: Unit[], dt: 
     p.pos.x += moveX;
     p.pos.y += moveY;
     p.distanceTraveled += Math.sqrt(moveX * moveX + moveY * moveY);
+
+    // Track trail (max 5 entries)
+    if (!p.trail) p.trail = [];
+    p.trail.push({ x: p.pos.x, y: p.pos.y });
+    if (p.trail.length > 5) p.trail.shift();
 
     // Check if out of bounds or past max range
     if (p.pos.x < 0 || p.pos.x > MAP_WIDTH || p.pos.y < 0 || p.pos.y > MAP_HEIGHT) continue;
@@ -251,7 +268,14 @@ export function updateProjectiles(projectiles: Projectile[], units: Unit[], dt: 
       const dy = p.pos.y - unit.pos.y;
       const hitDist = p.radius + unit.radius;
       if (dx * dx + dy * dy <= hitDist * hitDist) {
+        const wasBefore = unit.hp;
         applyDamage(unit, p.damage);
+        hits.push({
+          pos: { x: p.pos.x, y: p.pos.y },
+          targetId: unit.id,
+          killed: wasBefore > 0 && !unit.alive,
+          team: p.team,
+        });
         hit = true;
         break;
       }
@@ -260,5 +284,5 @@ export function updateProjectiles(projectiles: Projectile[], units: Unit[], dt: 
     if (!hit) alive.push(p);
   }
 
-  return alive;
+  return { alive, hits };
 }

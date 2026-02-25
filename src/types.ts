@@ -50,6 +50,7 @@ export interface Projectile {
   team: Team;
   maxRange: number;
   distanceTraveled: number;
+  trail?: Vec2[];
 }
 
 export interface Obstacle {

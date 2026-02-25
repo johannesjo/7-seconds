@@ -165,8 +165,8 @@ describe('updateProjectiles', () => {
       distanceTraveled: 40,
     };
     // This tick should push it past max range
-    const remaining = updateProjectiles([proj], [], 0.1);
-    expect(remaining).toHaveLength(0);
+    const { alive } = updateProjectiles([proj], [], 0.1);
+    expect(alive).toHaveLength(0);
   });
 
   it('applies damage on hit and removes the projectile', () => {
@@ -181,8 +181,11 @@ describe('updateProjectiles', () => {
       maxRange: 200,
       distanceTraveled: 0,
     };
-    const remaining = updateProjectiles([proj], [target], 0.016);
-    expect(remaining).toHaveLength(0);
+    const { alive, hits } = updateProjectiles([proj], [target], 0.016);
+    expect(alive).toHaveLength(0);
     expect(target.hp).toBe(20); // 30 - 10
+    expect(hits).toHaveLength(1);
+    expect(hits[0].targetId).toBe('e1');
+    expect(hits[0].killed).toBe(false);
   });
 });

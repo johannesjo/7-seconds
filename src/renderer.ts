@@ -1,6 +1,7 @@
 import { Application, Graphics, Container } from 'pixi.js';
 import { Unit, Obstacle, Projectile } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { createEffectsManager, EffectsManager } from './effects';
 
 export class Renderer {
   private app: Application;
@@ -8,6 +9,7 @@ export class Renderer {
   private obstacleGraphics: Graphics | null = null;
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
+  private _effects: EffectsManager | null = null;
 
   constructor() {
     this.app = new Application();
@@ -22,6 +24,8 @@ export class Renderer {
     });
     container.appendChild(this.app.canvas);
     this.drawBackground();
+    this.drawSpawnZones();
+    this._effects = createEffectsManager(this.app.stage);
   }
 
   private drawBackground(): void {
@@ -40,15 +44,34 @@ export class Renderer {
     this.app.stage.addChild(this.bgGraphics);
   }
 
+  private drawSpawnZones(): void {
+    const zones = new Graphics();
+    const zoneWidth = MAP_WIDTH * 0.15;
+
+    // Blue spawn zone (left)
+    zones.rect(0, 0, zoneWidth, MAP_HEIGHT);
+    zones.fill({ color: 0x4a9eff, alpha: 0.05 });
+
+    // Red spawn zone (right)
+    zones.rect(MAP_WIDTH - zoneWidth, 0, zoneWidth, MAP_HEIGHT);
+    zones.fill({ color: 0xff4a4a, alpha: 0.05 });
+
+    this.app.stage.addChild(zones);
+  }
+
   renderObstacles(obstacles: Obstacle[]): void {
     if (this.obstacleGraphics) {
       this.app.stage.removeChild(this.obstacleGraphics);
     }
     this.obstacleGraphics = new Graphics();
     for (const obs of obstacles) {
-      this.obstacleGraphics.rect(obs.x, obs.y, obs.w, obs.h);
+      this.obstacleGraphics.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
       this.obstacleGraphics.fill({ color: 0x3a3a5a });
       this.obstacleGraphics.setStrokeStyle({ width: 1, color: 0x555577 });
+      this.obstacleGraphics.stroke();
+      // Inner highlight for depth
+      this.obstacleGraphics.roundRect(obs.x + 2, obs.y + 2, obs.w - 4, obs.h - 4, 2);
+      this.obstacleGraphics.setStrokeStyle({ width: 1, color: 0x666688, alpha: 0.3 });
       this.obstacleGraphics.stroke();
     }
     this.app.stage.addChild(this.obstacleGraphics);
@@ -61,6 +84,11 @@ export class Renderer {
       if (!unit.alive) {
         const existing = this.unitGraphics.get(unit.id);
         if (existing) {
+          this._effects?.addDeathEffect(
+            { x: unit.pos.x, y: unit.pos.y },
+            unit.radius,
+            unit.team,
+          );
           this.app.stage.removeChild(existing);
           this.unitGraphics.delete(unit.id);
         }
@@ -152,11 +180,35 @@ export class Renderer {
 
     for (const p of projectiles) {
       const color = p.team === 'blue' ? 0x88ccff : 0xff8888;
+
+      // Draw trail
+      if (p.trail && p.trail.length > 1) {
+        for (let i = 1; i < p.trail.length; i++) {
+          const alpha = (i / p.trail.length) * 0.4;
+          this.projectileGraphics!.setStrokeStyle({ width: p.radius, color, alpha });
+          this.projectileGraphics!.moveTo(p.trail[i - 1].x, p.trail[i - 1].y);
+          this.projectileGraphics!.lineTo(p.trail[i].x, p.trail[i].y);
+          this.projectileGraphics!.stroke();
+        }
+      }
+
       this.projectileGraphics.circle(p.pos.x, p.pos.y, p.radius);
       this.projectileGraphics.fill(color);
     }
 
     this.app.stage.addChild(this.projectileGraphics);
+  }
+
+  getUnitContainer(id: string): Container | undefined {
+    return this.unitGraphics.get(id);
+  }
+
+  get effects(): EffectsManager | null {
+    return this._effects;
+  }
+
+  get canvas(): HTMLCanvasElement {
+    return this.app.canvas;
   }
 
   get stage() {
