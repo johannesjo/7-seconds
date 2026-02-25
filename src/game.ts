@@ -150,8 +150,16 @@ export class GameEngine {
       return;
     }
 
+    // Check if action is complete — no movement, no combat, no projectiles
+    const idle = this.projectiles.length === 0 && this.units.every(u => {
+      if (!u.alive) return true;
+      if (u.moveTarget || u.waypoints.length > 0) return false;
+      const target = findTarget(u, this.units, null);
+      return !target || !isInRange(u, target);
+    });
+
     // Round over → back to planning
-    if (this.roundTimer <= 0) {
+    if (this.roundTimer <= 0 || idle) {
       this.projectiles = [];
       this.renderer.renderProjectiles([]);
       this.setPhase('blue-planning');
