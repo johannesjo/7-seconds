@@ -113,14 +113,9 @@ export function fallbackOrders(units: Unit[], team: Team): AiResponse {
   };
 }
 
-interface AiSession {
-  prompt: (text: string, opts?: Record<string, unknown>) => Promise<string>;
-  destroy: () => void;
-}
-
 /** Wraps the Chrome Prompt API to issue orders each tick. Falls back to simple behavior. */
 export class AiCommander {
-  private session: AiSession | null = null;
+  private session: LanguageModelSession | null = null;
   private team: Team;
   private userPrompt: string;
 
@@ -151,7 +146,7 @@ export class AiCommander {
         initialPrompts: [
           { role: 'system', content: systemContent },
         ],
-      }) as AiSession;
+      });
 
       return true;
     } catch (err) {
