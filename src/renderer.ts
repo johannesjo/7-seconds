@@ -1,11 +1,12 @@
 import { Application, Graphics, Container } from 'pixi.js';
 import { Unit, Obstacle, Projectile } from './types';
-import { MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, setMapSize } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 
 export class Renderer {
   private app: Application;
   private unitGraphics: Map<string, Container> = new Map();
+  private dyingUnits: Map<string, { container: Container; age: number }> = new Map();
   private obstacleGraphics: Graphics | null = null;
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
@@ -16,6 +17,10 @@ export class Renderer {
   }
 
   async init(container: HTMLElement): Promise<void> {
+    const w = container.clientWidth || window.innerWidth;
+    const h = container.clientHeight || window.innerHeight;
+    setMapSize(w, h);
+
     await this.app.init({
       width: MAP_WIDTH,
       height: MAP_HEIGHT,
@@ -77,7 +82,7 @@ export class Renderer {
     this.app.stage.addChild(this.obstacleGraphics);
   }
 
-  renderUnits(units: Unit[]): void {
+  renderUnits(units: Unit[], dt = 0): void {
     const activeIds = new Set<string>();
 
     for (const unit of units) {
@@ -89,8 +94,9 @@ export class Renderer {
             unit.radius,
             unit.team,
           );
-          this.app.stage.removeChild(existing);
+          // Move to dying pool instead of removing immediately
           this.unitGraphics.delete(unit.id);
+          this.dyingUnits.set(unit.id, { container: existing, age: 0 });
         }
         continue;
       }
@@ -107,9 +113,32 @@ export class Renderer {
       container.x = unit.pos.x;
       container.y = unit.pos.y;
 
-      // Update health bar
-      const hpBar = container.getChildAt(1) as Graphics;
-      this.updateHealthBar(hpBar, unit);
+      // Unit facing direction
+      const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+      if (speed > 1) {
+        container.rotation = Math.atan2(unit.vel.y, unit.vel.x);
+      }
+
+      // Update health bar — only show when damaged (child index 2: shape, nose, hpBar)
+      const hpBar = container.getChildAt(2) as Graphics;
+      if (unit.hp < unit.maxHp) {
+        this.updateHealthBar(hpBar, unit);
+      } else {
+        hpBar.clear();
+      }
+    }
+
+    // Update dying units — fade out over 0.3s
+    const DEATH_DURATION = 0.3;
+    for (const [id, dying] of this.dyingUnits) {
+      dying.age += dt;
+      const t = Math.min(dying.age / DEATH_DURATION, 1);
+      dying.container.alpha = 1 - t;
+      dying.container.scale.set(1 - 0.5 * t);
+      if (t >= 1) {
+        this.app.stage.removeChild(dying.container);
+        this.dyingUnits.delete(id);
+      }
     }
 
     // Remove graphics for units no longer present
@@ -126,13 +155,12 @@ export class Renderer {
     const shape = new Graphics();
     const color = unit.team === 'blue' ? 0x4a9eff : 0xff4a4a;
 
-    if (unit.type === 'scout') {
-      shape.circle(0, 0, unit.radius);
+    if (unit.type === 'sniper') {
+      // Diamond: 4-point rotated square
+      const r = unit.radius;
+      shape.poly([-r, 0, 0, -r, r, 0, 0, r]);
       shape.fill(color);
-    } else if (unit.type === 'soldier') {
-      shape.circle(0, 0, unit.radius);
-      shape.fill(color);
-    } else {
+    } else if (unit.type === 'tank') {
       // Tank: hexagon
       const r = unit.radius;
       const points: number[] = [];
@@ -142,11 +170,22 @@ export class Renderer {
       }
       shape.poly(points);
       shape.fill(color);
+    } else {
+      // Scout / Soldier: circle
+      shape.circle(0, 0, unit.radius);
+      shape.fill(color);
     }
 
-    container.addChild(shape);
+    // Directional nose — small triangle pointing in +X direction
+    const nose = new Graphics();
+    const nr = unit.radius * 0.4;
+    nose.poly([unit.radius + nr, 0, unit.radius - 1, -nr * 0.6, unit.radius - 1, nr * 0.6]);
+    nose.fill({ color: 0xffffff, alpha: 0.6 });
 
-    // Health bar (positioned above unit)
+    container.addChild(shape);
+    container.addChild(nose);
+
+    // Health bar (positioned above unit) — child index 2
     const hpBar = new Graphics();
     this.updateHealthBar(hpBar, unit);
     container.addChild(hpBar);

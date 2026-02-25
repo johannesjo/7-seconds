@@ -11,6 +11,7 @@ const battleScreen = document.getElementById('battle-screen')!;
 const resultScreen = document.getElementById('result-screen')!;
 
 const battleBtn = document.getElementById('battle-btn')!;
+const aiBtn = document.getElementById('ai-btn')!;
 
 const blueCountEl = document.getElementById('blue-count')!;
 const redCountEl = document.getElementById('red-count')!;
@@ -21,6 +22,7 @@ const planningOverlay = document.getElementById('planning-overlay')!;
 const planningLabel = document.getElementById('planning-label')!;
 const confirmBtn = document.getElementById('confirm-btn')!;
 const coverScreen = document.getElementById('cover-screen')!;
+const roundCounterEl = document.getElementById('round-counter')!;
 
 const winnerTextEl = document.getElementById('winner-text')!;
 const resultStatsEl = document.getElementById('result-stats')!;
@@ -32,6 +34,7 @@ const pixiContainer = document.getElementById('pixi-container')!;
 // State
 let renderer: Renderer | null = null;
 let engine: GameEngine | null = null;
+let aiMode = false;
 
 function showScreen(screen: 'prompt' | 'battle' | 'result') {
   promptScreen.classList.toggle('active', screen === 'prompt');
@@ -58,10 +61,13 @@ function onPhaseChange(phase: TurnPhase): void {
 
 function onGameEvent(
   event: 'update' | 'end' | 'phase-change',
-  data?: BattleResult | { phase: TurnPhase; timeLeft?: number },
+  data?: BattleResult | { phase: TurnPhase; timeLeft?: number; round?: number },
 ) {
   if (event === 'phase-change' && data && 'phase' in data) {
     onPhaseChange(data.phase);
+    if (data.round !== undefined) {
+      roundCounterEl.textContent = `Round ${data.round}`;
+    }
     return;
   }
 
@@ -103,9 +109,9 @@ function onGameEvent(
 
 async function initRenderer(): Promise<void> {
   if (renderer) return;
+  battleScreen.classList.add('active'); // visible before init so container has dimensions
   renderer = new Renderer();
   await renderer.init(pixiContainer);
-  battleScreen.classList.add('active');
 }
 
 function showPreview(): void {
@@ -117,20 +123,32 @@ function showPreview(): void {
 
 function startGame(): void {
   engine?.stop();
-  engine = new GameEngine(renderer!, onGameEvent);
+  engine = new GameEngine(renderer!, onGameEvent, aiMode);
   showScreen('battle');
   speedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.speed === '1'));
+  roundCounterEl.textContent = 'Round 1';
   engine.startBattle();
 }
 
 // Event listeners
 battleBtn.addEventListener('click', async () => {
+  aiMode = false;
+  await initRenderer();
+  startGame();
+});
+
+aiBtn.addEventListener('click', async () => {
+  aiMode = true;
   await initRenderer();
   startGame();
 });
 
 confirmBtn.addEventListener('click', () => {
   engine?.confirmPlan();
+});
+
+coverScreen.addEventListener('click', () => {
+  engine?.skipCover();
 });
 
 speedButtons.forEach(btn => {

@@ -130,13 +130,24 @@ export class PathDrawer {
     if (!this.enabled || !this.team) return;
 
     const teamColor = this.team === 'blue' ? 0x4a9eff : 0xff4a4a;
+    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
 
-    // Path status dots on units that have waypoints
     for (const unit of this.units) {
-      if (!unit.alive || unit.team !== this.team) continue;
-      if (unit.waypoints.length > 0 && unit !== this.selectedUnit) {
-        this.hoverGfx.circle(unit.pos.x, unit.pos.y, 3);
-        this.hoverGfx.fill({ color: teamColor, alpha: 0.6 });
+      if (!unit.alive || unit.team !== this.team || unit === this.selectedUnit) continue;
+
+      if (unit.waypoints.length > 0) {
+        // Units WITH paths: bright dot + ring
+        this.hoverGfx.circle(unit.pos.x, unit.pos.y, 5);
+        this.hoverGfx.fill({ color: teamColor, alpha: 0.8 });
+        this.hoverGfx.circle(unit.pos.x, unit.pos.y, unit.radius + 3);
+        this.hoverGfx.setStrokeStyle({ width: 1.5, color: teamColor, alpha: 0.4 });
+        this.hoverGfx.stroke();
+      } else {
+        // Units WITHOUT paths: pulsing ring to attract attention
+        const pulseRadius = unit.radius + 4 + pulse * 4;
+        this.hoverGfx.circle(unit.pos.x, unit.pos.y, pulseRadius);
+        this.hoverGfx.setStrokeStyle({ width: 2, color: teamColor, alpha: 0.3 + pulse * 0.4 });
+        this.hoverGfx.stroke();
       }
     }
 
@@ -154,6 +165,11 @@ export class PathDrawer {
       this.hoverGfx.setStrokeStyle({ width: 2, color: teamColor, alpha: 0.6 });
       this.hoverGfx.stroke();
     }
+  }
+
+  /** Call each frame to animate pulsing indicators during planning. */
+  updateHover(): void {
+    if (this.enabled) this.renderHoverLayer();
   }
 
   clearGraphics(): void {
