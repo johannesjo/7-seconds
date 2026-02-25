@@ -1,6 +1,6 @@
-import { Unit, Obstacle, Team, BattleResult } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile } from './types';
 import { AI_POLL_INTERVAL_MS } from './constants';
-import { createArmy, moveUnit, findTarget, isInRange, applyDamage } from './units';
+import { createArmy, moveUnit, findTarget, isInRange, tryFireProjectile, updateProjectiles } from './units';
 import { generateObstacles } from './battlefield';
 import { AiCommander } from './ai-commander';
 import { Renderer } from './renderer';
@@ -10,6 +10,7 @@ export type GameEventCallback = (event: 'update' | 'end', data?: BattleResult) =
 export class GameEngine {
   private units: Unit[] = [];
   private obstacles: Obstacle[] = [];
+  private projectiles: Projectile[] = [];
   private blueCommander: AiCommander | null = null;
   private redCommander: AiCommander | null = null;
   private renderer: Renderer;
@@ -28,6 +29,7 @@ export class GameEngine {
   async startBattle(bluePrompt: string, redPrompt: string): Promise<void> {
     this.units = [...createArmy('blue'), ...createArmy('red')];
     this.obstacles = generateObstacles();
+    this.projectiles = [];
     this.elapsedTime = 0;
     this.lastAiPoll = -AI_POLL_INTERVAL_MS; // trigger immediate first poll
     this.running = true;
@@ -71,18 +73,28 @@ export class GameEngine {
       moveUnit(unit, dt, this.obstacles);
     }
 
-    // Combat
+    // Combat — fire projectiles
     for (const unit of this.units) {
       if (!unit.alive) continue;
 
       const target = findTarget(unit, this.units, unit.attackTargetId);
       if (target && isInRange(unit, target)) {
-        applyDamage(target, unit.damage * dt);
+        const projectile = tryFireProjectile(unit, target, dt);
+        if (projectile) {
+          this.projectiles.push(projectile);
+        }
+      } else {
+        // Tick cooldown even when not firing so it's ready when in range
+        unit.fireTimer = Math.max(0, unit.fireTimer - dt);
       }
     }
 
+    // Update projectiles (move, hit detection, cleanup)
+    this.projectiles = updateProjectiles(this.projectiles, this.units, dt);
+
     // Render
     this.renderer.renderUnits(this.units);
+    this.renderer.renderProjectiles(this.projectiles);
 
     // HUD update
     this.onEvent('update');

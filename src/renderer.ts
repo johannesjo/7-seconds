@@ -1,5 +1,5 @@
 import { Application, Graphics, Container } from 'pixi.js';
-import { Unit, Obstacle } from './types';
+import { Unit, Obstacle, Projectile } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 export class Renderer {
@@ -7,6 +7,7 @@ export class Renderer {
   private unitGraphics: Map<string, Container> = new Map();
   private obstacleGraphics: Graphics | null = null;
   private bgGraphics: Graphics | null = null;
+  private projectileGraphics: Graphics | null = null;
 
   constructor() {
     this.app = new Application();
@@ -141,6 +142,21 @@ export class Renderer {
     const hpColor = hpRatio > 0.5 ? 0x44ff44 : hpRatio > 0.25 ? 0xffaa00 : 0xff4444;
     bar.rect(-w / 2, yOff, w * hpRatio, h);
     bar.fill(hpColor);
+  }
+
+  renderProjectiles(projectiles: Projectile[]): void {
+    if (this.projectileGraphics) {
+      this.app.stage.removeChild(this.projectileGraphics);
+    }
+    this.projectileGraphics = new Graphics();
+
+    for (const p of projectiles) {
+      const color = p.team === 'blue' ? 0x88ccff : 0xff8888;
+      this.projectileGraphics.circle(p.pos.x, p.pos.y, p.radius);
+      this.projectileGraphics.fill(color);
+    }
+
+    this.app.stage.addChild(this.projectileGraphics);
   }
 
   get ticker() {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage } from './units';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles } from './units';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 
@@ -118,5 +118,73 @@ describe('applyDamage', () => {
     const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
     applyDamage(unit, 999);
     expect(unit.hp).toBe(0);
+  });
+});
+
+describe('tryFireProjectile', () => {
+  it('fires a projectile when cooldown is ready', () => {
+    const attacker = createUnit('s1', 'soldier', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'scout', 'red', { x: 200, y: 100 });
+    attacker.fireTimer = 0;
+    const proj = tryFireProjectile(attacker, target, 0.016);
+    expect(proj).not.toBeNull();
+    expect(proj!.damage).toBe(10);
+    expect(proj!.team).toBe('blue');
+    expect(proj!.pos.x).toBeCloseTo(100);
+    expect(proj!.pos.y).toBeCloseTo(100);
+  });
+
+  it('returns null when cooldown is not ready', () => {
+    const attacker = createUnit('s1', 'soldier', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'scout', 'red', { x: 200, y: 100 });
+    attacker.fireTimer = 0.5;
+    const proj = tryFireProjectile(attacker, target, 0.016);
+    expect(proj).toBeNull();
+  });
+
+  it('aims at predicted position based on target velocity', () => {
+    const attacker = createUnit('s1', 'soldier', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'scout', 'red', { x: 200, y: 100 });
+    target.vel = { x: 0, y: 180 }; // moving down fast
+    attacker.fireTimer = 0;
+    const proj = tryFireProjectile(attacker, target, 0.016);
+    expect(proj).not.toBeNull();
+    // Projectile should aim below the target's current position
+    expect(proj!.vel.y).toBeGreaterThan(0);
+  });
+});
+
+describe('updateProjectiles', () => {
+  it('moves projectiles and removes those past max range', () => {
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 200, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 50,
+      distanceTraveled: 40,
+    };
+    // This tick should push it past max range
+    const remaining = updateProjectiles([proj], [], 0.1);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it('applies damage on hit and removes the projectile', () => {
+    const target = createUnit('e1', 'scout', 'red', { x: 105, y: 100 });
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 105, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 200,
+      distanceTraveled: 0,
+    };
+    const remaining = updateProjectiles([proj], [target], 0.016);
+    expect(remaining).toHaveLength(0);
+    expect(target.hp).toBe(20); // 30 - 10
   });
 });

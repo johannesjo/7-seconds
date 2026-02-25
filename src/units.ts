@@ -1,4 +1,4 @@
-import { Unit, UnitType, Team, Vec2, Obstacle } from './types';
+import { Unit, UnitType, Team, Vec2, Obstacle, Projectile } from './types';
 import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): Unit {
@@ -17,6 +17,11 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
     moveTarget: null,
     attackTargetId: null,
     alive: true,
+    fireCooldown: stats.fireCooldown,
+    fireTimer: 0,
+    projectileSpeed: stats.projectileSpeed,
+    projectileRadius: stats.projectileRadius,
+    vel: { x: 0, y: 0 },
   };
 }
 
@@ -58,7 +63,10 @@ function rectContainsCircle(obs: Obstacle, pos: Vec2, radius: number): boolean {
 }
 
 export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
-  if (!unit.moveTarget || !unit.alive) return;
+  if (!unit.moveTarget || !unit.alive) {
+    unit.vel = { x: 0, y: 0 };
+    return;
+  }
 
   const dx = unit.moveTarget.x - unit.pos.x;
   const dy = unit.moveTarget.y - unit.pos.y;
@@ -67,12 +75,16 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
   if (dist < 2) {
     unit.pos.x = unit.moveTarget.x;
     unit.pos.y = unit.moveTarget.y;
+    unit.vel = { x: 0, y: 0 };
     return;
   }
 
   const step = unit.speed * dt;
   const moveX = (dx / dist) * Math.min(step, dist);
   const moveY = (dy / dist) * Math.min(step, dist);
+
+  // Track velocity for projectile prediction
+  unit.vel = { x: (dx / dist) * unit.speed, y: (dy / dist) * unit.speed };
 
   let newX = unit.pos.x + moveX;
   let newY = unit.pos.y + moveY;
@@ -129,4 +141,73 @@ export function applyDamage(unit: Unit, amount: number): void {
   if (unit.hp === 0) {
     unit.alive = false;
   }
+}
+
+export function tryFireProjectile(unit: Unit, target: Unit, dt: number): Projectile | null {
+  unit.fireTimer -= dt;
+  if (unit.fireTimer > 0) return null;
+
+  unit.fireTimer = unit.fireCooldown;
+
+  // Predict where the target will be when the projectile arrives
+  const dx = target.pos.x - unit.pos.x;
+  const dy = target.pos.y - unit.pos.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const flightTime = dist / unit.projectileSpeed;
+
+  const predictedX = target.pos.x + target.vel.x * flightTime;
+  const predictedY = target.pos.y + target.vel.y * flightTime;
+
+  // Calculate velocity toward predicted position
+  const pdx = predictedX - unit.pos.x;
+  const pdy = predictedY - unit.pos.y;
+  const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+
+  if (pdist < 1) return null;
+
+  return {
+    pos: { x: unit.pos.x, y: unit.pos.y },
+    vel: { x: (pdx / pdist) * unit.projectileSpeed, y: (pdy / pdist) * unit.projectileSpeed },
+    target: { x: predictedX, y: predictedY },
+    damage: unit.damage,
+    radius: unit.projectileRadius,
+    team: unit.team,
+    maxRange: unit.range + unit.radius + 40,
+    distanceTraveled: 0,
+  };
+}
+
+export function updateProjectiles(projectiles: Projectile[], units: Unit[], dt: number): Projectile[] {
+  const alive: Projectile[] = [];
+
+  for (const p of projectiles) {
+    // Move projectile
+    const moveX = p.vel.x * dt;
+    const moveY = p.vel.y * dt;
+    p.pos.x += moveX;
+    p.pos.y += moveY;
+    p.distanceTraveled += Math.sqrt(moveX * moveX + moveY * moveY);
+
+    // Check if out of bounds or past max range
+    if (p.pos.x < 0 || p.pos.x > MAP_WIDTH || p.pos.y < 0 || p.pos.y > MAP_HEIGHT) continue;
+    if (p.distanceTraveled > p.maxRange) continue;
+
+    // Check hit against enemy units
+    let hit = false;
+    for (const unit of units) {
+      if (!unit.alive || unit.team === p.team) continue;
+      const dx = p.pos.x - unit.pos.x;
+      const dy = p.pos.y - unit.pos.y;
+      const hitDist = p.radius + unit.radius;
+      if (dx * dx + dy * dy <= hitDist * hitDist) {
+        applyDamage(unit, p.damage);
+        hit = true;
+        break;
+      }
+    }
+
+    if (!hit) alive.push(p);
+  }
+
+  return alive;
 }

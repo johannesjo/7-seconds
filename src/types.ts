@@ -13,6 +13,9 @@ export interface UnitStats {
   damage: number;
   range: number;
   radius: number;
+  fireCooldown: number;
+  projectileSpeed: number;
+  projectileRadius: number;
 }
 
 export interface Unit {
@@ -29,6 +32,22 @@ export interface Unit {
   moveTarget: Vec2 | null;
   attackTargetId: string | null;
   alive: boolean;
+  fireCooldown: number;
+  fireTimer: number;
+  projectileSpeed: number;
+  projectileRadius: number;
+  vel: Vec2;
+}
+
+export interface Projectile {
+  pos: Vec2;
+  vel: Vec2;
+  target: Vec2;
+  damage: number;
+  radius: number;
+  team: Team;
+  maxRange: number;
+  distanceTraveled: number;
 }
 
 export interface Obstacle {
