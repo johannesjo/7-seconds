@@ -29,9 +29,7 @@ describe('createArmy', () => {
   it('creates 10 units for blue team on the left side', () => {
     const units = createArmy('blue');
     expect(units).toHaveLength(10);
-    expect(units.filter(u => u.type === 'scout')).toHaveLength(4);
-    expect(units.filter(u => u.type === 'soldier')).toHaveLength(4);
-    expect(units.filter(u => u.type === 'tank')).toHaveLength(2);
+    expect(units.filter(u => u.type === 'soldier')).toHaveLength(10);
     units.forEach(u => {
       expect(u.team).toBe('blue');
       expect(u.pos.x).toBeLessThan(MAP_WIDTH / 3);
