@@ -1,6 +1,8 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
-import { BattleResult } from './types';
+import { generateObstacles } from './battlefield';
+import { createArmy } from './units';
+import { BattleResult, Obstacle } from './types';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -28,10 +30,11 @@ let renderer: Renderer | null = null;
 let engine: GameEngine | null = null;
 let lastBluePrompt = '';
 let lastRedPrompt = '';
+let currentObstacles: Obstacle[] = [];
 
 function showScreen(screen: 'prompt' | 'battle' | 'result') {
   promptScreen.classList.toggle('active', screen === 'prompt');
-  battleScreen.classList.toggle('active', screen === 'battle' || screen === 'result');
+  battleScreen.classList.add('active'); // always visible once initialized
   resultScreen.classList.toggle('active', screen === 'result');
 }
 
@@ -55,24 +58,36 @@ function onGameEvent(event: 'update' | 'end', data?: BattleResult) {
   }
 }
 
+async function initRenderer(): Promise<void> {
+  if (renderer) return;
+  renderer = new Renderer();
+  await renderer.init(pixiContainer);
+  battleScreen.classList.add('active');
+}
+
+function showPreview(): void {
+  if (!renderer) return;
+  currentObstacles = generateObstacles();
+  renderer.renderObstacles(currentObstacles);
+  // Show spawn positions as ghost units
+  const preview = [...createArmy('blue'), ...createArmy('red')];
+  renderer.renderUnits(preview);
+}
+
 async function startBattle(bluePrompt: string, redPrompt: string) {
   loadingOverlay.classList.add('active');
 
-  // Clean up previous
   engine?.stop();
-  renderer?.destroy();
+  await initRenderer();
 
-  renderer = new Renderer();
-  await renderer.init(pixiContainer);
-
-  engine = new GameEngine(renderer, onGameEvent);
+  engine = new GameEngine(renderer!, onGameEvent);
 
   showScreen('battle');
 
   // Reset speed buttons
   speedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.speed === '1'));
 
-  await engine.startBattle(bluePrompt, redPrompt);
+  await engine.startBattle(bluePrompt, redPrompt, currentObstacles);
   loadingOverlay.classList.remove('active');
 }
 
@@ -97,9 +112,8 @@ rematchBtn.addEventListener('click', () => {
 
 newBattleBtn.addEventListener('click', () => {
   engine?.stop();
-  renderer?.destroy();
-  renderer = null;
   engine = null;
+  showPreview();
   showScreen('prompt');
 });
 
@@ -124,5 +138,9 @@ newBattleBtn.addEventListener('click', () => {
   }
 })();
 
-// Start on prompt screen
-showScreen('prompt');
+// Initialize renderer and show battlefield preview behind prompt screen
+(async () => {
+  await initRenderer();
+  showPreview();
+  showScreen('prompt');
+})();

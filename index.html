@@ -17,13 +17,17 @@
     .screen { display: none; width: 100%; height: 100%; }
     .screen.active { display: flex; }
 
-    /* Prompt Screen */
+    /* Prompt Screen — overlay on top of battlefield */
     #prompt-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 24px;
       padding: 32px;
+      background: rgba(0,0,0,0.7);
+      z-index: 15;
     }
     #prompt-screen h1 {
       font-size: 48px;

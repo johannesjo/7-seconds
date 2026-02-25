@@ -26,9 +26,9 @@ export class GameEngine {
     this.onEvent = onEvent;
   }
 
-  async startBattle(bluePrompt: string, redPrompt: string): Promise<void> {
+  async startBattle(bluePrompt: string, redPrompt: string, obstacles?: Obstacle[]): Promise<void> {
     this.units = [...createArmy('blue'), ...createArmy('red')];
-    this.obstacles = generateObstacles();
+    this.obstacles = obstacles ?? generateObstacles();
     this.projectiles = [];
     this.elapsedTime = 0;
     this.lastAiPoll = -AI_POLL_INTERVAL_MS; // trigger immediate first poll
