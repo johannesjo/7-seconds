@@ -299,7 +299,7 @@ export class EffectsManager {
       const duration = 0.25 + Math.random() * 0.2;
       this.effects.push(new BloodParticle(
         this.container, this.groundStains, pos, angle,
-        Math.PI * 0.7, speed, team, size, duration,
+        Math.PI * 0.35, speed, team, size, duration,
       ));
     }
   }
@@ -308,7 +308,7 @@ export class EffectsManager {
     const count = Math.min(Math.floor(damage * 1.2) + 8, 35) + Math.floor(Math.random() * 6);
     const dmgScale = Math.min(damage / 10, 3);
     for (let i = 0; i < count; i++) {
-      const a = angle + (Math.random() - 0.5) * Math.PI * 1.2;
+      const a = angle + (Math.random() - 0.5) * Math.PI * 0.6;
       const speed = 60 + Math.random() * 160 * dmgScale;
       const size = (2 + Math.random() * 2) * Math.min(dmgScale, 1.5);
       const duration = 0.3 + Math.random() * 0.3;
