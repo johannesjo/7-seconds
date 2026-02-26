@@ -13,6 +13,7 @@ export class Renderer {
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
   private zoneStatusGfx: Graphics | null = null;
+  bloodEnabled = true;
 
   constructor() {
     this.app = new Application();
@@ -105,6 +106,13 @@ export class Renderer {
       if (!unit.alive) {
         const existing = this.unitGraphics.get(unit.id);
         if (existing) {
+          if (!this.bloodEnabled) {
+            this._effects?.addDeathEffect(
+              { x: unit.pos.x, y: unit.pos.y },
+              unit.radius,
+              unit.team,
+            );
+          }
           // Move to dying pool instead of removing immediately
           this.unitGraphics.delete(unit.id);
           this.dyingUnits.set(unit.id, { container: existing, age: 0 });

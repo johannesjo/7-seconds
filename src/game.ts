@@ -31,18 +31,20 @@ export class GameEngine {
   private redHoldsZone = false;
   private zoneControlEnabled = false;
   private oneShotEnabled = false;
+  private bloodEnabled = true;
   private endingBattle = false;
   private endDelayTimer = 0;
   private pendingWinner: Team | null = null;
   private pendingWinCondition: 'elimination' | 'zone-control' | null = null;
 
-  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef; zoneControl?: boolean; oneShot?: boolean }) {
+  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef; zoneControl?: boolean; oneShot?: boolean; blood?: boolean }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
     this.aiMode = opts?.aiMode ?? false;
     this.mission = opts?.mission ?? null;
     this.zoneControlEnabled = opts?.zoneControl ?? false;
     this.oneShotEnabled = opts?.oneShot ?? false;
+    this.bloodEnabled = opts?.blood ?? true;
   }
 
   get phase(): TurnPhase {
@@ -50,6 +52,7 @@ export class GameEngine {
   }
 
   startBattle(): void {
+    this.renderer.bloodEnabled = this.bloodEnabled;
     if (this.mission) {
       this.units = [
         ...createMissionArmy('blue', this.mission.blueArmy),
@@ -268,12 +271,16 @@ export class GameEngine {
       const unitGfx = this.renderer.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
 
-      const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
-      fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, hit.damage);
-
-      if (hit.killed) {
-        fx?.addKillText(hit.pos, hit.team);
-        fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, hit.damage);
+      if (this.bloodEnabled) {
+        const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
+        fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, hit.damage);
+        if (hit.killed) {
+          fx?.addKillText(hit.pos, hit.team);
+          fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, hit.damage);
+        }
+      } else {
+        fx?.addImpactBurst(hit.pos, hit.team);
+        if (hit.killed) fx?.addKillText(hit.pos, hit.team);
       }
     }
 
