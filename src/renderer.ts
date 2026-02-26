@@ -113,11 +113,8 @@ export class Renderer {
       container.x = unit.pos.x;
       container.y = unit.pos.y;
 
-      // Unit facing direction
-      const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
-      if (speed > 1) {
-        container.rotation = Math.atan2(unit.vel.y, unit.vel.x);
-      }
+      // Rotate only the nose (gun direction indicator), not the whole container
+      (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
 
       // Update health bar — only show when damaged (child index 2: shape, nose, hpBar)
       const hpBar = container.getChildAt(2) as Graphics;

@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { createArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint } from './units';
+import { createArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle } from './units';
 import { generateObstacles } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
@@ -160,12 +160,19 @@ export class GameEngine {
 
       const target = findTarget(unit, this.units, null);
       if (target && isInRange(unit, target)) {
+        const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
+        updateGunAngle(unit, desired, dt);
         const projectile = tryFireProjectile(unit, target, dt);
         if (projectile) {
           this.projectiles.push(projectile);
         }
       } else {
         unit.fireTimer = Math.max(0, unit.fireTimer - dt);
+        const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+        if (speed > 1) {
+          const desired = Math.atan2(unit.vel.y, unit.vel.x);
+          updateGunAngle(unit, desired, dt);
+        }
       }
     }
 

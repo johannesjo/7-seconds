@@ -30,6 +30,7 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
     projectileSpeed: stats.projectileSpeed,
     projectileRadius: stats.projectileRadius,
     vel: { x: 0, y: 0 },
+    gunAngle: 0,
   };
 }
 
@@ -51,6 +52,24 @@ export function createArmy(team: Team): Unit[] {
   }
 
   return units;
+}
+
+/** Smoothly rotate unit.gunAngle toward desiredAngle via shortest arc, capped at ~5 rad/s. */
+export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): void {
+  const MAX_TURN_SPEED = 5; // rad/s (~1s for full 180° turn)
+  let diff = desiredAngle - unit.gunAngle;
+  // Normalize to [-PI, PI] for shortest arc
+  diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
+  if (diff < -Math.PI) diff += 2 * Math.PI;
+  const maxStep = MAX_TURN_SPEED * dt;
+  if (Math.abs(diff) <= maxStep) {
+    unit.gunAngle = desiredAngle;
+  } else {
+    unit.gunAngle += Math.sign(diff) * maxStep;
+  }
+  // Keep in [-PI, PI]
+  unit.gunAngle = ((unit.gunAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+  if (unit.gunAngle < -Math.PI) unit.gunAngle += 2 * Math.PI;
 }
 
 /** Pop the next waypoint into moveTarget when the current one is reached. */

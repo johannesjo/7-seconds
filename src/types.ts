@@ -39,6 +39,7 @@ export interface Unit {
   projectileSpeed: number;
   projectileRadius: number;
   vel: Vec2;
+  gunAngle: number;
 }
 
 export interface Projectile {
