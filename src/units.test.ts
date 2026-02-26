@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles } from './units';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints } from './units';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 
@@ -117,6 +117,63 @@ describe('applyDamage', () => {
     const unit = createUnit('s1', 'scout', 'blue', { x: 0, y: 0 });
     applyDamage(unit, 999);
     expect(unit.hp).toBe(0);
+  });
+});
+
+describe('segmentHitsRect', () => {
+  const rect = { x: 100, y: 100, w: 50, h: 50 };
+
+  it('returns true when segment passes through rect', () => {
+    expect(segmentHitsRect({ x: 0, y: 125 }, { x: 200, y: 125 }, rect, 0)).toBe(true);
+  });
+
+  it('returns false when segment misses rect', () => {
+    expect(segmentHitsRect({ x: 0, y: 50 }, { x: 200, y: 50 }, rect, 0)).toBe(false);
+  });
+
+  it('returns true when segment ends inside rect', () => {
+    expect(segmentHitsRect({ x: 0, y: 125 }, { x: 120, y: 125 }, rect, 0)).toBe(true);
+  });
+
+  it('returns false when segment is too short to reach rect', () => {
+    expect(segmentHitsRect({ x: 0, y: 125 }, { x: 50, y: 125 }, rect, 0)).toBe(false);
+  });
+
+  it('respects padding to expand hit area', () => {
+    // Segment passes just outside the rect (y=95), but padding=10 extends rect to y=90
+    expect(segmentHitsRect({ x: 0, y: 95 }, { x: 200, y: 95 }, rect, 0)).toBe(false);
+    expect(segmentHitsRect({ x: 0, y: 95 }, { x: 200, y: 95 }, rect, 10)).toBe(true);
+  });
+
+  it('handles vertical segments', () => {
+    expect(segmentHitsRect({ x: 125, y: 0 }, { x: 125, y: 200 }, rect, 0)).toBe(true);
+    expect(segmentHitsRect({ x: 50, y: 0 }, { x: 50, y: 200 }, rect, 0)).toBe(false);
+  });
+});
+
+describe('detourWaypoints', () => {
+  const rect = { x: 100, y: 100, w: 50, h: 50 };
+
+  it('returns empty array for clear path', () => {
+    const result = detourWaypoints({ x: 0, y: 50 }, { x: 200, y: 50 }, [rect], 5);
+    expect(result).toEqual([]);
+  });
+
+  it('returns detour point for blocked path', () => {
+    const result = detourWaypoints({ x: 125, y: 0 }, { x: 125, y: 200 }, [rect], 5);
+    expect(result.length).toBeGreaterThan(0);
+    // Detour point should route around the obstacle (not inside it)
+    for (const p of result) {
+      const inside = p.x > rect.x && p.x < rect.x + rect.w && p.y > rect.y && p.y < rect.y + rect.h;
+      expect(inside).toBe(false);
+    }
+  });
+
+  it('handles multiple obstacles', () => {
+    const obs1 = { x: 100, y: 100, w: 50, h: 50 };
+    const obs2 = { x: 100, y: 200, w: 50, h: 50 };
+    const result = detourWaypoints({ x: 125, y: 0 }, { x: 125, y: 300 }, [obs1, obs2], 5);
+    expect(result.length).toBeGreaterThanOrEqual(2);
   });
 });
 

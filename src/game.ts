@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle } from './units';
+import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
 import { generateObstacles, generateElevationZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
@@ -126,23 +126,35 @@ export class GameEngine {
     this.onEvent('phase-change', { phase, round: this.roundNumber });
   }
 
-  /** Generate simple AI paths for red units: head toward blue side with random spread. */
+  /** Generate AI paths for red units: head toward blue side, routing around obstacles. */
   private generateAiPaths(): void {
     const redUnits = this.units.filter(u => u.alive && u.team === 'red');
     for (const unit of redUnits) {
-      const waypoints: { x: number; y: number }[] = [];
+      const rawWaypoints: { x: number; y: number }[] = [];
       const steps = 2 + Math.floor(Math.random() * 2); // 2-3 waypoints
       const targetY = MAP_HEIGHT * 0.85; // Head toward blue spawn side (bottom)
       const stepY = (targetY - unit.pos.y) / steps;
 
       for (let i = 1; i <= steps; i++) {
         const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.3;
-        waypoints.push({
+        rawWaypoints.push({
           x: Math.max(20, Math.min(MAP_WIDTH - 20, unit.pos.x + spreadX)),
           y: Math.min(MAP_HEIGHT - 20, unit.pos.y + stepY * i),
         });
       }
-      unit.waypoints = waypoints;
+
+      // Post-process: insert detour waypoints around obstacles
+      const margin = 4;
+      const padding = unit.radius + margin;
+      const refined: { x: number; y: number }[] = [{ ...unit.pos }];
+
+      for (const wp of rawWaypoints) {
+        const last = refined[refined.length - 1];
+        const detours = detourWaypoints(last, wp, this.obstacles, padding);
+        refined.push(...detours, wp);
+      }
+
+      unit.waypoints = refined.slice(1); // remove starting pos
     }
   }
 

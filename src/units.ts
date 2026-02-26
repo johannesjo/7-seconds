@@ -8,6 +8,99 @@ export interface ProjectileHit {
 }
 import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS } from './constants';
 
+/** Check if line segment from a to b intersects rect expanded by padding (slab method). */
+export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
+  const left = rect.x - padding;
+  const right = rect.x + rect.w + padding;
+  const top = rect.y - padding;
+  const bottom = rect.y + rect.h + padding;
+
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+
+  let tMin = 0;
+  let tMax = 1;
+
+  if (Math.abs(dx) < 1e-8) {
+    if (a.x < left || a.x > right) return false;
+  } else {
+    let t1 = (left - a.x) / dx;
+    let t2 = (right - a.x) / dx;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return false;
+  }
+
+  if (Math.abs(dy) < 1e-8) {
+    if (a.y < top || a.y > bottom) return false;
+  } else {
+    let t1 = (top - a.y) / dy;
+    let t2 = (bottom - a.y) / dy;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return false;
+  }
+
+  return true;
+}
+
+/** Insert detour waypoints around obstacles blocking the segment from a to b. */
+export function detourWaypoints(a: Vec2, b: Vec2, obstacles: Obstacle[], padding: number, depth = 0): Vec2[] {
+  const MAX_DEPTH = 3;
+  if (depth >= MAX_DEPTH) return [];
+
+  // Find the first blocking obstacle (closest to a by projecting obstacle center onto segment)
+  let firstObs: Obstacle | null = null;
+  let firstT = Infinity;
+
+  for (const obs of obstacles) {
+    if (!segmentHitsRect(a, b, obs, padding)) continue;
+    const cx = obs.x + obs.w / 2;
+    const cy = obs.y + obs.h / 2;
+    const sx = b.x - a.x;
+    const sy = b.y - a.y;
+    const len2 = sx * sx + sy * sy;
+    const t = len2 > 0 ? ((cx - a.x) * sx + (cy - a.y) * sy) / len2 : 0;
+    if (t < firstT) {
+      firstT = t;
+      firstObs = obs;
+    }
+  }
+
+  if (!firstObs) return [];
+
+  const obs = firstObs;
+  const corners: Vec2[] = [
+    { x: obs.x - padding, y: obs.y - padding },
+    { x: obs.x + obs.w + padding, y: obs.y - padding },
+    { x: obs.x - padding, y: obs.y + obs.h + padding },
+    { x: obs.x + obs.w + padding, y: obs.y + obs.h + padding },
+  ];
+
+  // Pick corner that minimizes total detour distance
+  let bestCorner = corners[0];
+  let bestDist = Infinity;
+  for (const c of corners) {
+    const dist = Math.hypot(c.x - a.x, c.y - a.y) + Math.hypot(b.x - c.x, b.y - c.y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestCorner = c;
+    }
+  }
+
+  // Clamp to map bounds
+  bestCorner = {
+    x: Math.max(padding, Math.min(MAP_WIDTH - padding, bestCorner.x)),
+    y: Math.max(padding, Math.min(MAP_HEIGHT - padding, bestCorner.y)),
+  };
+
+  const before = detourWaypoints(a, bestCorner, obstacles, padding, depth + 1);
+  const after = detourWaypoints(bestCorner, b, obstacles, padding, depth + 1);
+  return [...before, bestCorner, ...after];
+}
+
 export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): Unit {
   const stats = UNIT_STATS[type];
   return {
