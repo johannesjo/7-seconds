@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints } from './units';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight } from './units';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 
@@ -96,6 +96,25 @@ describe('findTarget', () => {
     const attacker = createUnit('s1', 'scout', 'blue', { x: 100, y: 100 });
     const target = findTarget(attacker, [attacker], null);
     expect(target).toBeNull();
+  });
+
+  it('prefers visible enemy over closer blocked enemy', () => {
+    const attacker = createUnit('s1', 'scout', 'blue', { x: 100, y: 100 });
+    const blocked = createUnit('e1', 'soldier', 'red', { x: 300, y: 100 });
+    const visible = createUnit('e2', 'soldier', 'red', { x: 100, y: 400 });
+    const obstacle = { x: 180, y: 80, w: 40, h: 40 }; // blocks horizontal path to e1
+
+    const target = findTarget(attacker, [attacker, blocked, visible], null, [obstacle]);
+    expect(target).toBe(visible);
+  });
+
+  it('falls back to blocked enemy when all are blocked', () => {
+    const attacker = createUnit('s1', 'scout', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'soldier', 'red', { x: 200, y: 100 });
+    const obstacle = { x: 140, y: 80, w: 40, h: 40 };
+
+    const target = findTarget(attacker, [attacker, enemy], null, [obstacle]);
+    expect(target).toBe(enemy);
   });
 });
 
@@ -245,5 +264,37 @@ describe('updateProjectiles', () => {
     expect(hits).toHaveLength(1);
     expect(hits[0].targetId).toBe('e1');
     expect(hits[0].killed).toBe(false);
+  });
+
+  it('removes projectile when it hits an obstacle', () => {
+    const obstacle = { x: 110, y: 90, w: 40, h: 40 };
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 300, y: 100 },
+      damage: 10,
+      radius: 3,
+      team: 'blue' as const,
+      maxRange: 500,
+      distanceTraveled: 0,
+    };
+    const { alive } = updateProjectiles([proj], [], 0.1, [obstacle]);
+    expect(alive).toHaveLength(0);
+  });
+
+  it('projectile passes when no obstacle blocks it', () => {
+    const obstacle = { x: 150, y: 200, w: 40, h: 40 };
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 300, y: 100 },
+      damage: 10,
+      radius: 3,
+      team: 'blue' as const,
+      maxRange: 500,
+      distanceTraveled: 0,
+    };
+    const { alive } = updateProjectiles([proj], [], 0.1, [obstacle]);
+    expect(alive).toHaveLength(1);
   });
 });

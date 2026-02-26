@@ -342,25 +342,39 @@ export function separateUnits(units: Unit[]): void {
   }
 }
 
-export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null): Unit | null {
+/** Check if line of sight from a to b is clear of obstacles. */
+export function hasLineOfSight(a: Vec2, b: Vec2, obstacles: Obstacle[]): boolean {
+  return !obstacles.some(o => segmentHitsRect(a, b, o, 0));
+}
+
+export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null, obstacles: Obstacle[] = []): Unit | null {
   const enemies = allUnits.filter(u => u.alive && u.team !== attacker.team);
   if (enemies.length === 0) return null;
 
   if (preferredId) {
     const preferred = enemies.find(u => u.id === preferredId);
-    if (preferred) return preferred;
+    if (preferred && hasLineOfSight(attacker.pos, preferred.pos, obstacles)) return preferred;
   }
 
-  let nearest = enemies[0];
-  let nearestDist = distance(attacker.pos, nearest.pos);
-  for (let i = 1; i < enemies.length; i++) {
-    const d = distance(attacker.pos, enemies[i].pos);
-    if (d < nearestDist) {
-      nearest = enemies[i];
-      nearestDist = d;
+  // Split into visible and blocked enemies
+  let nearestVisible: Unit | null = null;
+  let nearestVisibleDist = Infinity;
+  let nearestAny: Unit | null = null;
+  let nearestAnyDist = Infinity;
+
+  for (const enemy of enemies) {
+    const d = distance(attacker.pos, enemy.pos);
+    if (d < nearestAnyDist) {
+      nearestAny = enemy;
+      nearestAnyDist = d;
+    }
+    if (hasLineOfSight(attacker.pos, enemy.pos, obstacles) && d < nearestVisibleDist) {
+      nearestVisible = enemy;
+      nearestVisibleDist = d;
     }
   }
-  return nearest;
+
+  return nearestVisible ?? nearestAny;
 }
 
 /** Count how many elevation zones overlap a position (0 = flat ground). */
@@ -432,12 +446,14 @@ export function updateProjectiles(
   projectiles: Projectile[],
   units: Unit[],
   dt: number,
+  obstacles: Obstacle[] = [],
 ): { alive: Projectile[]; hits: ProjectileHit[] } {
   const alive: Projectile[] = [];
   const hits: ProjectileHit[] = [];
 
   for (const p of projectiles) {
     // Move projectile
+    const oldPos = { x: p.pos.x, y: p.pos.y };
     const moveX = p.vel.x * dt;
     const moveY = p.vel.y * dt;
     p.pos.x += moveX;
@@ -452,6 +468,9 @@ export function updateProjectiles(
     // Check if out of bounds or past max range
     if (p.pos.x < 0 || p.pos.x > MAP_WIDTH || p.pos.y < 0 || p.pos.y > MAP_HEIGHT) continue;
     if (p.distanceTraveled > p.maxRange) continue;
+
+    // Check if projectile hit an obstacle
+    if (obstacles.some(o => segmentHitsRect(oldPos, p.pos, o, p.radius))) continue;
 
     // Check hit against enemy units
     let hit = false;

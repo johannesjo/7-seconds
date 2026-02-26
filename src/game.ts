@@ -186,7 +186,7 @@ export class GameEngine {
     for (const unit of this.units) {
       if (!unit.alive) continue;
 
-      const target = findTarget(unit, this.units, null);
+      const target = findTarget(unit, this.units, null, this.obstacles);
       if (target && isInRange(unit, target, this.elevationZones)) {
         const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
         updateGunAngle(unit, desired, dt);
@@ -205,7 +205,7 @@ export class GameEngine {
       }
     }
 
-    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt);
+    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
     this.projectiles = aliveProjectiles;
 
     // Trigger effects for hits
@@ -240,7 +240,7 @@ export class GameEngine {
       // Use actual velocity — moveTarget can be stuck on obstacles
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
-      const target = findTarget(u, this.units, null);
+      const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
     });
 
