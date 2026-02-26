@@ -185,20 +185,106 @@
     }
     #result-screen button:hover { background: #3a3a5a; }
 
+    /* Campaign Screen */
+    #campaign-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 32px;
+      background: rgba(0,0,0,0.8);
+      z-index: 15;
+    }
+    #campaign-screen h2 {
+      font-size: 32px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .mission-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 400px;
+    }
+    .mission-btn {
+      padding: 16px 20px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 2px solid #555;
+      border-radius: 6px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .mission-btn:hover:not(:disabled) { background: #3a3a5a; border-color: #777; }
+    .mission-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .mission-btn .mission-name {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .mission-btn .mission-desc {
+      font-size: 13px;
+      opacity: 0.7;
+    }
+    .mission-btn .mission-status {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 4px;
+    }
+    #campaign-back-btn {
+      margin-top: 12px;
+      padding: 10px 28px;
+      font-size: 14px;
+      background: transparent;
+      color: #aaa;
+      border: 1px solid #444;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #campaign-back-btn:hover { color: #eee; border-color: #777; }
+
     /* Mobile */
     @media (max-width: 900px) {
-      #prompt-screen h1 { font-size: 28px; }
-      #prompt-screen p { font-size: 14px; }
-      #battle-btn { padding: 12px 32px; }
-      #battle-hud { font-size: 12px; padding: 6px 10px; }
-      #round-timer { font-size: 16px; }
+      #prompt-screen { padding: 24px 16px; gap: 16px; }
+      #prompt-screen h1 { font-size: 28px; letter-spacing: 2px; }
+      #prompt-screen p { font-size: 13px; padding: 0 8px; }
+      #prompt-screen .btn-row { flex-wrap: wrap; justify-content: center; }
+      #prompt-screen .btn-row button {
+        padding: 12px 24px !important;
+        font-size: 16px !important;
+        letter-spacing: 2px !important;
+      }
+      #campaign-btn {
+        padding: 10px 24px !important;
+        font-size: 14px !important;
+        letter-spacing: 2px !important;
+      }
+      #battle-hud { font-size: 11px; padding: 6px 8px; gap: 4px; }
+      #battle-hud > div { gap: 6px; }
+      #round-timer { font-size: 14px; }
+      #round-counter { font-size: 11px; }
       #planning-overlay { flex-direction: row; gap: 12px; }
-      #planning-label { font-size: 16px; }
+      #planning-label { font-size: 16px; letter-spacing: 1px; }
       #planning-instructions { display: none; }
-      #confirm-btn { min-height: 44px; padding: 8px 28px; font-size: 14px; }
-      #result-screen h2 { font-size: 36px; }
-      #result-screen button { min-height: 48px; }
-      .speed-controls button { min-height: 36px; padding: 6px 14px; }
+      #confirm-btn { min-height: 44px; padding: 8px 24px; font-size: 14px; letter-spacing: 1px; }
+      #cover-screen { font-size: 24px; letter-spacing: 2px; padding: 0 16px; text-align: center; }
+      #result-screen { padding: 0 16px; }
+      #result-screen h2 { font-size: 32px; letter-spacing: 2px; }
+      #result-screen .stats { font-size: 15px; }
+      #result-screen .buttons { flex-wrap: wrap; justify-content: center; }
+      #result-screen button { min-height: 48px; padding: 10px 20px; font-size: 14px; }
+      .speed-controls button { min-height: 36px; padding: 6px 10px; font-size: 11px; }
+      #campaign-screen { padding: 24px 16px; }
+      #campaign-screen h2 { font-size: 24px; letter-spacing: 2px; }
+      .mission-list { max-width: 100%; }
+      .mission-btn { padding: 12px 14px; }
+      .mission-btn .mission-name { font-size: 15px; }
+      .mission-btn .mission-desc { font-size: 12px; }
     }
   </style>
 </head>
@@ -206,10 +292,17 @@
   <div id="prompt-screen" class="screen active">
     <h1>7 Seconds</h1>
     <p>Draw paths for your units, then watch them fight. Blue plans first, then Red.</p>
-    <div style="display:flex;gap:16px">
+    <div class="btn-row" style="display:flex;gap:16px">
       <button id="ai-btn" style="padding:16px 48px;font-size:20px;font-weight:bold;text-transform:uppercase;letter-spacing:4px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">vs AI</button>
       <button id="battle-btn">vs Player</button>
     </div>
+    <button id="campaign-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:transparent;color:#aaa;border:1px solid #444;border-radius:4px;cursor:pointer">Campaign</button>
+  </div>
+
+  <div id="campaign-screen" class="screen">
+    <h2>Campaign</h2>
+    <div class="mission-list" id="mission-list"></div>
+    <button id="campaign-back-btn">Back</button>
   </div>
 
   <div id="battle-screen" class="screen">

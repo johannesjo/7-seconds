@@ -56,6 +56,58 @@ export function createArmy(team: Team): Unit[] {
   return units;
 }
 
+/** Create an army from a custom composition (used by campaign missions). */
+export function createMissionArmy(team: Team, composition: { type: UnitType; count: number }[]): Unit[] {
+  const units: Unit[] = [];
+  const isBlue = team === 'blue';
+  const totalUnits = composition.reduce((sum, c) => sum + c.count, 0);
+  const spacing = 60;
+
+  if (isBlue) {
+    // Blue spawns at bottom, single row like createArmy
+    const baseY = MAP_HEIGHT * 0.85;
+    const groupWidth = spacing * (totalUnits - 1);
+    const startX = (MAP_WIDTH - groupWidth) / 2;
+    let index = 0;
+    for (const { type, count } of composition) {
+      for (let i = 0; i < count; i++) {
+        const x = startX + spacing * index;
+        units.push(createUnit(`${team}_${type}_${i}`, type, team, { x, y: baseY }));
+        index++;
+      }
+    }
+  } else {
+    // Red spawns spread across the top ~60% of the map
+    const margin = 80;
+    const xRange = MAP_WIDTH - margin * 2;
+    const yMin = MAP_HEIGHT * 0.08;
+    const yMax = MAP_HEIGHT * 0.55;
+    // Deterministic spread: distribute evenly with staggered offsets
+    const cols = Math.min(totalUnits, Math.ceil(Math.sqrt(totalUnits * 2)));
+    const rows = Math.ceil(totalUnits / cols);
+    const xStep = xRange / Math.max(cols, 1);
+    const yStep = (yMax - yMin) / Math.max(rows, 1);
+    let index = 0;
+    for (const { type, count } of composition) {
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(index / cols);
+        const col = index % cols;
+        // Stagger odd rows by half a step for a less grid-like feel
+        const stagger = row % 2 === 1 ? xStep * 0.5 : 0;
+        const x = margin + xStep * 0.5 + col * xStep + stagger;
+        const y = yMin + yStep * 0.5 + row * yStep;
+        units.push(createUnit(`${team}_${type}_${i}`, type, team, {
+          x: Math.min(x, MAP_WIDTH - margin),
+          y,
+        }));
+        index++;
+      }
+    }
+  }
+
+  return units;
+}
+
 /** Smoothly rotate unit.gunAngle toward desiredAngle via shortest arc, capped at ~5 rad/s. */
 export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): void {
   const MAX_TURN_SPEED = 5; // rad/s (~1s for full 180° turn)
@@ -218,14 +270,25 @@ export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string
   return nearest;
 }
 
+/** Count how many elevation zones overlap a position (0 = flat ground). */
+export function getElevationLevel(pos: Vec2, zones: ElevationZone[]): number {
+  let level = 0;
+  for (const z of zones) {
+    if (pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h) {
+      level++;
+    }
+  }
+  return level;
+}
+
+/** Backward-compat wrapper: true when on at least one elevation zone. */
 export function isOnElevation(pos: Vec2, zones: ElevationZone[]): boolean {
-  return zones.some(z => pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h);
+  return getElevationLevel(pos, zones) > 0;
 }
 
 export function isInRange(attacker: Unit, target: Unit, elevationZones: ElevationZone[] = []): boolean {
-  const range = isOnElevation(attacker.pos, elevationZones)
-    ? attacker.range * (1 + ELEVATION_RANGE_BONUS)
-    : attacker.range;
+  const level = getElevationLevel(attacker.pos, elevationZones);
+  const range = attacker.range * (1 + ELEVATION_RANGE_BONUS * level);
   return distance(attacker.pos, target.pos) <= range + attacker.radius + target.radius;
 }
 
@@ -267,7 +330,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     damage: unit.damage,
     radius: unit.projectileRadius,
     team: unit.team,
-    maxRange: (isOnElevation(unit.pos, elevationZones) ? unit.range * (1 + ELEVATION_RANGE_BONUS) : unit.range) + unit.radius + 40,
+    maxRange: unit.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(unit.pos, elevationZones)) + unit.radius + 40,
     distanceTraveled: 0,
   };
 }

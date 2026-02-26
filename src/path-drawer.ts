@@ -1,7 +1,7 @@
 import { Graphics, Container, Rectangle } from 'pixi.js';
 import { Unit, Team, Vec2, ElevationZone } from './types';
 import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS } from './constants';
-import { isOnElevation } from './units';
+import { getElevationLevel } from './units';
 
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
 export function samplePath(raw: Vec2[], minDist: number): Vec2[] {
@@ -33,6 +33,7 @@ export class PathDrawer {
   private hoverGfx: Graphics;
   private selectedUnit: Unit | null = null;
   private hoveredUnit: Unit | null = null;
+  private hoveredEnemy: Unit | null = null;
   private rawPoints: Vec2[] = [];
   private enabled = false;
   private canvas: HTMLCanvasElement | null = null;
@@ -68,6 +69,7 @@ export class PathDrawer {
     this.enabled = true;
     this.selectedUnit = null;
     this.hoveredUnit = null;
+    this.hoveredEnemy = null;
     this.rawPoints = [];
     this.renderPaths();
   }
@@ -77,6 +79,7 @@ export class PathDrawer {
     this.team = null;
     this.selectedUnit = null;
     this.hoveredUnit = null;
+    this.hoveredEnemy = null;
     this.rawPoints = [];
     this.hoverGfx.clear();
   }
@@ -178,6 +181,15 @@ export class PathDrawer {
         : this.hoveredUnit.pos;
       this.drawRangeCircle(this.hoveredUnit, hoverPos, teamColor);
     }
+
+    // Enemy unit range preview (tap or hover)
+    if (this.hoveredEnemy && !this.selectedUnit) {
+      const enemyColor = this.hoveredEnemy.team === 'red' ? 0xff4a4a : 0x4a9eff;
+      this.hoverGfx.circle(this.hoveredEnemy.pos.x, this.hoveredEnemy.pos.y, this.hoveredEnemy.radius + 4);
+      this.hoverGfx.setStrokeStyle({ width: 2, color: enemyColor, alpha: 0.6 });
+      this.hoverGfx.stroke();
+      this.drawRangeCircle(this.hoveredEnemy, this.hoveredEnemy.pos, enemyColor);
+    }
   }
 
   /** Call each frame to animate pulsing indicators during planning. */
@@ -186,10 +198,9 @@ export class PathDrawer {
   }
 
   private drawRangeCircle(unit: Unit, pos: Vec2, color: number): void {
-    const elevated = isOnElevation(pos, this.elevationZones);
-    const range = elevated
-      ? unit.range * (1 + ELEVATION_RANGE_BONUS)
-      : unit.range;
+    const level = getElevationLevel(pos, this.elevationZones);
+    const elevated = level > 0;
+    const range = unit.range * (1 + ELEVATION_RANGE_BONUS * level);
     const ringColor = elevated ? 0x66ff88 : color;
 
     // Highlight the elevation zone the position sits on
@@ -250,6 +261,22 @@ export class PathDrawer {
     return closest;
   }
 
+  private findNearestEnemy(px: number, py: number): Unit | null {
+    if (!this.team) return null;
+    let closest: Unit | null = null;
+    let closestDist = UNIT_SELECT_RADIUS;
+
+    for (const unit of this.units) {
+      if (!unit.alive || unit.team === this.team) continue;
+      const dist = distancePt(unit.pos, { x: px, y: py });
+      if (dist < closestDist) {
+        closest = unit;
+        closestDist = dist;
+      }
+    }
+    return closest;
+  }
+
   private onPointerDown = (e: { global: { x: number; y: number }; button?: number }): void => {
     if (!this.enabled || !this.team) return;
     // Ignore right clicks for path drawing
@@ -257,10 +284,17 @@ export class PathDrawer {
 
     const closest = this.findNearestUnit(e.global.x, e.global.y);
     if (closest) {
+      this.hoveredEnemy = null;
       this.selectedUnit = closest;
       this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
       this.renderHoverLayer();
+      return;
     }
+
+    // Tap on enemy → show their range
+    const enemy = this.findNearestEnemy(e.global.x, e.global.y);
+    this.hoveredEnemy = enemy;
+    this.renderHoverLayer();
   };
 
   private onPointerMove = (e: { global: { x: number; y: number } }): void => {
@@ -270,7 +304,14 @@ export class PathDrawer {
     if (!this.selectedUnit) {
       const prev = this.hoveredUnit;
       this.hoveredUnit = this.findNearestUnit(e.global.x, e.global.y);
-      if (this.hoveredUnit !== prev) this.renderHoverLayer();
+      // If not hovering own unit, check for enemy
+      const prevEnemy = this.hoveredEnemy;
+      if (!this.hoveredUnit) {
+        this.hoveredEnemy = this.findNearestEnemy(e.global.x, e.global.y);
+      } else {
+        this.hoveredEnemy = null;
+      }
+      if (this.hoveredUnit !== prev || this.hoveredEnemy !== prevEnemy) this.renderHoverLayer();
     }
 
     // Drawing mode

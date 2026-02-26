@@ -1,6 +1,6 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { createArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle } from './units';
+import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle } from './units';
 import { generateObstacles, generateElevationZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
@@ -25,12 +25,14 @@ export class GameEngine {
   private _phase: TurnPhase = 'blue-planning';
   private roundNumber = 1;
   private aiMode = false;
+  private mission: MissionDef | null = null;
   private idleTime = 0;
 
-  constructor(renderer: Renderer, onEvent: GameEventCallback, aiMode = false) {
+  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
-    this.aiMode = aiMode;
+    this.aiMode = opts?.aiMode ?? false;
+    this.mission = opts?.mission ?? null;
   }
 
   get phase(): TurnPhase {
@@ -38,7 +40,14 @@ export class GameEngine {
   }
 
   startBattle(): void {
-    this.units = [...createArmy('blue'), ...createArmy('red')];
+    if (this.mission) {
+      this.units = [
+        ...createMissionArmy('blue', this.mission.blueArmy),
+        ...createMissionArmy('red', this.mission.redArmy),
+      ];
+    } else {
+      this.units = [...createArmy('blue'), ...createArmy('red')];
+    }
     this.obstacles = generateObstacles();
     this.elevationZones = generateElevationZones();
     this.projectiles = [];
@@ -95,8 +104,10 @@ export class GameEngine {
     } else if (phase === 'cover') {
       this.pathDrawer?.disable();
       if (this.aiMode) {
-        // Skip cover screen, generate AI paths, go straight to playing
-        this.generateAiPaths();
+        // Skip cover screen, generate AI paths (unless static), go straight to playing
+        if (!this.mission?.redStatic) {
+          this.generateAiPaths();
+        }
         this.onEvent('phase-change', { phase, round: this.roundNumber });
         this.setPhase('playing');
         return;
@@ -242,14 +253,19 @@ export class GameEngine {
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
-    const armySize = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
+    const blueTotal = this.mission
+      ? this.mission.blueArmy.reduce((s, c) => s + c.count, 0)
+      : ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
+    const redTotal = this.mission
+      ? this.mission.redArmy.reduce((s, c) => s + c.count, 0)
+      : ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
 
     this.onEvent('end', {
       winner,
       blueAlive,
       redAlive,
-      blueKilled: armySize - redAlive,
-      redKilled: armySize - blueAlive,
+      blueKilled: redTotal - redAlive,
+      redKilled: blueTotal - blueAlive,
       duration: this.elapsedTime,
     });
   }

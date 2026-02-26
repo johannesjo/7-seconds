@@ -2,16 +2,19 @@ import { Renderer } from './renderer';
 import { GameEngine } from './game';
 import { createArmy } from './units';
 import { generateObstacles, generateElevationZones } from './battlefield';
-import { BattleResult, TurnPhase } from './types';
+import { BattleResult, TurnPhase, MissionDef } from './types';
 import { ARMY_COMPOSITION } from './constants';
+import { MISSIONS } from './missions';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
+const campaignScreen = document.getElementById('campaign-screen')!;
 const battleScreen = document.getElementById('battle-screen')!;
 const resultScreen = document.getElementById('result-screen')!;
 
 const battleBtn = document.getElementById('battle-btn')!;
 const aiBtn = document.getElementById('ai-btn')!;
+const campaignBtn = document.getElementById('campaign-btn')!;
 
 const battleHud = document.getElementById('battle-hud')!;
 const blueCountEl = document.getElementById('blue-count')!;
@@ -30,15 +33,21 @@ const resultStatsEl = document.getElementById('result-stats')!;
 const rematchBtn = document.getElementById('rematch-btn')!;
 const newBattleBtn = document.getElementById('new-battle-btn')!;
 
+const missionListEl = document.getElementById('mission-list')!;
+const campaignBackBtn = document.getElementById('campaign-back-btn')!;
+
 const pixiContainer = document.getElementById('pixi-container')!;
 
 // State
 let renderer: Renderer | null = null;
 let engine: GameEngine | null = null;
 let aiMode = false;
+let currentMission: MissionDef | null = null;
+const completedMissions = new Set<number>();
 
-function showScreen(screen: 'prompt' | 'battle' | 'result') {
+function showScreen(screen: 'prompt' | 'campaign' | 'battle' | 'result') {
   promptScreen.classList.toggle('active', screen === 'prompt');
+  campaignScreen.classList.toggle('active', screen === 'campaign');
   battleScreen.classList.add('active'); // always visible once initialized
   resultScreen.classList.toggle('active', screen === 'result');
 }
@@ -103,13 +112,56 @@ function onGameEvent(
     winnerTextEl.textContent = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
     winnerTextEl.style.color = color;
 
-    const armySize = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
+    // Calculate army sizes based on mode
+    const blueTotal = currentMission
+      ? currentMission.blueArmy.reduce((s, c) => s + c.count, 0)
+      : ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
+    const redTotal = currentMission
+      ? currentMission.redArmy.reduce((s, c) => s + c.count, 0)
+      : ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
+
     resultStatsEl.innerHTML = [
       `Duration: ${result.duration.toFixed(1)}s`,
-      `Blue survivors: ${result.blueAlive}/${armySize}`,
-      `Red survivors: ${result.redAlive}/${armySize}`,
+      `Blue survivors: ${result.blueAlive}/${blueTotal}`,
+      `Red survivors: ${result.redAlive}/${redTotal}`,
     ].join('<br>');
+
+    // Campaign: mark mission complete on win, show appropriate buttons
+    if (currentMission) {
+      if (result.winner === 'blue') {
+        completedMissions.add(currentMission.id);
+      }
+      const nextMission = MISSIONS.find(m => m.id === currentMission!.id + 1);
+      updateResultButtons(result.winner === 'blue' && nextMission != null);
+    } else {
+      updateResultButtons(false);
+    }
+
     showScreen('result');
+  }
+}
+
+function updateResultButtons(showNext: boolean): void {
+  // Reset buttons to default state
+  rematchBtn.textContent = 'Rematch';
+  newBattleBtn.textContent = currentMission ? 'Back to Missions' : 'New Battle';
+
+  // Remove old next-mission button if any
+  const existingNext = document.getElementById('next-mission-btn');
+  if (existingNext) existingNext.remove();
+
+  if (showNext) {
+    const nextBtn = document.createElement('button');
+    nextBtn.id = 'next-mission-btn';
+    nextBtn.textContent = 'Next Mission';
+    nextBtn.addEventListener('click', () => {
+      const next = MISSIONS.find(m => m.id === currentMission!.id + 1);
+      if (next) {
+        currentMission = next;
+        startGame();
+      }
+    });
+    rematchBtn.parentElement!.appendChild(nextBtn);
   }
 }
 
@@ -130,24 +182,72 @@ function showPreview(): void {
 
 function startGame(): void {
   engine?.stop();
-  engine = new GameEngine(renderer!, onGameEvent, aiMode);
+  engine = new GameEngine(renderer!, onGameEvent, {
+    aiMode,
+    mission: currentMission ?? undefined,
+  });
   showScreen('battle');
   speedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.speed === '1'));
   roundCounterEl.textContent = 'Round 1';
   engine.startBattle();
 }
 
+function renderMissionList(): void {
+  missionListEl.innerHTML = '';
+  for (const mission of MISSIONS) {
+    const btn = document.createElement('button');
+    btn.className = 'mission-btn';
+
+    const isCompleted = completedMissions.has(mission.id);
+    const isUnlocked = mission.id === 1 || completedMissions.has(mission.id - 1);
+
+    btn.disabled = !isUnlocked;
+
+    const statusText = isCompleted ? 'Completed' : isUnlocked ? 'Available' : 'Locked';
+    const statusColor = isCompleted ? '#66ff88' : isUnlocked ? '#4a9eff' : '#666';
+
+    btn.innerHTML = `
+      <div class="mission-name">${mission.name}</div>
+      <div class="mission-desc">${mission.description}</div>
+      <div class="mission-status" style="color:${statusColor}">${statusText}</div>
+    `;
+
+    btn.addEventListener('click', async () => {
+      if (!isUnlocked) return;
+      currentMission = mission;
+      aiMode = true;
+      await initRenderer();
+      startGame();
+    });
+
+    missionListEl.appendChild(btn);
+  }
+}
+
 // Event listeners
 battleBtn.addEventListener('click', async () => {
   aiMode = false;
+  currentMission = null;
   await initRenderer();
   startGame();
 });
 
 aiBtn.addEventListener('click', async () => {
   aiMode = true;
+  currentMission = null;
   await initRenderer();
   startGame();
+});
+
+campaignBtn.addEventListener('click', async () => {
+  await initRenderer();
+  renderMissionList();
+  showScreen('campaign');
+});
+
+campaignBackBtn.addEventListener('click', () => {
+  showPreview();
+  showScreen('prompt');
 });
 
 confirmBtn.addEventListener('click', () => {
@@ -177,8 +277,17 @@ newBattleBtn.addEventListener('click', () => {
   planningOverlay.classList.remove('active');
   coverScreen.classList.remove('active');
   roundTimerEl.textContent = '';
-  showPreview();
-  showScreen('prompt');
+
+  if (currentMission) {
+    // Return to campaign screen
+    currentMission = null;
+    renderMissionList();
+    showPreview();
+    showScreen('campaign');
+  } else {
+    showPreview();
+    showScreen('prompt');
+  }
 });
 
 // Initialize renderer and show battlefield preview behind start screen
