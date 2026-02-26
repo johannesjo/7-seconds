@@ -1,7 +1,7 @@
 import { Graphics, Container, Rectangle } from 'pixi.js';
-import { Unit, Team, Vec2, ElevationZone } from './types';
+import { Unit, Team, Vec2, ElevationZone, Obstacle } from './types';
 import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ZONE_DEPTH_RATIO } from './constants';
-import { getElevationLevel } from './units';
+import { getElevationLevel, adjustPath } from './units';
 
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
 export function samplePath(raw: Vec2[], minDist: number): Vec2[] {
@@ -35,6 +35,7 @@ export class PathDrawer {
   private hoveredUnit: Unit | null = null;
   private hoveredEnemy: Unit | null = null;
   private rawPoints: Vec2[] = [];
+  private obstacles: Obstacle[] = [];
   private enabled = false;
   private canvas: HTMLCanvasElement | null = null;
   private _zoneControl = false;
@@ -67,10 +68,11 @@ export class PathDrawer {
     this._zoneControl = value;
   }
 
-  enable(team: Team, units: Unit[], elevationZones: ElevationZone[] = []): void {
+  enable(team: Team, units: Unit[], elevationZones: ElevationZone[] = [], obstacles: Obstacle[] = []): void {
     this.team = team;
     this.units = units;
     this.elevationZones = elevationZones;
+    this.obstacles = obstacles;
     this.enabled = true;
     this.selectedUnit = null;
     this.hoveredUnit = null;
@@ -368,8 +370,9 @@ export class PathDrawer {
     if (!this.enabled || !this.selectedUnit) return;
 
     const waypoints = samplePath(this.rawPoints, PATH_SAMPLE_DISTANCE);
-    // Skip the first point (unit's current position)
-    this.selectedUnit.waypoints = waypoints.slice(1);
+    // Skip the first point (unit's current position), then adjust for obstacles/borders
+    const raw = waypoints.slice(1);
+    this.selectedUnit.waypoints = adjustPath(raw, this.selectedUnit.radius, this.obstacles);
 
     this.selectedUnit = null;
     this.rawPoints = [];
