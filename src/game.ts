@@ -137,22 +137,36 @@ export class GameEngine {
   private generateAiPaths(): void {
     const redUnits = this.units.filter(u => u.alive && u.team === 'red');
     for (const unit of redUnits) {
+      const margin = 8;
+      const padding = unit.radius + margin;
       const rawWaypoints: { x: number; y: number }[] = [];
       const steps = 2 + Math.floor(Math.random() * 2); // 2-3 waypoints
       const targetY = MAP_HEIGHT * 0.85; // Head toward blue spawn side (bottom)
       const stepY = (targetY - unit.pos.y) / steps;
 
       for (let i = 1; i <= steps; i++) {
-        const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.3;
-        rawWaypoints.push({
-          x: Math.max(20, Math.min(MAP_WIDTH - 20, unit.pos.x + spreadX)),
-          y: Math.min(MAP_HEIGHT - 20, unit.pos.y + stepY * i),
-        });
+        // Try up to 5 times to find a waypoint that doesn't land on an obstacle
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.3;
+          const wp = {
+            x: Math.max(padding, Math.min(MAP_WIDTH - padding, unit.pos.x + spreadX)),
+            y: Math.min(MAP_HEIGHT - padding, unit.pos.y + stepY * i),
+          };
+          const onObstacle = this.obstacles.some(obs => {
+            const cx = Math.max(obs.x, Math.min(obs.x + obs.w, wp.x));
+            const cy = Math.max(obs.y, Math.min(obs.y + obs.h, wp.y));
+            const dx = wp.x - cx;
+            const dy = wp.y - cy;
+            return dx * dx + dy * dy < padding * padding;
+          });
+          if (!onObstacle) {
+            rawWaypoints.push(wp);
+            break;
+          }
+        }
       }
 
       // Post-process: insert detour waypoints around obstacles
-      const margin = 8;
-      const padding = unit.radius + margin;
       const refined: { x: number; y: number }[] = [{ ...unit.pos }];
 
       for (const wp of rawWaypoints) {

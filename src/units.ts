@@ -46,9 +46,20 @@ export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: numbe
   return true;
 }
 
+/** Check if a point overlaps any obstacle (with padding). */
+function pointHitsObstacle(p: Vec2, obstacles: Obstacle[], padding: number): boolean {
+  return obstacles.some(obs => {
+    const cx = Math.max(obs.x, Math.min(obs.x + obs.w, p.x));
+    const cy = Math.max(obs.y, Math.min(obs.y + obs.h, p.y));
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    return dx * dx + dy * dy < padding * padding;
+  });
+}
+
 /** Insert detour waypoints around obstacles blocking the segment from a to b. */
 export function detourWaypoints(a: Vec2, b: Vec2, obstacles: Obstacle[], padding: number, depth = 0): Vec2[] {
-  const MAX_DEPTH = 3;
+  const MAX_DEPTH = 6;
   if (depth >= MAX_DEPTH) return [];
 
   // Find the first blocking obstacle (closest to a by projecting obstacle center onto segment)
@@ -72,29 +83,51 @@ export function detourWaypoints(a: Vec2, b: Vec2, obstacles: Obstacle[], padding
   if (!firstObs) return [];
 
   const obs = firstObs;
+  // Offset corners beyond the expanded rect so segments from them don't re-hit this obstacle
+  const cp = padding + 3;
   const corners: Vec2[] = [
-    { x: obs.x - padding, y: obs.y - padding },
-    { x: obs.x + obs.w + padding, y: obs.y - padding },
-    { x: obs.x - padding, y: obs.y + obs.h + padding },
-    { x: obs.x + obs.w + padding, y: obs.y + obs.h + padding },
+    { x: obs.x - cp, y: obs.y - cp },
+    { x: obs.x + obs.w + cp, y: obs.y - cp },
+    { x: obs.x - cp, y: obs.y + obs.h + cp },
+    { x: obs.x + obs.w + cp, y: obs.y + obs.h + cp },
   ];
 
+  // Filter out corners that land inside other obstacles or out of map bounds
+  const validCorners = corners
+    .map(c => ({
+      x: Math.max(padding, Math.min(MAP_WIDTH - padding, c.x)),
+      y: Math.max(padding, Math.min(MAP_HEIGHT - padding, c.y)),
+    }))
+    .filter(c => !pointHitsObstacle(c, obstacles, padding));
+
+  if (validCorners.length === 0) {
+    // All corners blocked — try midpoints along obstacle edges instead
+    const edgeMids: Vec2[] = [
+      { x: obs.x + obs.w / 2, y: obs.y - cp },
+      { x: obs.x + obs.w / 2, y: obs.y + obs.h + cp },
+      { x: obs.x - cp, y: obs.y + obs.h / 2 },
+      { x: obs.x + obs.w + cp, y: obs.y + obs.h / 2 },
+    ];
+    const fallback = edgeMids
+      .map(c => ({
+        x: Math.max(padding, Math.min(MAP_WIDTH - padding, c.x)),
+        y: Math.max(padding, Math.min(MAP_HEIGHT - padding, c.y)),
+      }))
+      .filter(c => !pointHitsObstacle(c, obstacles, padding));
+    if (fallback.length === 0) return [];
+    validCorners.push(...fallback);
+  }
+
   // Pick corner that minimizes total detour distance
-  let bestCorner = corners[0];
+  let bestCorner = validCorners[0];
   let bestDist = Infinity;
-  for (const c of corners) {
+  for (const c of validCorners) {
     const dist = Math.hypot(c.x - a.x, c.y - a.y) + Math.hypot(b.x - c.x, b.y - c.y);
     if (dist < bestDist) {
       bestDist = dist;
       bestCorner = c;
     }
   }
-
-  // Clamp to map bounds
-  bestCorner = {
-    x: Math.max(padding, Math.min(MAP_WIDTH - padding, bestCorner.x)),
-    y: Math.max(padding, Math.min(MAP_HEIGHT - padding, bestCorner.y)),
-  };
 
   const before = detourWaypoints(a, bestCorner, obstacles, padding, depth + 1);
   const after = detourWaypoints(bestCorner, b, obstacles, padding, depth + 1);
