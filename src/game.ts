@@ -253,7 +253,14 @@ export class GameEngine {
       fx?.addImpactBurst(hit.pos, hit.team);
       const unitGfx = this.renderer.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
-      if (hit.killed) fx?.addKillText(hit.pos, hit.team);
+
+      const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
+      fx?.addBloodSpray(hit.pos, hit.angle, victimTeam);
+
+      if (hit.killed) {
+        fx?.addKillText(hit.pos, hit.team);
+        fx?.addBloodBurst(hit.pos, victimTeam);
+      }
     }
 
     this.renderer.renderProjectiles(this.projectiles);
