@@ -68,9 +68,11 @@ function onPhaseChange(phase: TurnPhase): void {
     planningLabel.textContent = `${team} Planning`;
     planningLabel.style.color = color;
     planningOverlay.classList.add('active');
+    confirmBtn.classList.add('active');
     roundTimerEl.textContent = '';
   } else {
     planningOverlay.classList.remove('active');
+    confirmBtn.classList.remove('active');
   }
 
   // Cover screen
@@ -282,6 +284,7 @@ newBattleBtn.addEventListener('click', () => {
   engine?.stop();
   engine = null;
   planningOverlay.classList.remove('active');
+  confirmBtn.classList.remove('active');
   coverScreen.classList.remove('active');
   roundTimerEl.textContent = '';
 
