@@ -219,7 +219,7 @@ export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): vo
   if (unit.gunAngle < -Math.PI) unit.gunAngle += 2 * Math.PI;
 }
 
-/** Pop the next waypoint into moveTarget when the current one is reached. */
+/** Pop the next waypoint into moveTarget when the current one is reached or stuck. */
 export function advanceWaypoint(unit: Unit): void {
   if (!unit.alive) return;
 
@@ -227,7 +227,13 @@ export function advanceWaypoint(unit: Unit): void {
     (Math.abs(unit.pos.x - unit.moveTarget.x) < 2 &&
      Math.abs(unit.pos.y - unit.moveTarget.y) < 2);
 
-  if (atTarget) {
+  // Skip waypoint if unit is stuck (not moving but has a target)
+  const speed = unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y;
+  const stuck = unit.moveTarget && speed < 1 &&
+    (Math.abs(unit.pos.x - unit.moveTarget.x) > 4 ||
+     Math.abs(unit.pos.y - unit.moveTarget.y) > 4);
+
+  if (atTarget || stuck) {
     unit.moveTarget = unit.waypoints.length > 0
       ? unit.waypoints.shift()!
       : null;
@@ -252,7 +258,35 @@ function rectContainsCircle(obs: Obstacle, pos: Vec2, radius: number): boolean {
   return dx * dx + dy * dy < radius * radius;
 }
 
-export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
+/** Push a position out of any overlapping obstacles. */
+function pushOutOfObstacles(pos: Vec2, radius: number, obstacles: Obstacle[]): void {
+  for (const obs of obstacles) {
+    const closestX = clamp(pos.x, obs.x, obs.x + obs.w);
+    const closestY = clamp(pos.y, obs.y, obs.y + obs.h);
+    const dx = pos.x - closestX;
+    const dy = pos.y - closestY;
+    const dist2 = dx * dx + dy * dy;
+    if (dist2 < radius * radius && dist2 > 0.001) {
+      const dist = Math.sqrt(dist2);
+      const push = radius - dist + 0.5;
+      pos.x += (dx / dist) * push;
+      pos.y += (dy / dist) * push;
+    } else if (dist2 <= 0.001) {
+      // Center is exactly inside obstacle — push to nearest edge
+      const toLeft = pos.x - obs.x;
+      const toRight = obs.x + obs.w - pos.x;
+      const toTop = pos.y - obs.y;
+      const toBottom = obs.y + obs.h - pos.y;
+      const minDist = Math.min(toLeft, toRight, toTop, toBottom);
+      if (minDist === toLeft) pos.x = obs.x - radius - 0.5;
+      else if (minDist === toRight) pos.x = obs.x + obs.w + radius + 0.5;
+      else if (minDist === toTop) pos.y = obs.y - radius - 0.5;
+      else pos.y = obs.y + obs.h + radius + 0.5;
+    }
+  }
+}
+
+export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits: Unit[] = []): void {
   if (!unit.moveTarget || !unit.alive) {
     unit.vel = { x: 0, y: 0 };
     return;
@@ -270,8 +304,47 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
   }
 
   const step = unit.speed * dt;
-  const moveX = (dx / dist) * Math.min(step, dist);
-  const moveY = (dy / dist) * Math.min(step, dist);
+  let dirX = dx / dist;
+  let dirY = dy / dist;
+
+  // Steer around nearby units in our path
+  const lookAhead = unit.radius * 3;
+  let steerX = 0;
+  let steerY = 0;
+  for (const other of allUnits) {
+    if (other === unit || !other.alive) continue;
+    const ox = other.pos.x - unit.pos.x;
+    const oy = other.pos.y - unit.pos.y;
+    const oDist = Math.sqrt(ox * ox + oy * oy);
+    const minSep = unit.radius + other.radius + 2;
+    if (oDist >= lookAhead + other.radius || oDist < 0.01) continue;
+
+    // Is the other unit ahead of us? (dot product with direction)
+    const dot = ox * dirX + oy * dirY;
+    if (dot < 0) continue; // behind us
+
+    // Perpendicular distance to our movement line
+    const perpDist = Math.abs(-dirY * ox + dirX * oy);
+    if (perpDist < minSep) {
+      // Steer perpendicular — away from the blocking unit
+      const side = -dirY * ox + dirX * oy; // signed perpendicular
+      const steerDir = side >= 0 ? 1 : -1;
+      const strength = (minSep - perpDist) / minSep;
+      steerX += -dirY * steerDir * strength;
+      steerY += dirX * steerDir * strength;
+    }
+  }
+
+  // Blend steering into direction
+  if (steerX !== 0 || steerY !== 0) {
+    dirX += steerX * 0.6;
+    dirY += steerY * 0.6;
+    const len = Math.sqrt(dirX * dirX + dirY * dirY);
+    if (len > 0.01) { dirX /= len; dirY /= len; }
+  }
+
+  const moveX = dirX * Math.min(step, dist);
+  const moveY = dirY * Math.min(step, dist);
 
   const oldX = unit.pos.x;
   const oldY = unit.pos.y;
@@ -279,7 +352,7 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
   let newX = oldX + moveX;
   let newY = oldY + moveY;
 
-  // Obstacle avoidance
+  // Obstacle avoidance with sliding
   const blocked = obstacles.some(o => rectContainsCircle(o, { x: newX, y: newY }, unit.radius));
   if (blocked) {
     const hBlocked = obstacles.some(o => rectContainsCircle(o, { x: newX, y: oldY }, unit.radius));
@@ -289,6 +362,8 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
     } else if (!vBlocked) {
       newX = oldX;
     } else {
+      // Both axes blocked — push out of obstacle instead of freezing
+      pushOutOfObstacles(unit.pos, unit.radius, obstacles);
       unit.vel = { x: 0, y: 0 };
       return;
     }
@@ -308,37 +383,48 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[]): void {
 }
 
 /** Push overlapping units apart so they don't stack on the same spot. */
-export function separateUnits(units: Unit[]): void {
+export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
   const alive = units.filter(u => u.alive);
-  for (let i = 0; i < alive.length; i++) {
-    for (let j = i + 1; j < alive.length; j++) {
-      const a = alive[i];
-      const b = alive[j];
-      const dx = b.pos.x - a.pos.x;
-      const dy = b.pos.y - a.pos.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const minDist = a.radius + b.radius;
+  const ITERATIONS = 3;
 
-      if (dist < minDist && dist > 0.01) {
-        const overlap = (minDist - dist) / 2;
-        const nx = dx / dist;
-        const ny = dy / dist;
-        a.pos.x -= nx * overlap;
-        a.pos.y -= ny * overlap;
-        b.pos.x += nx * overlap;
-        b.pos.y += ny * overlap;
+  for (let iter = 0; iter < ITERATIONS; iter++) {
+    for (let i = 0; i < alive.length; i++) {
+      for (let j = i + 1; j < alive.length; j++) {
+        const a = alive[i];
+        const b = alive[j];
+        const dx = b.pos.x - a.pos.x;
+        const dy = b.pos.y - a.pos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const minDist = a.radius + b.radius + 1; // +1 small buffer to prevent touching
 
-        // Keep within bounds
-        a.pos.x = clamp(a.pos.x, a.radius, MAP_WIDTH - a.radius);
-        a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
-        b.pos.x = clamp(b.pos.x, b.radius, MAP_WIDTH - b.radius);
-        b.pos.y = clamp(b.pos.y, b.radius, MAP_HEIGHT - b.radius);
-      } else if (dist <= 0.01) {
-        // Exactly overlapping — nudge apart with small random offset
-        a.pos.x -= 1;
-        b.pos.x += 1;
+        if (dist < minDist && dist > 0.01) {
+          const overlap = (minDist - dist) / 2;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          a.pos.x -= nx * overlap;
+          a.pos.y -= ny * overlap;
+          b.pos.x += nx * overlap;
+          b.pos.y += ny * overlap;
+
+          // Keep within bounds
+          a.pos.x = clamp(a.pos.x, a.radius, MAP_WIDTH - a.radius);
+          a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
+          b.pos.x = clamp(b.pos.x, b.radius, MAP_WIDTH - b.radius);
+          b.pos.y = clamp(b.pos.y, b.radius, MAP_HEIGHT - b.radius);
+        } else if (dist <= 0.01) {
+          // Exactly overlapping — nudge apart with small random offset
+          a.pos.x -= 1;
+          b.pos.x += 1;
+        }
       }
     }
+  }
+
+  // Push units out of obstacles after separation
+  for (const unit of alive) {
+    pushOutOfObstacles(unit.pos, unit.radius, obstacles);
+    unit.pos.x = clamp(unit.pos.x, unit.radius, MAP_WIDTH - unit.radius);
+    unit.pos.y = clamp(unit.pos.y, unit.radius, MAP_HEIGHT - unit.radius);
   }
 }
 

@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
-import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
+import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
 import { generateObstacles, generateElevationZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
@@ -151,7 +151,7 @@ export class GameEngine {
       }
 
       // Post-process: insert detour waypoints around obstacles
-      const margin = 4;
+      const margin = 8;
       const padding = unit.radius + margin;
       const refined: { x: number; y: number }[] = [{ ...unit.pos }];
 
@@ -185,16 +185,19 @@ export class GameEngine {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       advanceWaypoint(unit);
-      moveUnit(unit, dt, this.obstacles);
+      moveUnit(unit, dt, this.obstacles, this.units);
     }
-    separateUnits(this.units);
+    separateUnits(this.units, this.obstacles);
 
     // Combat — auto-target nearest enemy, fire projectiles
     for (const unit of this.units) {
       if (!unit.alive) continue;
 
       const target = findTarget(unit, this.units, null, this.obstacles);
-      if (target && isInRange(unit, target, this.elevationZones)) {
+      const canShoot = target
+        && isInRange(unit, target, this.elevationZones)
+        && hasLineOfSight(unit.pos, target.pos, this.obstacles);
+      if (canShoot) {
         const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
         updateGunAngle(unit, desired, dt);
         const projectile = tryFireProjectile(unit, target, dt, this.elevationZones);

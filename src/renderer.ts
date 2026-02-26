@@ -131,8 +131,8 @@ export class Renderer {
 
       // Rotate gun barrel
       (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
-      // Rotate oval body with the gun for scout/soldier (person turning)
-      if (unit.type === 'scout' || unit.type === 'soldier') {
+      // Rotate body with the gun for person-shaped units
+      if (unit.type === 'scout' || unit.type === 'soldier' || unit.type === 'sniper') {
         (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
       }
 

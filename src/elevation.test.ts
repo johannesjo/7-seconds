@@ -43,8 +43,8 @@ describe('isOnElevation (backward compat)', () => {
 describe('isInRange with elevation', () => {
   it('uses base range without elevation', () => {
     const attacker = createUnit('a1', 'soldier', 'blue', { x: 0, y: 0 });
-    // soldier: range=100, radius=10. Distance must exceed range + both radii = 120
-    const target = createUnit('t1', 'soldier', 'red', { x: 121, y: 0 });
+    // soldier: range=120, radius=10. Distance must exceed range + both radii = 140
+    const target = createUnit('t1', 'soldier', 'red', { x: 141, y: 0 });
     expect(isInRange(attacker, target)).toBe(false);
     expect(isInRange(attacker, target, [])).toBe(false);
   });
