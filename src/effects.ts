@@ -290,11 +290,12 @@ export class EffectsManager {
     this.effects.push(new RoundStartFlash(this.container, width, height));
   }
 
-  addBloodSpray(pos: Vec2, angle: number, team: Team): void {
-    const count = 6 + Math.floor(Math.random() * 3);
+  addBloodSpray(pos: Vec2, angle: number, team: Team, damage: number): void {
+    const count = Math.min(Math.floor(damage * 0.5) + 2, 15) + Math.floor(Math.random() * 3);
+    const dmgScale = Math.min(damage / 10, 3);
     for (let i = 0; i < count; i++) {
-      const speed = 80 + Math.random() * 120;
-      const size = 1.5 + Math.random() * 1.5;
+      const speed = 80 + Math.random() * 120 * dmgScale;
+      const size = (1.5 + Math.random() * 1.5) * Math.min(dmgScale, 1.5);
       const duration = 0.25 + Math.random() * 0.2;
       this.effects.push(new BloodParticle(
         this.container, this.groundStains, pos, angle,
@@ -303,30 +304,33 @@ export class EffectsManager {
     }
   }
 
-  addBloodBurst(pos: Vec2, team: Team): void {
-    const count = 15 + Math.floor(Math.random() * 6);
+  addBloodBurst(pos: Vec2, angle: number, team: Team, damage: number): void {
+    const count = Math.min(Math.floor(damage * 1.2) + 8, 35) + Math.floor(Math.random() * 6);
+    const dmgScale = Math.min(damage / 10, 3);
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 60 + Math.random() * 160;
-      const size = 2 + Math.random() * 2;
+      const a = angle + (Math.random() - 0.5) * Math.PI * 1.2;
+      const speed = 60 + Math.random() * 160 * dmgScale;
+      const size = (2 + Math.random() * 2) * Math.min(dmgScale, 1.5);
       const duration = 0.3 + Math.random() * 0.3;
       this.effects.push(new BloodParticle(
-        this.container, this.groundStains, pos, angle,
+        this.container, this.groundStains, pos, a,
         0, speed, team, size, duration,
       ));
     }
 
-    // Immediate blood pool at death site
+    // Immediate blood pool at death site — scales with damage
     const stainColor = team === 'blue' ? 0x1a3366 : 0x661a1a;
-    const poolSize = 5 + Math.random() * 4;
+    const poolSize = (5 + Math.random() * 4) * Math.min(dmgScale, 2);
     this.groundStains.circle(pos.x, pos.y, poolSize);
     this.groundStains.fill({ color: stainColor, alpha: 0.5 + Math.random() * 0.2 });
 
     // Smaller satellite stains around the pool
-    for (let i = 0; i < 3; i++) {
-      const ox = (Math.random() - 0.5) * 12;
-      const oy = (Math.random() - 0.5) * 12;
-      const s = 2 + Math.random() * 2;
+    const satellites = Math.min(3 + Math.floor(damage * 0.2), 8);
+    for (let i = 0; i < satellites; i++) {
+      const spread = 12 * dmgScale;
+      const ox = (Math.random() - 0.5) * spread;
+      const oy = (Math.random() - 0.5) * spread;
+      const s = (2 + Math.random() * 2) * Math.min(dmgScale, 1.5);
       this.groundStains.circle(pos.x + ox, pos.y + oy, s);
       this.groundStains.fill({ color: stainColor, alpha: 0.3 + Math.random() * 0.2 });
     }

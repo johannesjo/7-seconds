@@ -31,6 +31,10 @@ export class GameEngine {
   private redHoldsZone = false;
   private zoneControlEnabled = false;
   private oneShotEnabled = false;
+  private endingBattle = false;
+  private endDelayTimer = 0;
+  private pendingWinner: Team | null = null;
+  private pendingWinCondition: 'elimination' | 'zone-control' | null = null;
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef; zoneControl?: boolean; oneShot?: boolean }) {
     this.renderer = renderer;
@@ -201,6 +205,17 @@ export class GameEngine {
     this.pathDrawer?.updateHover();
 
     if (this._phase !== 'playing') return;
+
+    // During end delay, only animate effects and dying units (no combat/movement)
+    if (this.endingBattle) {
+      this.endDelayTimer -= dt;
+      this.renderer.effects?.update(dt);
+      if (this.endDelayTimer <= 0) {
+        this.endBattle(this.pendingWinner!, this.pendingWinCondition!);
+      }
+      return;
+    }
+
     this.elapsedTime += dt;
     this.roundTimer -= dt;
 
@@ -250,16 +265,15 @@ export class GameEngine {
     // Trigger effects for hits
     const fx = this.renderer.effects;
     for (const hit of hits) {
-      fx?.addImpactBurst(hit.pos, hit.team);
       const unitGfx = this.renderer.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
 
       const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
-      fx?.addBloodSpray(hit.pos, hit.angle, victimTeam);
+      fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, hit.damage);
 
       if (hit.killed) {
         fx?.addKillText(hit.pos, hit.team);
-        fx?.addBloodBurst(hit.pos, victimTeam);
+        fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, hit.damage);
       }
     }
 
@@ -292,7 +306,10 @@ export class GameEngine {
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
 
     if (blueAlive === 0 || redAlive === 0) {
-      this.endBattle(blueAlive === 0 ? 'red' : 'blue', 'elimination');
+      this.endingBattle = true;
+      this.endDelayTimer = 0.6;
+      this.pendingWinner = blueAlive === 0 ? 'red' : 'blue';
+      this.pendingWinCondition = 'elimination';
       return;
     }
 
