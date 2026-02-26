@@ -286,23 +286,6 @@ function pushOutOfObstacles(pos: Vec2, radius: number, obstacles: Obstacle[]): v
   }
 }
 
-/** Adjust waypoints so they don't overlap obstacles or sit too close to map borders. */
-export function adjustPath(waypoints: Vec2[], radius: number, obstacles: Obstacle[]): Vec2[] {
-  const margin = radius + 4;
-  return waypoints.map(wp => {
-    const p = { x: wp.x, y: wp.y };
-    // Clamp to map borders with clearance
-    p.x = clamp(p.x, margin, MAP_WIDTH - margin);
-    p.y = clamp(p.y, margin, MAP_HEIGHT - margin);
-    // Push out of obstacles (run twice to handle adjacent obstacles)
-    pushOutOfObstacles(p, margin, obstacles);
-    pushOutOfObstacles(p, margin, obstacles);
-    p.x = clamp(p.x, margin, MAP_WIDTH - margin);
-    p.y = clamp(p.y, margin, MAP_HEIGHT - margin);
-    return p;
-  });
-}
-
 export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits: Unit[] = []): void {
   if (!unit.moveTarget || !unit.alive) {
     unit.vel = { x: 0, y: 0 };

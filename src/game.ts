@@ -105,7 +105,7 @@ export class GameEngine {
 
     if (phase === 'blue-planning') {
       this.pathDrawer?.clearPaths('blue');
-      this.pathDrawer?.enable('blue', this.units, this.elevationZones, this.obstacles);
+      this.pathDrawer?.enable('blue', this.units, this.elevationZones);
     } else if (phase === 'cover') {
       this.pathDrawer?.disable();
       if (this.aiMode) {
@@ -119,7 +119,7 @@ export class GameEngine {
       }
     } else if (phase === 'red-planning') {
       this.pathDrawer?.clearPaths('red');
-      this.pathDrawer?.enable('red', this.units, this.elevationZones, this.obstacles);
+      this.pathDrawer?.enable('red', this.units, this.elevationZones);
     } else if (phase === 'playing') {
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
