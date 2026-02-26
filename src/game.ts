@@ -25,6 +25,7 @@ export class GameEngine {
   private _phase: TurnPhase = 'blue-planning';
   private roundNumber = 1;
   private aiMode = false;
+  private idleTime = 0;
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, aiMode = false) {
     this.renderer = renderer;
@@ -107,6 +108,7 @@ export class GameEngine {
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
       this.roundTimer = ROUND_DURATION_S;
+      this.idleTime = 0;
       this.renderer.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
     }
 
@@ -212,13 +214,18 @@ export class GameEngine {
     // Check if action is complete — no movement, no combat, no projectiles
     const idle = this.projectiles.length === 0 && this.units.every(u => {
       if (!u.alive) return true;
-      if (u.moveTarget || u.waypoints.length > 0) return false;
+      // Use actual velocity — moveTarget can be stuck on obstacles
+      const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
+      if (speed > 1 || u.waypoints.length > 0) return false;
       const target = findTarget(u, this.units, null);
       return !target || !isInRange(u, target, this.elevationZones);
     });
 
+    // Require sustained idle for 0.5s to avoid transient false positives
+    this.idleTime = idle ? this.idleTime + dt : 0;
+
     // Round over → back to planning
-    if (this.roundTimer <= 0 || idle) {
+    if (this.roundTimer <= 0 || this.idleTime >= 0.5) {
       this.projectiles = [];
       this.renderer.renderProjectiles([]);
       this.roundNumber++;
