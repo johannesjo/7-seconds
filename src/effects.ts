@@ -180,11 +180,86 @@ class RoundStartFlash implements Effect {
   }
 }
 
+class BloodParticle implements Effect {
+  private gfx: Graphics;
+  private stains: Graphics;
+  private age = 0;
+  private readonly duration: number;
+  private vx: number;
+  private vy: number;
+  private x: number;
+  private y: number;
+  private readonly size: number;
+  private readonly color: number;
+  private readonly stainColor: number;
+  private static readonly FRICTION = 5;
+
+  constructor(
+    container: Container,
+    stains: Graphics,
+    pos: Vec2,
+    angle: number,
+    spread: number,
+    speed: number,
+    team: Team,
+    size: number,
+    duration: number,
+  ) {
+    this.gfx = new Graphics();
+    this.stains = stains;
+    this.x = pos.x;
+    this.y = pos.y;
+    this.size = size;
+    this.duration = duration;
+
+    const a = angle + (Math.random() - 0.5) * spread;
+    this.vx = Math.cos(a) * speed;
+    this.vy = Math.sin(a) * speed;
+
+    const blueColors = [0x3377dd, 0x2255bb, 0x5599ee];
+    const redColors = [0xdd3333, 0xbb2222, 0xee4444];
+    const colors = team === 'blue' ? blueColors : redColors;
+    this.color = colors[Math.floor(Math.random() * colors.length)];
+    this.stainColor = team === 'blue' ? 0x1a3366 : 0x661a1a;
+
+    container.addChild(this.gfx);
+  }
+
+  update(dt: number): boolean {
+    this.age += dt;
+    if (this.age >= this.duration) {
+      const stainSize = this.size * (0.5 + Math.random() * 0.5);
+      this.stains.circle(this.x, this.y, stainSize);
+      this.stains.fill({ color: this.stainColor, alpha: 0.3 + Math.random() * 0.3 });
+      this.gfx.destroy();
+      return false;
+    }
+
+    const t = this.age / this.duration;
+    const decay = Math.exp(-BloodParticle.FRICTION * dt);
+    this.vx *= decay;
+    this.vy *= decay;
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+
+    const currentSize = this.size * (1 - t * 0.5);
+    const alpha = 1 - t * 0.6;
+
+    this.gfx.clear();
+    this.gfx.circle(this.x, this.y, currentSize);
+    this.gfx.fill({ color: this.color, alpha });
+    return true;
+  }
+}
+
 export class EffectsManager {
   private container: Container;
+  private groundStains: Graphics;
   private effects: Effect[] = [];
 
   constructor(stage: Container) {
+    this.groundStains = new Graphics();
+    stage.addChild(this.groundStains);
     this.container = new Container();
     stage.addChild(this.container);
   }
@@ -215,18 +290,62 @@ export class EffectsManager {
     this.effects.push(new RoundStartFlash(this.container, width, height));
   }
 
+  addBloodSpray(pos: Vec2, angle: number, team: Team): void {
+    const count = 6 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i++) {
+      const speed = 80 + Math.random() * 120;
+      const size = 1.5 + Math.random() * 1.5;
+      const duration = 0.25 + Math.random() * 0.2;
+      this.effects.push(new BloodParticle(
+        this.container, this.groundStains, pos, angle,
+        Math.PI * 0.7, speed, team, size, duration,
+      ));
+    }
+  }
+
+  addBloodBurst(pos: Vec2, team: Team): void {
+    const count = 15 + Math.floor(Math.random() * 6);
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 60 + Math.random() * 160;
+      const size = 2 + Math.random() * 2;
+      const duration = 0.3 + Math.random() * 0.3;
+      this.effects.push(new BloodParticle(
+        this.container, this.groundStains, pos, angle,
+        0, speed, team, size, duration,
+      ));
+    }
+
+    // Immediate blood pool at death site
+    const stainColor = team === 'blue' ? 0x1a3366 : 0x661a1a;
+    const poolSize = 5 + Math.random() * 4;
+    this.groundStains.circle(pos.x, pos.y, poolSize);
+    this.groundStains.fill({ color: stainColor, alpha: 0.5 + Math.random() * 0.2 });
+
+    // Smaller satellite stains around the pool
+    for (let i = 0; i < 3; i++) {
+      const ox = (Math.random() - 0.5) * 12;
+      const oy = (Math.random() - 0.5) * 12;
+      const s = 2 + Math.random() * 2;
+      this.groundStains.circle(pos.x + ox, pos.y + oy, s);
+      this.groundStains.fill({ color: stainColor, alpha: 0.3 + Math.random() * 0.2 });
+    }
+  }
+
   update(dt: number): void {
     this.effects = this.effects.filter(e => e.update(dt));
   }
 
   clear(): void {
     this.container.removeChildren();
+    this.groundStains.clear();
     this.effects = [];
   }
 
   destroy(): void {
     this.clear();
     this.container.destroy();
+    this.groundStains.destroy();
   }
 }
 
