@@ -5,6 +5,7 @@ export interface ProjectileHit {
   targetId: string;
   killed: boolean;
   team: Team;
+  angle: number;
 }
 import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS } from './constants';
 
@@ -613,6 +614,7 @@ export function updateProjectiles(
           targetId: unit.id,
           killed: wasBefore > 0 && !unit.alive,
           team: p.team,
+          angle: Math.atan2(p.vel.y, p.vel.x),
         });
         hit = true;
         break;
