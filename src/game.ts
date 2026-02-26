@@ -30,13 +30,15 @@ export class GameEngine {
   private blueHoldsZone = false;
   private redHoldsZone = false;
   private zoneControlEnabled = false;
+  private oneShotEnabled = false;
 
-  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef; zoneControl?: boolean }) {
+  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef; zoneControl?: boolean; oneShot?: boolean }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
     this.aiMode = opts?.aiMode ?? false;
     this.mission = opts?.mission ?? null;
     this.zoneControlEnabled = opts?.zoneControl ?? false;
+    this.oneShotEnabled = opts?.oneShot ?? false;
   }
 
   get phase(): TurnPhase {
@@ -52,6 +54,13 @@ export class GameEngine {
     } else {
       this.units = [...createArmy('blue'), ...createArmy('red')];
     }
+    // One-shot mode: set all damage to 9999
+    if (this.oneShotEnabled) {
+      for (const unit of this.units) {
+        unit.damage = 9999;
+      }
+    }
+
     this.obstacles = generateObstacles();
     this.elevationZones = generateElevationZones();
     this.projectiles = [];

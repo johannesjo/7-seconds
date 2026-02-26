@@ -37,6 +37,7 @@ const missionListEl = document.getElementById('mission-list')!;
 const campaignBackBtn = document.getElementById('campaign-back-btn')!;
 
 const zoneControlCb = document.getElementById('zone-control-cb') as HTMLInputElement;
+const oneShotCb = document.getElementById('one-shot-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
 
 // State
@@ -188,6 +189,7 @@ function startGame(): void {
     aiMode,
     mission: currentMission ?? undefined,
     zoneControl: zoneControlCb.checked,
+    oneShot: oneShotCb.checked,
   });
   showScreen('battle');
   speedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.speed === '1'));

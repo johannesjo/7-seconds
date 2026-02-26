@@ -297,10 +297,16 @@
       <button id="battle-btn">vs Player</button>
     </div>
     <button id="campaign-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:transparent;color:#aaa;border:1px solid #444;border-radius:4px;cursor:pointer">Campaign</button>
-    <label id="zone-toggle" style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;opacity:0.7;cursor:pointer">
-      <input type="checkbox" id="zone-control-cb" style="cursor:pointer" />
-      Zone Control win condition
-    </label>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
+        <input type="checkbox" id="zone-control-cb" style="cursor:pointer" />
+        Zone Control win condition
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
+        <input type="checkbox" id="one-shot-cb" style="cursor:pointer" />
+        One-shot kills
+      </label>
+    </div>
   </div>
 
   <div id="campaign-screen" class="screen">
