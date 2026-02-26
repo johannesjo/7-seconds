@@ -36,6 +36,7 @@ const newBattleBtn = document.getElementById('new-battle-btn')!;
 const missionListEl = document.getElementById('mission-list')!;
 const campaignBackBtn = document.getElementById('campaign-back-btn')!;
 
+const zoneControlCb = document.getElementById('zone-control-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
 
 // State
@@ -109,7 +110,8 @@ function onGameEvent(
   if (event === 'end' && data && 'winner' in data) {
     const result = data as BattleResult;
     const color = result.winner === 'blue' ? '#4a9eff' : '#ff4a4a';
-    winnerTextEl.textContent = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
+    const conditionLabel = result.winCondition === 'zone-control' ? 'Zone Control!' : 'Elimination!';
+    winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">${conditionLabel}</span>`;
     winnerTextEl.style.color = color;
 
     // Calculate army sizes based on mode
@@ -185,6 +187,7 @@ function startGame(): void {
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode,
     mission: currentMission ?? undefined,
+    zoneControl: zoneControlCb.checked,
   });
   showScreen('battle');
   speedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.speed === '1'));

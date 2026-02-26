@@ -1,5 +1,5 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef } from './types';
-import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
 import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
 import { generateObstacles, generateElevationZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
@@ -27,12 +27,16 @@ export class GameEngine {
   private aiMode = false;
   private mission: MissionDef | null = null;
   private idleTime = 0;
+  private blueHoldsZone = false;
+  private redHoldsZone = false;
+  private zoneControlEnabled = false;
 
-  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef }) {
+  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef; zoneControl?: boolean }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
     this.aiMode = opts?.aiMode ?? false;
     this.mission = opts?.mission ?? null;
+    this.zoneControlEnabled = opts?.zoneControl ?? false;
   }
 
   get phase(): TurnPhase {
@@ -56,6 +60,7 @@ export class GameEngine {
     this.running = true;
 
     this.pathDrawer = new PathDrawer(this.renderer.stage, this.renderer.canvas);
+    this.pathDrawer.zoneControl = this.zoneControlEnabled;
 
     // Render initial state — hills under obstacles
     this.renderer.renderElevationZones(this.elevationZones);
@@ -120,6 +125,8 @@ export class GameEngine {
       this.pathDrawer?.clearGraphics();
       this.roundTimer = ROUND_DURATION_S;
       this.idleTime = 0;
+      this.blueHoldsZone = true;
+      this.redHoldsZone = true;
       this.renderer.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
     }
 
@@ -197,10 +204,16 @@ export class GameEngine {
         }
       } else {
         unit.fireTimer = Math.max(0, unit.fireTimer - dt);
-        const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
-        if (speed > 1) {
-          const desired = Math.atan2(unit.vel.y, unit.vel.x);
+        if (target) {
+          // Out of range but enemy exists — face them
+          const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
           updateGunAngle(unit, desired, dt);
+        } else {
+          const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+          if (speed > 1) {
+            const desired = Math.atan2(unit.vel.y, unit.vel.x);
+            updateGunAngle(unit, desired, dt);
+          }
         }
       }
     }
@@ -222,15 +235,31 @@ export class GameEngine {
     // Update effects
     this.renderer.effects?.update(dt);
 
+    // Zone hold tracking
+    if (this.zoneControlEnabled) {
+      const zoneDepth = MAP_HEIGHT * ZONE_DEPTH_RATIO;
+      const blueInRedZone = this.units.some(u => u.alive && u.team === 'blue' && u.pos.y < zoneDepth);
+      const redInRedZone = this.units.some(u => u.alive && u.team === 'red' && u.pos.y < zoneDepth);
+      const redInBlueZone = this.units.some(u => u.alive && u.team === 'red' && u.pos.y > MAP_HEIGHT - zoneDepth);
+      const blueInBlueZone = this.units.some(u => u.alive && u.team === 'blue' && u.pos.y > MAP_HEIGHT - zoneDepth);
+
+      // Blue holds red zone (top) = blue present AND no red present
+      if (!blueInRedZone || redInRedZone) this.blueHoldsZone = false;
+      // Red holds blue zone (bottom) = red present AND no blue present
+      if (!redInBlueZone || blueInBlueZone) this.redHoldsZone = false;
+
+      this.renderer.renderZoneStatus(this.blueHoldsZone, this.redHoldsZone);
+    }
+
     // HUD update with time left
     this.onEvent('update', { phase: 'playing', timeLeft: Math.max(0, this.roundTimer) });
 
-    // Win condition
+    // Win condition — elimination
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
 
     if (blueAlive === 0 || redAlive === 0) {
-      this.endBattle(blueAlive === 0 ? 'red' : 'blue');
+      this.endBattle(blueAlive === 0 ? 'red' : 'blue', 'elimination');
       return;
     }
 
@@ -247,21 +276,35 @@ export class GameEngine {
     // Require sustained idle for 0.5s to avoid transient false positives
     this.idleTime = idle ? this.idleTime + dt : 0;
 
-    // Round over → back to planning
+    // Round over → check zone control win, then back to planning
     if (this.roundTimer <= 0 || this.idleTime >= 0.5) {
+      // Zone control win — team held enemy zone for the entire round
+      if (this.zoneControlEnabled) {
+        if (this.blueHoldsZone) {
+          this.endBattle('blue', 'zone-control');
+          return;
+        }
+        if (this.redHoldsZone) {
+          this.endBattle('red', 'zone-control');
+          return;
+        }
+      }
+
       this.projectiles = [];
       this.renderer.renderProjectiles([]);
+      this.renderer.renderZoneStatus(false, false);
       this.roundNumber++;
       this.setPhase('blue-planning');
     }
   };
 
-  private endBattle(winner: Team): void {
+  private endBattle(winner: Team, winCondition: 'elimination' | 'zone-control' = 'elimination'): void {
     this.running = false;
     this.renderer.ticker.remove(this.tick, this);
     this.pathDrawer?.disable();
     this.pathDrawer?.clearGraphics();
     this.renderer.effects?.clear();
+    this.renderer.renderZoneStatus(false, false);
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
@@ -279,6 +322,7 @@ export class GameEngine {
       blueKilled: redTotal - redAlive,
       redKilled: blueTotal - blueAlive,
       duration: this.elapsedTime,
+      winCondition,
     });
   }
 

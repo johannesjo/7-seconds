@@ -1,6 +1,6 @@
 import { Application, Graphics, Container } from 'pixi.js';
 import { Unit, Obstacle, Projectile, ElevationZone } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, setMapSize } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, setMapSize, ZONE_DEPTH_RATIO } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 
 export class Renderer {
@@ -12,6 +12,7 @@ export class Renderer {
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
+  private zoneStatusGfx: Graphics | null = null;
 
   constructor() {
     this.app = new Application();
@@ -267,6 +268,38 @@ export class Renderer {
     }
 
     this.app.stage.addChild(this.projectileGraphics);
+  }
+
+  renderZoneStatus(blueHolds: boolean, redHolds: boolean): void {
+    if (!this.zoneStatusGfx) {
+      this.zoneStatusGfx = new Graphics();
+      this.app.stage.addChild(this.zoneStatusGfx);
+    }
+    this.zoneStatusGfx.clear();
+
+    if (!blueHolds && !redHolds) return;
+
+    const zoneHeight = MAP_HEIGHT * ZONE_DEPTH_RATIO;
+    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 400);
+
+    if (blueHolds) {
+      // Blue is holding the red zone (top) — brighten it
+      this.zoneStatusGfx.rect(0, 0, MAP_WIDTH, zoneHeight);
+      this.zoneStatusGfx.fill({ color: 0x4a9eff, alpha: 0.08 + 0.07 * pulse });
+      this.zoneStatusGfx.rect(0, 0, MAP_WIDTH, zoneHeight);
+      this.zoneStatusGfx.setStrokeStyle({ width: 2, color: 0x4a9eff, alpha: 0.4 + 0.3 * pulse });
+      this.zoneStatusGfx.stroke();
+    }
+
+    if (redHolds) {
+      // Red is holding the blue zone (bottom) — brighten it
+      const y = MAP_HEIGHT - zoneHeight;
+      this.zoneStatusGfx.rect(0, y, MAP_WIDTH, zoneHeight);
+      this.zoneStatusGfx.fill({ color: 0xff4a4a, alpha: 0.08 + 0.07 * pulse });
+      this.zoneStatusGfx.rect(0, y, MAP_WIDTH, zoneHeight);
+      this.zoneStatusGfx.setStrokeStyle({ width: 2, color: 0xff4a4a, alpha: 0.4 + 0.3 * pulse });
+      this.zoneStatusGfx.stroke();
+    }
   }
 
   getUnitContainer(id: string): Container | undefined {
