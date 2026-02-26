@@ -1,5 +1,5 @@
 import { Application, Graphics, Container } from 'pixi.js';
-import { Unit, Obstacle, Projectile } from './types';
+import { Unit, Obstacle, Projectile, ElevationZone } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, setMapSize } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 
@@ -7,6 +7,7 @@ export class Renderer {
   private app: Application;
   private unitGraphics: Map<string, Container> = new Map();
   private dyingUnits: Map<string, { container: Container; age: number }> = new Map();
+  private elevationGraphics: Graphics | null = null;
   private obstacleGraphics: Graphics | null = null;
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
@@ -64,6 +65,19 @@ export class Renderer {
     this.app.stage.addChild(zones);
   }
 
+  renderElevationZones(zones: ElevationZone[]): void {
+    if (this.elevationGraphics) {
+      this.app.stage.removeChild(this.elevationGraphics);
+    }
+    this.elevationGraphics = new Graphics();
+    for (const z of zones) {
+      this.elevationGraphics.roundRect(z.x, z.y, z.w, z.h, 6);
+      this.elevationGraphics.fill({ color: 0x2a2a3e, alpha: 0.6 });
+    }
+    // Index 2: right after bg grid (0) and spawn zones (1)
+    this.app.stage.addChildAt(this.elevationGraphics, 2);
+  }
+
   renderObstacles(obstacles: Obstacle[]): void {
     if (this.obstacleGraphics) {
       this.app.stage.removeChild(this.obstacleGraphics);
@@ -79,7 +93,8 @@ export class Renderer {
       this.obstacleGraphics.setStrokeStyle({ width: 1, color: 0x666688, alpha: 0.3 });
       this.obstacleGraphics.stroke();
     }
-    this.app.stage.addChild(this.obstacleGraphics);
+    // Index 3: right after elevation (2)
+    this.app.stage.addChildAt(this.obstacleGraphics, 3);
   }
 
   renderUnits(units: Unit[], dt = 0): void {

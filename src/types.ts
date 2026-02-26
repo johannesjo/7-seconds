@@ -61,6 +61,13 @@ export interface Obstacle {
   h: number;
 }
 
+export interface ElevationZone {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface AiUnitOrder {
   id: string;
   move_to: [number, number];

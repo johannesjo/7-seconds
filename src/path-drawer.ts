@@ -1,6 +1,7 @@
 import { Graphics, Container, Rectangle } from 'pixi.js';
-import { Unit, Team, Vec2 } from './types';
-import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { Unit, Team, Vec2, ElevationZone } from './types';
+import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS } from './constants';
+import { isOnElevation } from './units';
 
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
 export function samplePath(raw: Vec2[], minDist: number): Vec2[] {
@@ -26,6 +27,7 @@ function distancePt(a: Vec2, b: Vec2): number {
 export class PathDrawer {
   private stage: Container;
   private units: Unit[] = [];
+  private elevationZones: ElevationZone[] = [];
   private team: Team | null = null;
   private gfx: Graphics;
   private hoverGfx: Graphics;
@@ -59,9 +61,10 @@ export class PathDrawer {
     this.stage.on('rightdown', this.onRightDown);
   }
 
-  enable(team: Team, units: Unit[]): void {
+  enable(team: Team, units: Unit[], elevationZones: ElevationZone[] = []): void {
     this.team = team;
     this.units = units;
+    this.elevationZones = elevationZones;
     this.enabled = true;
     this.selectedUnit = null;
     this.hoveredUnit = null;
@@ -156,8 +159,11 @@ export class PathDrawer {
       this.hoverGfx.circle(this.selectedUnit.pos.x, this.selectedUnit.pos.y, this.selectedUnit.radius + 5);
       this.hoverGfx.setStrokeStyle({ width: 2.5, color: teamColor, alpha: 1.0 });
       this.hoverGfx.stroke();
-      // Range circle for selected unit
-      this.drawRangeCircle(this.selectedUnit, teamColor);
+      // Range circle at path endpoint (live update while drawing)
+      const endPos = this.rawPoints.length > 0
+        ? this.rawPoints[this.rawPoints.length - 1]
+        : this.selectedUnit.pos;
+      this.drawRangeCircle(this.selectedUnit, endPos, teamColor);
       return; // Don't show hover when drawing
     }
 
@@ -166,8 +172,11 @@ export class PathDrawer {
       this.hoverGfx.circle(this.hoveredUnit.pos.x, this.hoveredUnit.pos.y, this.hoveredUnit.radius + 4);
       this.hoverGfx.setStrokeStyle({ width: 2, color: teamColor, alpha: 0.6 });
       this.hoverGfx.stroke();
-      // Range circle for hovered unit
-      this.drawRangeCircle(this.hoveredUnit, teamColor);
+      // Range circle at path endpoint (or current pos if no path)
+      const hoverPos = this.hoveredUnit.waypoints.length > 0
+        ? this.hoveredUnit.waypoints[this.hoveredUnit.waypoints.length - 1]
+        : this.hoveredUnit.pos;
+      this.drawRangeCircle(this.hoveredUnit, hoverPos, teamColor);
     }
   }
 
@@ -176,12 +185,29 @@ export class PathDrawer {
     if (this.enabled) this.renderHoverLayer();
   }
 
-  private drawRangeCircle(unit: Unit, color: number): void {
-    this.hoverGfx.circle(unit.pos.x, unit.pos.y, unit.range + unit.radius);
-    this.hoverGfx.setStrokeStyle({ width: 1, color, alpha: 0.2 });
+  private drawRangeCircle(unit: Unit, pos: Vec2, color: number): void {
+    const elevated = isOnElevation(pos, this.elevationZones);
+    const range = elevated
+      ? unit.range * (1 + ELEVATION_RANGE_BONUS)
+      : unit.range;
+    const ringColor = elevated ? 0x66ff88 : color;
+
+    // Highlight the elevation zone the position sits on
+    if (elevated) {
+      for (const z of this.elevationZones) {
+        if (pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h) {
+          this.hoverGfx.roundRect(z.x, z.y, z.w, z.h, 6);
+          this.hoverGfx.setStrokeStyle({ width: 1.5, color: 0x66ff88, alpha: 0.4 });
+          this.hoverGfx.stroke();
+        }
+      }
+    }
+
+    this.hoverGfx.circle(pos.x, pos.y, range + unit.radius);
+    this.hoverGfx.setStrokeStyle({ width: 1, color: ringColor, alpha: 0.2 });
     this.hoverGfx.stroke();
-    this.hoverGfx.circle(unit.pos.x, unit.pos.y, unit.range + unit.radius);
-    this.hoverGfx.fill({ color, alpha: 0.03 });
+    this.hoverGfx.circle(pos.x, pos.y, range + unit.radius);
+    this.hoverGfx.fill({ color: ringColor, alpha: 0.03 });
   }
 
   clearGraphics(): void {

@@ -1,7 +1,7 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createArmy, moveUnit, separateUnits, findTarget, isInRange, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle } from './units';
-import { generateObstacles } from './battlefield';
+import { generateObstacles, generateElevationZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
 
@@ -13,6 +13,7 @@ export type GameEventCallback = (
 export class GameEngine {
   private units: Unit[] = [];
   private obstacles: Obstacle[] = [];
+  private elevationZones: ElevationZone[] = [];
   private projectiles: Projectile[] = [];
   private renderer: Renderer;
   private running = false;
@@ -38,6 +39,7 @@ export class GameEngine {
   startBattle(): void {
     this.units = [...createArmy('blue'), ...createArmy('red')];
     this.obstacles = generateObstacles();
+    this.elevationZones = generateElevationZones();
     this.projectiles = [];
     this.elapsedTime = 0;
     this.roundTimer = 0;
@@ -45,7 +47,8 @@ export class GameEngine {
 
     this.pathDrawer = new PathDrawer(this.renderer.stage, this.renderer.canvas);
 
-    // Render initial state
+    // Render initial state — hills under obstacles
+    this.renderer.renderElevationZones(this.elevationZones);
     this.renderer.renderObstacles(this.obstacles);
     this.renderer.renderUnits(this.units);
 
@@ -87,7 +90,7 @@ export class GameEngine {
 
     if (phase === 'blue-planning') {
       this.pathDrawer?.clearPaths('blue');
-      this.pathDrawer?.enable('blue', this.units);
+      this.pathDrawer?.enable('blue', this.units, this.elevationZones);
     } else if (phase === 'cover') {
       this.pathDrawer?.disable();
       if (this.aiMode) {
@@ -99,7 +102,7 @@ export class GameEngine {
       }
     } else if (phase === 'red-planning') {
       this.pathDrawer?.clearPaths('red');
-      this.pathDrawer?.enable('red', this.units);
+      this.pathDrawer?.enable('red', this.units, this.elevationZones);
     } else if (phase === 'playing') {
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
@@ -159,10 +162,10 @@ export class GameEngine {
       if (!unit.alive) continue;
 
       const target = findTarget(unit, this.units, null);
-      if (target && isInRange(unit, target)) {
+      if (target && isInRange(unit, target, this.elevationZones)) {
         const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
         updateGunAngle(unit, desired, dt);
-        const projectile = tryFireProjectile(unit, target, dt);
+        const projectile = tryFireProjectile(unit, target, dt, this.elevationZones);
         if (projectile) {
           this.projectiles.push(projectile);
           this.renderer.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
@@ -211,7 +214,7 @@ export class GameEngine {
       if (!u.alive) return true;
       if (u.moveTarget || u.waypoints.length > 0) return false;
       const target = findTarget(u, this.units, null);
-      return !target || !isInRange(u, target);
+      return !target || !isInRange(u, target, this.elevationZones);
     });
 
     // Round over → back to planning

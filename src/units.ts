@@ -1,4 +1,4 @@
-import { Unit, UnitType, Team, Vec2, Obstacle, Projectile } from './types';
+import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone } from './types';
 
 export interface ProjectileHit {
   pos: Vec2;
@@ -6,7 +6,7 @@ export interface ProjectileHit {
   killed: boolean;
   team: Team;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS } from './constants';
 
 export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): Unit {
   const stats = UNIT_STATS[type];
@@ -218,8 +218,15 @@ export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string
   return nearest;
 }
 
-export function isInRange(attacker: Unit, target: Unit): boolean {
-  return distance(attacker.pos, target.pos) <= attacker.range + attacker.radius + target.radius;
+export function isOnElevation(pos: Vec2, zones: ElevationZone[]): boolean {
+  return zones.some(z => pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h);
+}
+
+export function isInRange(attacker: Unit, target: Unit, elevationZones: ElevationZone[] = []): boolean {
+  const range = isOnElevation(attacker.pos, elevationZones)
+    ? attacker.range * (1 + ELEVATION_RANGE_BONUS)
+    : attacker.range;
+  return distance(attacker.pos, target.pos) <= range + attacker.radius + target.radius;
 }
 
 export function applyDamage(unit: Unit, amount: number): void {
@@ -229,7 +236,7 @@ export function applyDamage(unit: Unit, amount: number): void {
   }
 }
 
-export function tryFireProjectile(unit: Unit, target: Unit, dt: number): Projectile | null {
+export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevationZones: ElevationZone[] = []): Projectile | null {
   unit.fireTimer -= dt;
   if (unit.fireTimer > 0) return null;
 
@@ -260,7 +267,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number): Project
     damage: unit.damage,
     radius: unit.projectileRadius,
     team: unit.team,
-    maxRange: unit.range + unit.radius + 40,
+    maxRange: (isOnElevation(unit.pos, elevationZones) ? unit.range * (1 + ELEVATION_RANGE_BONUS) : unit.range) + unit.radius + 40,
     distanceTraveled: 0,
   };
 }

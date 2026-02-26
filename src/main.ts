@@ -1,7 +1,7 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
 import { createArmy } from './units';
-import { generateObstacles } from './battlefield';
+import { generateObstacles, generateElevationZones } from './battlefield';
 import { BattleResult, TurnPhase } from './types';
 import { ARMY_COMPOSITION } from './constants';
 
@@ -13,6 +13,7 @@ const resultScreen = document.getElementById('result-screen')!;
 const battleBtn = document.getElementById('battle-btn')!;
 const aiBtn = document.getElementById('ai-btn')!;
 
+const battleHud = document.getElementById('battle-hud')!;
 const blueCountEl = document.getElementById('blue-count')!;
 const redCountEl = document.getElementById('red-count')!;
 const roundTimerEl = document.getElementById('round-timer')!;
@@ -43,8 +44,13 @@ function showScreen(screen: 'prompt' | 'battle' | 'result') {
 }
 
 function onPhaseChange(phase: TurnPhase): void {
+  const planning = phase === 'blue-planning' || phase === 'red-planning';
+
+  // Hide HUD during planning so the Done button doesn't overlap
+  battleHud.style.display = planning ? 'none' : '';
+
   // Planning overlay
-  if (phase === 'blue-planning' || phase === 'red-planning') {
+  if (planning) {
     const team = phase === 'blue-planning' ? 'Blue' : 'Red';
     const color = phase === 'blue-planning' ? '#4a9eff' : '#ff4a4a';
     planningLabel.textContent = `${team} Planning`;
@@ -116,6 +122,7 @@ async function initRenderer(): Promise<void> {
 
 function showPreview(): void {
   if (!renderer) return;
+  renderer.renderElevationZones(generateElevationZones());
   renderer.renderObstacles(generateObstacles());
   const preview = [...createArmy('blue'), ...createArmy('red')];
   renderer.renderUnits(preview);

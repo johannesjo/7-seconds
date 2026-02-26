@@ -27,3 +27,4 @@ export const ROUND_DURATION_S = 7;
 export const PATH_SAMPLE_DISTANCE = 18;
 export const UNIT_SELECT_RADIUS = 30;
 export const COVER_SCREEN_DURATION_MS = 1500;
+export const ELEVATION_RANGE_BONUS = 0.2;
