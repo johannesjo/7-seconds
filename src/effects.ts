@@ -127,6 +127,35 @@ class KillText implements Effect {
   }
 }
 
+class MuzzleFlash implements Effect {
+  private gfx: Graphics;
+  private age = 0;
+  private readonly duration = 0.1;
+
+  constructor(container: Container, private pos: Vec2) {
+    this.gfx = new Graphics();
+    container.addChild(this.gfx);
+  }
+
+  update(dt: number): boolean {
+    this.age += dt;
+    if (this.age >= this.duration) {
+      this.gfx.destroy();
+      return false;
+    }
+    const t = this.age / this.duration;
+    const radius = 4 + t * 6;
+    const alpha = 1 - t;
+
+    this.gfx.clear();
+    this.gfx.circle(this.pos.x, this.pos.y, radius);
+    this.gfx.fill({ color: 0xffffaa, alpha });
+    this.gfx.circle(this.pos.x, this.pos.y, radius * 0.5);
+    this.gfx.fill({ color: 0xffffff, alpha });
+    return true;
+  }
+}
+
 class RoundStartFlash implements Effect {
   private gfx: Graphics;
   private age = 0;
@@ -174,6 +203,12 @@ export class EffectsManager {
 
   addKillText(pos: Vec2, team: Team): void {
     this.effects.push(new KillText(this.container, pos, team));
+  }
+
+  addMuzzleFlash(pos: Vec2, angle: number, radius: number): void {
+    const tipX = pos.x + Math.cos(angle) * (radius + 4);
+    const tipY = pos.y + Math.sin(angle) * (radius + 4);
+    this.effects.push(new MuzzleFlash(this.container, { x: tipX, y: tipY }));
   }
 
   addRoundStartFlash(width: number, height: number): void {

@@ -107,7 +107,7 @@
     #planning-overlay {
       display: none;
       position: fixed;
-      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      top: calc(8px + env(safe-area-inset-top, 0px));
       left: 50%;
       transform: translateX(-50%);
       flex-direction: column;
@@ -192,7 +192,7 @@
       #battle-btn { padding: 12px 32px; }
       #battle-hud { font-size: 12px; padding: 6px 10px; }
       #round-timer { font-size: 16px; }
-      #planning-overlay { top: 40px; bottom: auto; flex-direction: row; gap: 12px; }
+      #planning-overlay { flex-direction: row; gap: 12px; }
       #planning-label { font-size: 16px; }
       #planning-instructions { display: none; }
       #confirm-btn { min-height: 44px; padding: 8px 28px; font-size: 14px; }

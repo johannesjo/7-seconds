@@ -30,7 +30,7 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
     projectileSpeed: stats.projectileSpeed,
     projectileRadius: stats.projectileRadius,
     vel: { x: 0, y: 0 },
-    gunAngle: 0,
+    gunAngle: team === 'blue' ? -Math.PI / 2 : Math.PI / 2,
   };
 }
 
@@ -39,12 +39,14 @@ export function createArmy(team: Team): Unit[] {
   const isBlue = team === 'blue';
   const baseY = isBlue ? MAP_HEIGHT * 0.85 : MAP_HEIGHT * 0.15;
   const totalUnits = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
-  const spacing = MAP_WIDTH / (totalUnits + 1);
+  const spacing = 60;
+  const groupWidth = spacing * (totalUnits - 1);
+  const startX = (MAP_WIDTH - groupWidth) / 2;
   let index = 0;
 
   for (const { type, count } of ARMY_COMPOSITION) {
     for (let i = 0; i < count; i++) {
-      const x = spacing * (index + 1);
+      const x = startX + spacing * index;
       const pos = { x, y: baseY };
       units.push(createUnit(`${team}_${type}_${i}`, type, team, pos));
       index++;

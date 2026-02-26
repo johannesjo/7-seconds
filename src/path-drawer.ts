@@ -156,6 +156,8 @@ export class PathDrawer {
       this.hoverGfx.circle(this.selectedUnit.pos.x, this.selectedUnit.pos.y, this.selectedUnit.radius + 5);
       this.hoverGfx.setStrokeStyle({ width: 2.5, color: teamColor, alpha: 1.0 });
       this.hoverGfx.stroke();
+      // Range circle for selected unit
+      this.drawRangeCircle(this.selectedUnit, teamColor);
       return; // Don't show hover when drawing
     }
 
@@ -164,12 +166,22 @@ export class PathDrawer {
       this.hoverGfx.circle(this.hoveredUnit.pos.x, this.hoveredUnit.pos.y, this.hoveredUnit.radius + 4);
       this.hoverGfx.setStrokeStyle({ width: 2, color: teamColor, alpha: 0.6 });
       this.hoverGfx.stroke();
+      // Range circle for hovered unit
+      this.drawRangeCircle(this.hoveredUnit, teamColor);
     }
   }
 
   /** Call each frame to animate pulsing indicators during planning. */
   updateHover(): void {
     if (this.enabled) this.renderHoverLayer();
+  }
+
+  private drawRangeCircle(unit: Unit, color: number): void {
+    this.hoverGfx.circle(unit.pos.x, unit.pos.y, unit.range + unit.radius);
+    this.hoverGfx.setStrokeStyle({ width: 1, color, alpha: 0.2 });
+    this.hoverGfx.stroke();
+    this.hoverGfx.circle(unit.pos.x, unit.pos.y, unit.range + unit.radius);
+    this.hoverGfx.fill({ color, alpha: 0.03 });
   }
 
   clearGraphics(): void {

@@ -165,6 +165,7 @@ export class GameEngine {
         const projectile = tryFireProjectile(unit, target, dt);
         if (projectile) {
           this.projectiles.push(projectile);
+          this.renderer.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
         }
       } else {
         unit.fireTimer = Math.max(0, unit.fireTimer - dt);

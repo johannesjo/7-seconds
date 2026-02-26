@@ -116,6 +116,15 @@ export class Renderer {
       // Rotate only the nose (gun direction indicator), not the whole container
       (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
 
+      // Idle breathing pulse when stationary
+      const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+      if (speed < 1) {
+        const breath = 1 + 0.015 * Math.sin(Date.now() / 400 + unit.pos.x);
+        (container.getChildAt(0) as Graphics).scale.set(breath);
+      } else {
+        (container.getChildAt(0) as Graphics).scale.set(1);
+      }
+
       // Update health bar — only show when damaged (child index 2: shape, nose, hpBar)
       const hpBar = container.getChildAt(2) as Graphics;
       if (unit.hp < unit.maxHp) {
