@@ -201,6 +201,7 @@ describe('tryFireProjectile', () => {
     const attacker = createUnit('s1', 'soldier', 'blue', { x: 100, y: 100 });
     const target = createUnit('e1', 'scout', 'red', { x: 200, y: 100 });
     attacker.fireTimer = 0;
+    attacker.gunAngle = 0; // aim right toward target
     const proj = tryFireProjectile(attacker, target, 0.016);
     expect(proj).not.toBeNull();
     expect(proj!.damage).toBe(10);
@@ -222,6 +223,7 @@ describe('tryFireProjectile', () => {
     const target = createUnit('e1', 'scout', 'red', { x: 200, y: 100 });
     target.vel = { x: 0, y: 180 }; // moving down fast
     attacker.fireTimer = 0;
+    attacker.gunAngle = 0; // aim right toward target
     const proj = tryFireProjectile(attacker, target, 0.016);
     expect(proj).not.toBeNull();
     // Projectile should aim below the target's current position

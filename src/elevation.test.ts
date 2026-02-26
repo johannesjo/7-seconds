@@ -92,6 +92,7 @@ describe('tryFireProjectile with elevation', () => {
     const attacker = createUnit('a1', 'soldier', 'blue', { x: 100, y: 100 });
     const target = createUnit('t1', 'soldier', 'red', { x: 200, y: 100 });
     attacker.fireTimer = 0;
+    attacker.gunAngle = 0; // aim right toward target
 
     const projBase = tryFireProjectile(attacker, target, 0.016);
     attacker.fireTimer = 0;
@@ -107,6 +108,7 @@ describe('tryFireProjectile with elevation', () => {
     const attacker = createUnit('a1', 'soldier', 'blue', { x: 100, y: 100 });
     const target = createUnit('t1', 'soldier', 'red', { x: 200, y: 100 });
     attacker.fireTimer = 0;
+    attacker.gunAngle = 0; // aim right toward target
 
     const projBase = tryFireProjectile(attacker, target, 0.016);
     attacker.fireTimer = 0;
@@ -121,6 +123,7 @@ describe('tryFireProjectile with elevation', () => {
     const attacker = createUnit('a1', 'soldier', 'blue', { x: 100, y: 100 });
     const target = createUnit('t1', 'soldier', 'red', { x: 200, y: 100 });
     attacker.fireTimer = 0;
+    attacker.gunAngle = 0; // aim right toward target
 
     const projSingle = tryFireProjectile(attacker, target, 0.016, [zone1]);
     attacker.fireTimer = 0;

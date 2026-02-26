@@ -117,10 +117,10 @@ export class PathDrawer {
       this.gfx.fill({ color, alpha });
     }
 
-    // Draw in-progress raw line (thicker)
+    // Draw in-progress raw line (thicker + brighter than finalized paths)
     if (this.selectedUnit && this.rawPoints.length > 1) {
-      const color = this.team === 'blue' ? 0x4a9eff : 0xff4a4a;
-      this.gfx.setStrokeStyle({ width: 4, color, alpha: 0.7 });
+      const color = this.team === 'blue' ? 0x8ac4ff : 0xff8a8a;
+      this.gfx.setStrokeStyle({ width: 4, color, alpha: 1.0 });
       this.gfx.moveTo(this.rawPoints[0].x, this.rawPoints[0].y);
       for (let i = 1; i < this.rawPoints.length; i++) {
         this.gfx.lineTo(this.rawPoints[i].x, this.rawPoints[i].y);

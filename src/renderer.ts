@@ -128,8 +128,12 @@ export class Renderer {
       container.x = unit.pos.x;
       container.y = unit.pos.y;
 
-      // Rotate only the nose (gun direction indicator), not the whole container
+      // Rotate gun barrel
       (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
+      // Rotate oval body with the gun for scout/soldier (person turning)
+      if (unit.type === 'scout' || unit.type === 'soldier') {
+        (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
+      }
 
       // Idle breathing pulse when stationary
       const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
@@ -192,16 +196,23 @@ export class Renderer {
       shape.poly(points);
       shape.fill(color);
     } else {
-      // Scout / Soldier: circle
-      shape.circle(0, 0, unit.radius);
+      // Scout / Soldier: oval (wider shoulders, person from above)
+      shape.ellipse(0, 0, unit.radius, unit.radius * 0.7);
       shape.fill(color);
     }
 
-    // Directional nose — small triangle pointing in +X direction
+    // Gun barrel — elongated shape pointing in +X direction
     const nose = new Graphics();
-    const nr = unit.radius * 0.4;
-    nose.poly([unit.radius + nr, 0, unit.radius - 1, -nr * 0.6, unit.radius - 1, nr * 0.6]);
-    nose.fill({ color: 0xffffff, alpha: 0.6 });
+    if (unit.type === 'sniper') {
+      // Sniper: thin straight barrel
+      const nr = unit.radius * 1.4;
+      nose.rect(unit.radius - 1, -1.5, nr + 1, 3);
+      nose.fill({ color: 0xffffff, alpha: 0.6 });
+    } else {
+      const nr = unit.radius * 0.6;
+      nose.poly([unit.radius + nr, 0, unit.radius - 1, -nr * 0.35, unit.radius - 1, nr * 0.35]);
+      nose.fill({ color: 0xffffff, alpha: 0.6 });
+    }
 
     container.addChild(shape);
     container.addChild(nose);

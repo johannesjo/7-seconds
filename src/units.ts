@@ -201,9 +201,9 @@ export function createMissionArmy(team: Team, composition: { type: UnitType; cou
   return units;
 }
 
-/** Smoothly rotate unit.gunAngle toward desiredAngle via shortest arc, capped at ~5 rad/s. */
+/** Smoothly rotate unit.gunAngle toward desiredAngle via shortest arc, capped at ~2 rad/s. */
 export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): void {
-  const MAX_TURN_SPEED = 5; // rad/s (~1s for full 180° turn)
+  const MAX_TURN_SPEED = 2; // rad/s (~1.6s for full 180° turn)
   let diff = desiredAngle - unit.gunAngle;
   // Normalize to [-PI, PI] for shortest arc
   diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
@@ -409,6 +409,13 @@ export function applyDamage(unit: Unit, amount: number): void {
 export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevationZones: ElevationZone[] = []): Projectile | null {
   unit.fireTimer -= dt;
   if (unit.fireTimer > 0) return null;
+
+  // Gun must be aligned with target before firing (makes flanking viable)
+  const aimAngle = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
+  let aimDiff = aimAngle - unit.gunAngle;
+  aimDiff = ((aimDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+  if (aimDiff < -Math.PI) aimDiff += 2 * Math.PI;
+  if (Math.abs(aimDiff) > 0.15) return null; // ~8.5° tolerance
 
   unit.fireTimer = unit.fireCooldown;
 
