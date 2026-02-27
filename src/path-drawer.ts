@@ -76,15 +76,23 @@ export class PathDrawer {
   private labelContainer: Container;
   private labelPool: Text[] = [];
   private labelIndex = 0;
+  private hoverLabel: Text;
 
   constructor(stage: Container, canvas?: HTMLCanvasElement) {
     this.stage = stage;
     this.gfx = new Graphics();
     this.hoverGfx = new Graphics();
     this.labelContainer = new Container();
+    this.hoverLabel = new Text({
+      text: '',
+      style: { fontSize: 11, fontFamily: 'monospace', fill: 0xffffff },
+    });
+    this.hoverLabel.anchor.set(0.5, 1);
+    this.hoverLabel.visible = false;
     this.stage.addChild(this.gfx);
     this.stage.addChild(this.hoverGfx);
     this.stage.addChild(this.labelContainer);
+    this.stage.addChild(this.hoverLabel);
 
     // Suppress context menu on canvas
     if (canvas) {
@@ -248,6 +256,7 @@ export class PathDrawer {
 
   private renderHoverLayer(): void {
     this.hoverGfx.clear();
+    this.hoverLabel.visible = false;
     if (!this.enabled || !this.team) return;
 
     const teamColor = this.team === 'blue' ? 0x4a9eff : 0xff4a4a;
@@ -328,6 +337,31 @@ export class PathDrawer {
       this.hoverGfx.circle(this.hoveredUnit.pos.x, this.hoveredUnit.pos.y, this.hoveredUnit.radius + 4);
       this.hoverGfx.setStrokeStyle({ width: 2, color: teamColor, alpha: 0.6 });
       this.hoverGfx.stroke();
+
+      // Highlight path + time label on hover
+      if (this.hoveredUnit.waypoints.length > 0) {
+        const brightColor = this.team === 'blue' ? 0x8ac4ff : 0xff8a8a;
+        this.hoverGfx.setStrokeStyle({ width: 3, color: brightColor, alpha: 1.0 });
+        this.hoverGfx.moveTo(this.hoveredUnit.pos.x, this.hoveredUnit.pos.y);
+        for (const wp of this.hoveredUnit.waypoints) {
+          this.hoverGfx.lineTo(wp.x, wp.y);
+        }
+        this.hoverGfx.stroke();
+
+        const last = this.hoveredUnit.waypoints[this.hoveredUnit.waypoints.length - 1];
+        this.hoverGfx.circle(last.x, last.y, 5);
+        this.hoverGfx.fill({ color: brightColor, alpha: 1.0 });
+
+        const fullPath: Vec2[] = [this.hoveredUnit.pos, ...this.hoveredUnit.waypoints];
+        const pathLen = polylineLength(fullPath);
+        const travelTime = pathLen / this.hoveredUnit.speed;
+        const overLimit = travelTime > ROUND_DURATION_S;
+        this.hoverLabel.text = overLimit ? `${travelTime.toFixed(1)}s!` : `${travelTime.toFixed(1)}s`;
+        this.hoverLabel.style.fill = overLimit ? 0xff4444 : 0xffffff;
+        this.hoverLabel.position.set(last.x, last.y - 12);
+        this.hoverLabel.visible = true;
+      }
+
       // Range circle at path endpoint (or current pos if no path)
       const hoverPos = this.hoveredUnit.waypoints.length > 0
         ? this.hoveredUnit.waypoints[this.hoveredUnit.waypoints.length - 1]
@@ -392,9 +426,11 @@ export class PathDrawer {
     this.stage.removeChild(this.gfx);
     this.stage.removeChild(this.hoverGfx);
     this.stage.removeChild(this.labelContainer);
+    this.stage.removeChild(this.hoverLabel);
     this.gfx.destroy();
     this.hoverGfx.destroy();
     this.labelContainer.destroy();
+    this.hoverLabel.destroy();
   }
 
   private onContextMenu = (e: Event): void => {
