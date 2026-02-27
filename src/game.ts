@@ -1,4 +1,4 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef, CoverBlock } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef, CoverBlock, UnitType } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
 import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
 import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
@@ -6,7 +6,7 @@ import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
 
 export type GameEventCallback = (
-  event: 'update' | 'end' | 'phase-change',
+  event: 'update' | 'end' | 'phase-change' | 'wave-clear',
   data?: BattleResult | { phase: TurnPhase; timeLeft?: number; round?: number },
 ) => void;
 
@@ -37,8 +37,22 @@ export class GameEngine {
   private endDelayTimer = 0;
   private pendingWinner: Team | null = null;
   private pendingWinCondition: 'elimination' | 'zone-control' | null = null;
+  private hordeMode = false;
+  private hordeBlueUnits: Unit[] | null = null;
+  private hordeRedArmy: { type: UnitType; count: number }[] | null = null;
+  private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] } | null = null;
 
-  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: { aiMode?: boolean; mission?: MissionDef; zoneControl?: boolean; oneShot?: boolean; blood?: boolean }) {
+  constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: {
+    aiMode?: boolean;
+    mission?: MissionDef;
+    zoneControl?: boolean;
+    oneShot?: boolean;
+    blood?: boolean;
+    horde?: boolean;
+    hordeBlueUnits?: Unit[];
+    hordeRedArmy?: { type: UnitType; count: number }[];
+    hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] };
+  }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
     this.aiMode = opts?.aiMode ?? false;
@@ -46,6 +60,10 @@ export class GameEngine {
     this.zoneControlEnabled = opts?.zoneControl ?? false;
     this.oneShotEnabled = opts?.oneShot ?? false;
     this.bloodEnabled = opts?.blood ?? true;
+    this.hordeMode = opts?.horde ?? false;
+    this.hordeBlueUnits = opts?.hordeBlueUnits ?? null;
+    this.hordeRedArmy = opts?.hordeRedArmy ?? null;
+    this.hordeMap = opts?.hordeMap ?? null;
   }
 
   get phase(): TurnPhase {
@@ -54,7 +72,16 @@ export class GameEngine {
 
   startBattle(): void {
     this.renderer.bloodEnabled = this.bloodEnabled;
-    if (this.mission) {
+    if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
+      // Horde mode: use pre-created blue units + spawn wave enemies
+      const redUnits = createMissionArmy('red', this.hordeRedArmy);
+      // Prefix red IDs with wave index to avoid renderer collisions
+      const waveTag = `w${Date.now() % 10000}`;
+      for (const u of redUnits) {
+        u.id = u.id.replace('red_', `red_${waveTag}_`);
+      }
+      this.units = [...this.hordeBlueUnits, ...redUnits];
+    } else if (this.mission) {
       this.units = [
         ...createMissionArmy('blue', this.mission.blueArmy),
         ...createMissionArmy('red', this.mission.redArmy),
@@ -69,9 +96,15 @@ export class GameEngine {
       }
     }
 
-    this.obstacles = generateObstacles();
-    this.elevationZones = generateElevationZones();
-    this.coverBlocks = generateCoverBlocks(this.obstacles);
+    if (this.hordeMap) {
+      this.obstacles = this.hordeMap.obstacles;
+      this.elevationZones = this.hordeMap.elevationZones;
+      this.coverBlocks = this.hordeMap.coverBlocks;
+    } else {
+      this.obstacles = generateObstacles();
+      this.elevationZones = generateElevationZones();
+      this.coverBlocks = generateCoverBlocks(this.obstacles);
+    }
     this.projectiles = [];
     this.elapsedTime = 0;
     this.roundTimer = 0;
@@ -156,20 +189,41 @@ export class GameEngine {
   private generateAiPaths(): void {
     const allBlockers = [...this.obstacles, ...this.coverBlocks];
     const redUnits = this.units.filter(u => u.alive && u.team === 'red');
+    const blueAliveUnits = this.units.filter(u => u.alive && u.team === 'blue');
     for (const unit of redUnits) {
       const margin = 8;
       const padding = unit.radius + margin;
       const rawWaypoints: { x: number; y: number }[] = [];
       const steps = 2 + Math.floor(Math.random() * 2); // 2-3 waypoints
-      const targetY = MAP_HEIGHT * 0.85; // Head toward blue spawn side (bottom)
+
+      // Horde mode: target nearest blue unit instead of fixed Y
+      let targetY = MAP_HEIGHT * 0.85;
+      let targetX = unit.pos.x;
+      if (this.hordeMode && blueAliveUnits.length > 0) {
+        let nearest = blueAliveUnits[0];
+        let nearestDist = Infinity;
+        for (const blue of blueAliveUnits) {
+          const dx = blue.pos.x - unit.pos.x;
+          const dy = blue.pos.y - unit.pos.y;
+          const dist = dx * dx + dy * dy;
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearest = blue;
+          }
+        }
+        targetY = nearest.pos.y;
+        targetX = nearest.pos.x;
+      }
       const stepY = (targetY - unit.pos.y) / steps;
 
+      const stepX = (targetX - unit.pos.x) / steps;
       for (let i = 1; i <= steps; i++) {
         // Try up to 5 times to find a waypoint that doesn't land on an obstacle
         for (let attempt = 0; attempt < 5; attempt++) {
           const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.3;
+          const baseX = this.hordeMode ? unit.pos.x + stepX * i : unit.pos.x;
           const wp = {
-            x: Math.max(padding, Math.min(MAP_WIDTH - padding, unit.pos.x + spreadX)),
+            x: Math.max(padding, Math.min(MAP_WIDTH - padding, baseX + spreadX)),
             y: Math.min(MAP_HEIGHT - padding, unit.pos.y + stepY * i),
           };
           const onObstacle = allBlockers.some(obs => {
@@ -318,6 +372,15 @@ export class GameEngine {
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
 
     if (blueAlive === 0 || redAlive === 0) {
+      if (redAlive === 0 && this.hordeMode) {
+        // Wave cleared — don't end the battle, emit wave-clear event
+        this.running = false;
+        this.renderer.ticker.remove(this.tick, this);
+        this.pathDrawer?.disable();
+        this.pathDrawer?.clearGraphics();
+        this.onEvent('wave-clear');
+        return;
+      }
       this.endingBattle = true;
       this.endDelayTimer = 0.6;
       this.pendingWinner = blueAlive === 0 ? 'red' : 'blue';
@@ -397,6 +460,14 @@ export class GameEngine {
       blue: this.units.filter(u => u.alive && u.team === 'blue').length,
       red: this.units.filter(u => u.alive && u.team === 'red').length,
     };
+  }
+
+  getUnits(): Unit[] {
+    return this.units;
+  }
+
+  getMapData(): { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] } {
+    return { obstacles: this.obstacles, elevationZones: this.elevationZones, coverBlocks: this.coverBlocks };
   }
 
   stop(): void {

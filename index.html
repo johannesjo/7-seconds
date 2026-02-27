@@ -254,6 +254,28 @@
     }
     #campaign-back-btn:hover { color: #eee; border-color: #777; }
 
+    /* Upgrade cards */
+    .upgrade-card {
+      padding: 20px 24px;
+      background: #2a2a4a;
+      border: 2px solid #555;
+      border-radius: 8px;
+      cursor: pointer;
+      text-align: center;
+      width: 200px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .upgrade-card:hover { background: #3a3a5a; border-color: #ff8844; }
+    .upgrade-card .card-label { font-size: 18px; font-weight: bold; margin-bottom: 8px; }
+    .upgrade-card .card-desc { font-size: 13px; opacity: 0.7; }
+    .upgrade-card .card-category {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 8px;
+      opacity: 0.5;
+    }
+
     /* Mobile */
     @media (max-width: 900px) {
       #prompt-screen { padding: 24px 16px; gap: 16px; }
@@ -285,6 +307,8 @@
       #result-screen .buttons { flex-wrap: wrap; justify-content: center; }
       #result-screen button { min-height: 48px; padding: 10px 20px; font-size: 14px; }
       .speed-controls button { min-height: 36px; padding: 6px 10px; font-size: 11px; }
+      .upgrade-card { width: 160px; padding: 14px 16px; }
+      .upgrade-card .card-label { font-size: 15px; }
       #campaign-screen { padding: 24px 16px; }
       #campaign-screen h2 { font-size: 24px; letter-spacing: 2px; }
       .mission-list { max-width: 100%; }
@@ -302,7 +326,10 @@
       <button id="ai-btn" style="padding:16px 48px;font-size:20px;font-weight:bold;text-transform:uppercase;letter-spacing:4px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">vs AI</button>
       <button id="battle-btn">vs Player</button>
     </div>
-    <button id="campaign-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:transparent;color:#aaa;border:1px solid #444;border-radius:4px;cursor:pointer">Campaign</button>
+    <div class="btn-row" style="display:flex;gap:16px">
+      <button id="campaign-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:transparent;color:#aaa;border:1px solid #444;border-radius:4px;cursor:pointer">Campaign</button>
+      <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#4a2a2a;color:#ff8844;border:2px solid #884422;border-radius:4px;cursor:pointer">Horde</button>
+    </div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
         <input type="checkbox" id="zone-control-cb" style="cursor:pointer" />
@@ -328,6 +355,7 @@
   <div id="battle-screen" class="screen">
     <div id="battle-hud">
       <span id="blue-count" style="color:#4a9eff">Blue: 4</span>
+      <span id="wave-counter" style="color:#ff8844;display:none"></span>
       <div style="display:flex;align-items:center;gap:12px">
         <span id="round-counter" style="opacity:0.7">Round 1</span>
         <span id="round-timer"></span>
@@ -353,6 +381,12 @@
       <span>Pass device to Red</span>
       <span style="font-size:16px;opacity:0.5;letter-spacing:1px">Tap to continue</span>
     </div>
+  </div>
+
+  <div id="upgrade-screen" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:rgba(0,0,0,0.85);z-index:18">
+    <h2 style="font-size:32px;letter-spacing:3px;text-transform:uppercase;color:#ff8844">Wave Clear!</h2>
+    <p style="font-size:16px;opacity:0.7">Choose an upgrade</p>
+    <div id="upgrade-cards" style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;max-width:700px"></div>
   </div>
 
   <div id="result-screen" class="screen">

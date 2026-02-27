@@ -98,3 +98,16 @@ export interface BattleResult {
   duration: number;
   winCondition?: 'elimination' | 'zone-control';
 }
+
+export interface HordeWave {
+  wave: number;
+  enemies: { type: UnitType; count: number }[];
+}
+
+export interface HordeUpgrade {
+  id: string;
+  label: string;
+  description: string;
+  category: 'stat' | 'recruit';
+  apply: (units: Unit[]) => Unit[];
+}
