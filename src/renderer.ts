@@ -1,6 +1,6 @@
 import { Application, Graphics, Container, Text } from 'pixi.js';
-import { Unit, Obstacle, Projectile, ElevationZone } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, setMapSize, ZONE_DEPTH_RATIO } from './constants';
+import { Unit, Obstacle, Projectile, ElevationZone, CoverBlock } from './types';
+import { MAP_WIDTH, MAP_HEIGHT, setMapSize, ZONE_DEPTH_RATIO, COVER_PROXIMITY } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 
 export class Renderer {
@@ -9,9 +9,11 @@ export class Renderer {
   private dyingUnits: Map<string, { container: Container; age: number }> = new Map();
   private elevationGraphics: Container | null = null;
   private obstacleGraphics: Graphics | null = null;
+  private coverGraphics: Container | null = null;
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
+  private coverIndicatorGfx: Graphics | null = null;
   private zoneStatusGfx: Graphics | null = null;
   bloodEnabled = true;
 
@@ -132,16 +134,86 @@ export class Renderer {
     this.obstacleGraphics = new Graphics();
     for (const obs of obstacles) {
       this.obstacleGraphics.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
-      this.obstacleGraphics.fill({ color: 0x3a3a5a });
-      this.obstacleGraphics.setStrokeStyle({ width: 1, color: 0x555577 });
+      this.obstacleGraphics.fill({ color: 0x4a4a6e });
+      this.obstacleGraphics.setStrokeStyle({ width: 1.5, color: 0x8888aa });
       this.obstacleGraphics.stroke();
       // Inner highlight for depth
       this.obstacleGraphics.roundRect(obs.x + 2, obs.y + 2, obs.w - 4, obs.h - 4, 2);
-      this.obstacleGraphics.setStrokeStyle({ width: 1, color: 0x666688, alpha: 0.3 });
+      this.obstacleGraphics.setStrokeStyle({ width: 1, color: 0x9999bb, alpha: 0.3 });
       this.obstacleGraphics.stroke();
     }
     // Index 3: right after elevation (2)
     this.app.stage.addChildAt(this.obstacleGraphics, 3);
+  }
+
+  renderCoverBlocks(covers: CoverBlock[]): void {
+    if (this.coverGraphics) {
+      this.app.stage.removeChild(this.coverGraphics);
+      this.coverGraphics.destroy({ children: true });
+    }
+    const container = new Container();
+    const gfx = new Graphics();
+
+    for (const c of covers) {
+      const cx = c.x + c.w / 2;
+      const cy = c.y + c.h / 2;
+
+      // Cover block fill
+      gfx.roundRect(c.x, c.y, c.w, c.h, 3);
+      gfx.fill({ color: 0x4a4a68 });
+
+      // Dashed border — draw short segments along the perimeter
+      const dashLen = 5;
+      const gapLen = 4;
+      const edges: [number, number, number, number][] = [
+        [c.x, c.y, c.x + c.w, c.y],
+        [c.x + c.w, c.y, c.x + c.w, c.y + c.h],
+        [c.x + c.w, c.y + c.h, c.x, c.y + c.h],
+        [c.x, c.y + c.h, c.x, c.y],
+      ];
+      gfx.setStrokeStyle({ width: 1, color: 0x7788aa });
+      for (const [x1, y1, x2, y2] of edges) {
+        const edgeLen = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        const dx = (x2 - x1) / edgeLen;
+        const dy = (y2 - y1) / edgeLen;
+        let d = 0;
+        while (d < edgeLen) {
+          const end = Math.min(d + dashLen, edgeLen);
+          gfx.moveTo(x1 + dx * d, y1 + dy * d);
+          gfx.lineTo(x1 + dx * end, y1 + dy * end);
+          gfx.stroke();
+          d = end + gapLen;
+        }
+      }
+
+      // Hover label — "-50% Damage"
+      const hitArea = new Graphics();
+      hitArea.roundRect(c.x - 10, c.y - 10, c.w + 20, c.h + 20, 6);
+      hitArea.fill({ color: 0x000000, alpha: 0.001 });
+      hitArea.eventMode = 'static';
+      hitArea.cursor = 'default';
+
+      const label = new Text({
+        text: '-50% Dmg',
+        style: { fontSize: 9, fontFamily: 'monospace', fill: '#88aacc' },
+      });
+      label.alpha = 0;
+      label.anchor.set(0.5, 0.5);
+      label.x = cx;
+      label.y = cy;
+
+      hitArea.on('pointerenter', () => { label.alpha = 0.7; });
+      hitArea.on('pointerleave', () => { label.alpha = 0; });
+
+      container.addChild(label);
+      container.addChild(hitArea);
+    }
+
+    container.addChild(gfx);
+    container.setChildIndex(gfx, 0);
+    this.coverGraphics = container;
+    // Index 4: after obstacles (3)
+    this.app.stage.addChildAt(this.coverGraphics, 4);
   }
 
   renderUnits(units: Unit[], dt = 0): void {

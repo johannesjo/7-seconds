@@ -1,7 +1,7 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef, CoverBlock } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
 import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
-import { generateObstacles, generateElevationZones } from './battlefield';
+import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
 
@@ -14,6 +14,7 @@ export class GameEngine {
   private units: Unit[] = [];
   private obstacles: Obstacle[] = [];
   private elevationZones: ElevationZone[] = [];
+  private coverBlocks: CoverBlock[] = [];
   private projectiles: Projectile[] = [];
   private renderer: Renderer;
   private running = false;
@@ -70,6 +71,7 @@ export class GameEngine {
 
     this.obstacles = generateObstacles();
     this.elevationZones = generateElevationZones();
+    this.coverBlocks = generateCoverBlocks(this.obstacles);
     this.projectiles = [];
     this.elapsedTime = 0;
     this.roundTimer = 0;
@@ -81,6 +83,7 @@ export class GameEngine {
     // Render initial state — hills under obstacles
     this.renderer.renderElevationZones(this.elevationZones);
     this.renderer.renderObstacles(this.obstacles);
+    this.renderer.renderCoverBlocks(this.coverBlocks);
     this.renderer.renderUnits(this.units);
 
     // Start ticker for rendering during planning
@@ -151,6 +154,7 @@ export class GameEngine {
 
   /** Generate AI paths for red units: head toward blue side, routing around obstacles. */
   private generateAiPaths(): void {
+    const allBlockers = [...this.obstacles, ...this.coverBlocks];
     const redUnits = this.units.filter(u => u.alive && u.team === 'red');
     for (const unit of redUnits) {
       const margin = 8;
@@ -168,7 +172,7 @@ export class GameEngine {
             x: Math.max(padding, Math.min(MAP_WIDTH - padding, unit.pos.x + spreadX)),
             y: Math.min(MAP_HEIGHT - padding, unit.pos.y + stepY * i),
           };
-          const onObstacle = this.obstacles.some(obs => {
+          const onObstacle = allBlockers.some(obs => {
             const cx = Math.max(obs.x, Math.min(obs.x + obs.w, wp.x));
             const cy = Math.max(obs.y, Math.min(obs.y + obs.h, wp.y));
             const dx = wp.x - cx;
@@ -187,7 +191,7 @@ export class GameEngine {
 
       for (const wp of rawWaypoints) {
         const last = refined[refined.length - 1];
-        const detours = detourWaypoints(last, wp, this.obstacles, padding);
+        const detours = detourWaypoints(last, wp, allBlockers, padding);
         refined.push(...detours, wp);
       }
 
@@ -226,9 +230,9 @@ export class GameEngine {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       advanceWaypoint(unit);
-      moveUnit(unit, dt, this.obstacles, this.units);
+      moveUnit(unit, dt, [...this.obstacles, ...this.coverBlocks], this.units);
     }
-    separateUnits(this.units, this.obstacles);
+    separateUnits(this.units, [...this.obstacles, ...this.coverBlocks]);
 
     // Combat — auto-target nearest enemy, fire projectiles
     for (const unit of this.units) {
@@ -262,7 +266,7 @@ export class GameEngine {
       }
     }
 
-    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
+    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles, this.coverBlocks);
     this.projectiles = aliveProjectiles;
 
     // Trigger effects for hits

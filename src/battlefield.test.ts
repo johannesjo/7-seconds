@@ -114,4 +114,18 @@ describe('generateCoverBlocks', () => {
       }
     }
   });
+
+  it('cover blocks do not overlap obstacles', () => {
+    for (let i = 0; i < 20; i++) {
+      const obstacles = generateObstacles();
+      const covers = generateCoverBlocks(obstacles);
+      for (const c of covers) {
+        for (const obs of obstacles) {
+          const overlaps = c.x < obs.x + obs.w && c.x + c.w > obs.x
+            && c.y < obs.y + obs.h && c.y + c.h > obs.y;
+          expect(overlaps).toBe(false);
+        }
+      }
+    }
+  });
 });
