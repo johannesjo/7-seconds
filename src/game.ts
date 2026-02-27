@@ -211,8 +211,11 @@ export class GameEngine {
 
       const stepX = (targetX - unit.pos.x) / steps;
       for (let i = 1; i <= steps; i++) {
-        // Try up to 5 times to find a waypoint that doesn't land on an obstacle
-        for (let attempt = 0; attempt < 5; attempt++) {
+        const lastPos = rawWaypoints.length > 0 ? rawWaypoints[rawWaypoints.length - 1] : unit.pos;
+        let bestWp: { x: number; y: number } | null = null;
+        let bestClear = false;
+        // Try up to 8 times to find a waypoint; prefer clear line-of-sight
+        for (let attempt = 0; attempt < 8; attempt++) {
           const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.3;
           const baseX = this.hordeMode ? unit.pos.x + stepX * i : unit.pos.x;
           const wp = {
@@ -226,11 +229,17 @@ export class GameEngine {
             const dy = wp.y - cy;
             return dx * dx + dy * dy < padding * padding;
           });
-          if (!onObstacle) {
-            rawWaypoints.push(wp);
+          if (onObstacle) continue;
+          const clearPath = !allBlockers.some(obs => segmentHitsRect(lastPos, wp, obs, padding));
+          if (clearPath) {
+            bestWp = wp;
+            bestClear = true;
             break;
           }
+          // Keep first valid-position waypoint as fallback (detour will handle routing)
+          if (!bestWp) bestWp = wp;
         }
+        if (bestWp) rawWaypoints.push(bestWp);
       }
 
       // Post-process: insert detour waypoints around obstacles
@@ -242,16 +251,7 @@ export class GameEngine {
         refined.push(...detours, wp);
       }
 
-      // Validate: truncate path at first segment that still crosses an obstacle
-      let validEnd = refined.length;
-      for (let i = 0; i < refined.length - 1; i++) {
-        if (allBlockers.some(obs => segmentHitsRect(refined[i], refined[i + 1], obs, padding))) {
-          validEnd = i + 1;
-          break;
-        }
-      }
-
-      unit.waypoints = refined.slice(1, validEnd);
+      unit.waypoints = refined.slice(1);
     }
   }
 
