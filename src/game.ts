@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, CoverBlock, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
-import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
+import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect } from './units';
 import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
@@ -38,6 +38,7 @@ export class GameEngine {
   private pendingWinner: Team | null = null;
   private pendingWinCondition: 'elimination' | 'zone-control' | null = null;
   private hordeMode = false;
+  private hordeStartDelay = 0;
   private hordeBlueUnits: Unit[] | null = null;
   private hordeRedArmy: { type: UnitType; count: number }[] | null = null;
   private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] } | null = null;
@@ -182,6 +183,7 @@ export class GameEngine {
       this.replayFrames = [];
       this.replayEvents = [];
       this.renderer.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
+      if (this.hordeMode && this.roundNumber === 1) this.hordeStartDelay = 1;
     }
 
     this.onEvent('phase-change', { phase, round: this.roundNumber });
@@ -204,10 +206,8 @@ export class GameEngine {
       const margin = 8;
       const padding = unit.radius + margin;
 
-      // Score each candidate for this unit
-      let bestPos = unit.pos;
-      let bestScore = -Infinity;
-
+      // Score each candidate, then verify the full path is navigable
+      const scored: { pos: typeof unit.pos; score: number }[] = [];
       for (const candidate of candidates) {
         const s = scorePosition({
           candidate,
@@ -217,15 +217,37 @@ export class GameEngine {
           coverBlocks: this.coverBlocks,
           elevationZones: this.elevationZones,
         });
-        if (s > bestScore) {
-          bestScore = s;
+        scored.push({ pos: candidate, score: s });
+      }
+      scored.sort((a, b) => b.score - a.score);
+
+      // Pick the best candidate whose full waypoint chain is obstacle-free
+      let bestPos = unit.pos;
+      let bestWaypoints: typeof unit.waypoints = [];
+      for (const { pos: candidate, score } of scored) {
+        if (score === -Infinity) break;
+        const detours = detourWaypoints(unit.pos, candidate, allBlockers, padding);
+        const chain = [...detours, candidate];
+
+        // Validate every segment in the chain
+        let pathClear = true;
+        let prev = unit.pos;
+        for (const wp of chain) {
+          if (allBlockers.some(o => segmentHitsRect(prev, wp, o, padding))) {
+            pathClear = false;
+            break;
+          }
+          prev = wp;
+        }
+
+        if (pathClear) {
           bestPos = candidate;
+          bestWaypoints = chain;
+          break;
         }
       }
 
-      // Route to best position via detour waypoints
-      const detours = detourWaypoints(unit.pos, bestPos, allBlockers, padding);
-      unit.waypoints = [...detours, bestPos];
+      unit.waypoints = bestWaypoints.length > 0 ? bestWaypoints : [bestPos];
     }
   }
 
@@ -256,9 +278,14 @@ export class GameEngine {
     this.elapsedTime += dt;
     this.roundTimer -= dt;
 
+    // Horde start delay — skip red movement for 2s so player can react
+    const redDelayed = this.hordeStartDelay > 0;
+    if (redDelayed) this.hordeStartDelay -= dt;
+
     // Advance waypoints and move
     for (const unit of this.units) {
       if (!unit.alive) continue;
+      if (redDelayed && unit.team === 'red') continue;
       advanceWaypoint(unit);
       moveUnit(unit, dt, [...this.obstacles, ...this.coverBlocks], this.units);
     }

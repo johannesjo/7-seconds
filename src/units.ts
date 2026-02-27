@@ -260,8 +260,8 @@ export function createMissionArmy(team: Team, composition: { type: UnitType; cou
     // Red spawns spread across the top ~60% of the map
     const margin = 80;
     const xRange = MAP_WIDTH - margin * 2;
-    const yMin = MAP_HEIGHT * 0.08;
-    const yMax = MAP_HEIGHT * 0.55;
+    const yMin = MAP_HEIGHT * 0.02;
+    const yMax = MAP_HEIGHT * 0.25;
     // Deterministic spread: distribute evenly with staggered offsets
     const cols = Math.min(totalUnits, Math.ceil(Math.sqrt(totalUnits * 2)));
     const rows = Math.ceil(totalUnits / cols);

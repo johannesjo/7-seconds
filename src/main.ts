@@ -1,7 +1,7 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
 import { createArmy, createMissionArmy } from './units';
-import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
+import { generateObstacles, generateElevationZones, generateCoverBlocks, generateHordeObstacles, generateHordeElevationZones, generateHordeCoverBlocks } from './battlefield';
 import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, CoverBlock, ReplayData } from './types';
 import { ARMY_COMPOSITION, HORDE_MAX_WAVES, HORDE_STARTING_ARMY } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits } from './horde';
@@ -20,7 +20,7 @@ const battleHud = document.getElementById('battle-hud')!;
 const blueCountEl = document.getElementById('blue-count')!;
 const redCountEl = document.getElementById('red-count')!;
 const roundTimerEl = document.getElementById('round-timer')!;
-const speedButtons = document.querySelectorAll<HTMLButtonElement>('.speed-controls button');
+const speedToggle = document.getElementById('speed-toggle') as HTMLButtonElement;
 
 const planningOverlay = document.getElementById('planning-overlay')!;
 const planningLabel = document.getElementById('planning-label')!;
@@ -211,7 +211,9 @@ function startGame(): void {
     blood: bloodCb.checked,
   });
   showScreen('battle');
-  speedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.speed === '1'));
+  speedToggle.classList.remove('active');
+  speedToggle.dataset.speed = '1';
+  speedToggle.textContent = '3x';
   roundCounterEl.textContent = 'Round 1';
   engine.startBattle();
 }
@@ -262,9 +264,9 @@ function startHorde(): void {
   lastReplayData = null;
 
   // Generate map once for the whole run (before spawning so units avoid blocks)
-  const obstacles = generateObstacles();
-  const elevationZones = generateElevationZones();
-  const coverBlocks = generateCoverBlocks(obstacles);
+  const obstacles = generateHordeObstacles();
+  const elevationZones = generateHordeElevationZones();
+  const coverBlocks = generateHordeCoverBlocks(obstacles);
   hordeMap = { obstacles, elevationZones, coverBlocks };
 
   const allBlocks = [...obstacles, ...coverBlocks];
@@ -290,7 +292,9 @@ function startNextHordeWave(): void {
   });
 
   showScreen('battle');
-  speedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.speed === '1'));
+  speedToggle.classList.remove('active');
+  speedToggle.dataset.speed = '1';
+  speedToggle.textContent = '3x';
   roundCounterEl.textContent = 'Round 1';
   waveCounterEl.textContent = `Wave ${hordeWave}/${HORDE_MAX_WAVES}`;
   engine.startBattle();
@@ -390,12 +394,13 @@ coverScreen.addEventListener('click', () => {
   engine?.skipCover();
 });
 
-speedButtons.forEach(btn => {
-  btn.addEventListener('click', () => {
-    const speed = Number(btn.dataset.speed);
-    engine?.setSpeed(speed);
-    speedButtons.forEach(b => b.classList.toggle('active', b === btn));
-  });
+speedToggle.addEventListener('click', () => {
+  const isfast = speedToggle.dataset.speed === '3';
+  const newSpeed = isfast ? 1 : 3;
+  speedToggle.dataset.speed = String(newSpeed);
+  speedToggle.classList.toggle('active', !isfast);
+  speedToggle.textContent = isfast ? '3x' : '1x';
+  engine?.setSpeed(newSpeed);
 });
 
 rematchBtn.addEventListener('click', async () => {

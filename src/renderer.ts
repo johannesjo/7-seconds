@@ -8,7 +8,7 @@ export class Renderer {
   private unitGraphics: Map<string, Container> = new Map();
   private dyingUnits: Map<string, { container: Container; age: number }> = new Map();
   private elevationGraphics: Container | null = null;
-  private obstacleGraphics: Graphics | null = null;
+  private obstacleGraphics: Container | null = null;
   private coverGraphics: Container | null = null;
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
@@ -130,18 +130,33 @@ export class Renderer {
   renderObstacles(obstacles: Obstacle[]): void {
     if (this.obstacleGraphics) {
       this.app.stage.removeChild(this.obstacleGraphics);
+      this.obstacleGraphics.destroy({ children: true });
     }
-    this.obstacleGraphics = new Graphics();
+    const wrapper = new Container();
+    this.obstacleGraphics = wrapper;
+
+    // Bottom layer: borders
+    const borders = new Graphics();
     for (const obs of obstacles) {
-      this.obstacleGraphics.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
-      this.obstacleGraphics.fill({ color: 0x4a4a6e });
-      this.obstacleGraphics.setStrokeStyle({ width: 1.5, color: 0x8888aa });
-      this.obstacleGraphics.stroke();
-      // Inner highlight for depth
-      this.obstacleGraphics.roundRect(obs.x + 2, obs.y + 2, obs.w - 4, obs.h - 4, 2);
-      this.obstacleGraphics.setStrokeStyle({ width: 1, color: 0x9999bb, alpha: 0.3 });
-      this.obstacleGraphics.stroke();
+      borders.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
+      borders.setStrokeStyle({ width: 2, color: 0x8888aa });
+      borders.stroke();
     }
+    wrapper.addChild(borders);
+
+    // Top layer: fills + inner highlights — covers internal borders between overlapping blocks
+    const fills = new Graphics();
+    for (const obs of obstacles) {
+      fills.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
+      fills.fill({ color: 0x4a4a6e });
+    }
+    for (const obs of obstacles) {
+      fills.roundRect(obs.x + 2, obs.y + 2, obs.w - 4, obs.h - 4, 2);
+      fills.setStrokeStyle({ width: 1, color: 0x9999bb, alpha: 0.3 });
+      fills.stroke();
+    }
+    wrapper.addChild(fills);
+
     // Index 3: right after elevation (2)
     this.app.stage.addChildAt(this.obstacleGraphics, 3);
   }
@@ -152,17 +167,10 @@ export class Renderer {
       this.coverGraphics.destroy({ children: true });
     }
     const container = new Container();
-    const gfx = new Graphics();
 
+    // Bottom layer: dashed borders
+    const borderGfx = new Graphics();
     for (const c of covers) {
-      const cx = c.x + c.w / 2;
-      const cy = c.y + c.h / 2;
-
-      // Cover block fill
-      gfx.roundRect(c.x, c.y, c.w, c.h, 3);
-      gfx.fill({ color: 0x4a4a68 });
-
-      // Dashed border — draw short segments along the perimeter
       const dashLen = 5;
       const gapLen = 4;
       const edges: [number, number, number, number][] = [
@@ -171,7 +179,7 @@ export class Renderer {
         [c.x + c.w, c.y + c.h, c.x, c.y + c.h],
         [c.x, c.y + c.h, c.x, c.y],
       ];
-      gfx.setStrokeStyle({ width: 1, color: 0x7788aa });
+      borderGfx.setStrokeStyle({ width: 1, color: 0x7788aa });
       for (const [x1, y1, x2, y2] of edges) {
         const edgeLen = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
         const dx = (x2 - x1) / edgeLen;
@@ -179,12 +187,26 @@ export class Renderer {
         let d = 0;
         while (d < edgeLen) {
           const end = Math.min(d + dashLen, edgeLen);
-          gfx.moveTo(x1 + dx * d, y1 + dy * d);
-          gfx.lineTo(x1 + dx * end, y1 + dy * end);
-          gfx.stroke();
+          borderGfx.moveTo(x1 + dx * d, y1 + dy * d);
+          borderGfx.lineTo(x1 + dx * end, y1 + dy * end);
+          borderGfx.stroke();
           d = end + gapLen;
         }
       }
+    }
+    container.addChild(borderGfx);
+
+    // Top layer: fills — covers internal borders between overlapping blocks
+    const fillGfx = new Graphics();
+    for (const c of covers) {
+      fillGfx.roundRect(c.x, c.y, c.w, c.h, 3);
+      fillGfx.fill({ color: 0x4a4a68 });
+    }
+    container.addChild(fillGfx);
+
+    for (const c of covers) {
+      const cx = c.x + c.w / 2;
+      const cy = c.y + c.h / 2;
 
       // Hover label — "-50% Damage"
       const hitArea = new Graphics();
@@ -209,8 +231,6 @@ export class Renderer {
       container.addChild(hitArea);
     }
 
-    container.addChild(gfx);
-    container.setChildIndex(gfx, 0);
     this.coverGraphics = container;
     // Index 4: after obstacles (3)
     this.app.stage.addChildAt(this.coverGraphics, 4);
