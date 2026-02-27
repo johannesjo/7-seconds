@@ -286,16 +286,19 @@ export class Renderer {
     }
 
     // Gun barrel — elongated shape pointing in +X direction
+    // Gun barrel — zombies have none
     const nose = new Graphics();
-    if (unit.type === 'sniper') {
-      // Sniper: thin straight barrel
-      const nr = unit.radius * 1.4;
-      nose.rect(unit.radius - 1, -1.5, nr + 1, 3);
-      nose.fill({ color: 0xffffff, alpha: 0.6 });
-    } else {
-      const nr = unit.radius * 0.6;
-      nose.poly([unit.radius + nr, 0, unit.radius - 1, -nr * 0.35, unit.radius - 1, nr * 0.35]);
-      nose.fill({ color: 0xffffff, alpha: 0.6 });
+    if (unit.type !== 'zombie') {
+      if (unit.type === 'sniper') {
+        // Sniper: thin straight barrel
+        const nr = unit.radius * 1.4;
+        nose.rect(unit.radius - 1, -1.5, nr + 1, 3);
+        nose.fill({ color: 0xffffff, alpha: 0.6 });
+      } else {
+        const nr = unit.radius * 0.6;
+        nose.poly([unit.radius + nr, 0, unit.radius - 1, -nr * 0.35, unit.radius - 1, nr * 0.35]);
+        nose.fill({ color: 0xffffff, alpha: 0.6 });
+      }
     }
 
     container.addChild(shape);

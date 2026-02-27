@@ -195,6 +195,8 @@ export class GameEngine {
     );
 
     for (const unit of redUnits) {
+      // Zombies don't use AI planning — they chase in real-time
+      if (unit.type === 'zombie') continue;
       const margin = 8;
       const padding = unit.radius + margin;
 
@@ -272,6 +274,16 @@ export class GameEngine {
     // Horde start delay — skip red movement for 2s so player can react
     const redDelayed = this.hordeStartDelay > 0;
     if (redDelayed) this.hordeStartDelay -= dt;
+
+    // Zombies always chase closest enemy
+    for (const unit of this.units) {
+      if (!unit.alive || unit.type !== 'zombie') continue;
+      const target = findTarget(unit, this.units, null, this.obstacles);
+      if (target) {
+        unit.waypoints = [];
+        unit.moveTarget = { x: target.pos.x, y: target.pos.y };
+      }
+    }
 
     // Advance waypoints and move
     for (const unit of this.units) {
