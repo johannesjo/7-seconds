@@ -7,8 +7,9 @@ export interface ProjectileHit {
   team: Team;
   angle: number;
   damage: number;
+  flanked: boolean;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER } from './constants';
 
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
@@ -520,6 +521,15 @@ export function isInRange(attacker: Unit, target: Unit, elevationZones: Elevatio
   return distance(attacker.pos, target.pos) <= range + attacker.radius + target.radius;
 }
 
+/** Check if a projectile hit is a flank (outside the target's 120° front cone). */
+export function isFlanked(projectileVelAngle: number, targetGunAngle: number): boolean {
+  const incomingAngle = projectileVelAngle + Math.PI;
+  let diff = incomingAngle - targetGunAngle;
+  diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
+  if (diff < -Math.PI) diff += 2 * Math.PI;
+  return Math.abs(diff) > FLANK_ANGLE_THRESHOLD;
+}
+
 export function applyDamage(unit: Unit, amount: number): void {
   unit.hp = Math.max(0, unit.hp - amount);
   if (unit.hp === 0) {
@@ -608,15 +618,19 @@ export function updateProjectiles(
       const dy = p.pos.y - unit.pos.y;
       const hitDist = p.radius + unit.radius;
       if (dx * dx + dy * dy <= hitDist * hitDist) {
+        const projAngle = Math.atan2(p.vel.y, p.vel.x);
+        const flanked = isFlanked(projAngle, unit.gunAngle);
+        const actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
         const wasBefore = unit.hp;
-        applyDamage(unit, p.damage);
+        applyDamage(unit, actualDamage);
         hits.push({
           pos: { x: p.pos.x, y: p.pos.y },
           targetId: unit.id,
           killed: wasBefore > 0 && !unit.alive,
           team: p.team,
-          angle: Math.atan2(p.vel.y, p.vel.x),
-          damage: p.damage,
+          angle: projAngle,
+          flanked,
+          damage: actualDamage,
         });
         hit = true;
         break;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight } from './units';
-import { MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked } from './units';
+import { MAP_WIDTH, MAP_HEIGHT, FLANK_ANGLE_THRESHOLD } from './constants';
 
 
 describe('createUnit', () => {
@@ -231,6 +231,30 @@ describe('tryFireProjectile', () => {
   });
 });
 
+describe('isFlanked', () => {
+  it('returns true when projectile hits from behind', () => {
+    // Target faces right (0), projectile travels right (0) = hitting from behind
+    expect(isFlanked(0, 0)).toBe(true);
+  });
+
+  it('returns false when projectile hits head-on', () => {
+    // Target faces right (0), projectile travels left (PI) = head-on
+    expect(isFlanked(Math.PI, 0)).toBe(false);
+  });
+
+  it('returns true when projectile hits from the side at 90°', () => {
+    // Target faces right (0), projectile travels down (PI/2) = side hit
+    expect(isFlanked(Math.PI / 2, 0)).toBe(true);
+  });
+
+  it('handles negative angles correctly', () => {
+    // Target faces left (PI), projectile travels right (0) = comes from left = head-on
+    expect(isFlanked(0, Math.PI)).toBe(false);
+    // Target faces left (PI), projectile travels left (PI) = comes from right = from behind
+    expect(isFlanked(Math.PI, Math.PI)).toBe(true);
+  });
+});
+
 describe('updateProjectiles', () => {
   it('moves projectiles and removes those past max range', () => {
     const proj = {
@@ -262,10 +286,12 @@ describe('updateProjectiles', () => {
     };
     const { alive, hits } = updateProjectiles([proj], [target], 0.016);
     expect(alive).toHaveLength(0);
-    expect(target.hp).toBe(20); // 30 - 10
+    expect(target.hp).toBe(15); // 30 - 15 (flanked: red scout faces down, hit from side)
     expect(hits).toHaveLength(1);
     expect(hits[0].targetId).toBe('e1');
     expect(hits[0].killed).toBe(false);
+    expect(hits[0].flanked).toBe(true);
+    expect(hits[0].damage).toBe(15);
   });
 
   it('removes projectile when it hits an obstacle', () => {
@@ -298,5 +324,45 @@ describe('updateProjectiles', () => {
     };
     const { alive } = updateProjectiles([proj], [], 0.1, [obstacle]);
     expect(alive).toHaveLength(1);
+  });
+
+  it('applies 1.5x damage on flanking hit', () => {
+    const target = createUnit('e1', 'soldier', 'red', { x: 95, y: 100 });
+    target.gunAngle = Math.PI; // facing left
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: -300, y: 0 }, // traveling left — comes from right, hitting from behind
+      target: { x: 95, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 200,
+      distanceTraveled: 0,
+    };
+    const { hits } = updateProjectiles([proj], [target], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].flanked).toBe(true);
+    expect(hits[0].damage).toBe(15); // 10 * 1.5
+    expect(target.hp).toBe(45); // 60 - 15
+  });
+
+  it('applies normal damage on head-on hit', () => {
+    const target = createUnit('e1', 'soldier', 'red', { x: 95, y: 100 });
+    target.gunAngle = 0; // facing right (toward the projectile coming from the left)
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: -300, y: 0 }, // traveling left — head-on to target facing right
+      target: { x: 95, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 200,
+      distanceTraveled: 0,
+    };
+    const { hits } = updateProjectiles([proj], [target], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].flanked).toBe(false);
+    expect(hits[0].damage).toBe(10);
+    expect(target.hp).toBe(50); // 60 - 10
   });
 });
