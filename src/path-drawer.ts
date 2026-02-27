@@ -1,6 +1,6 @@
-import { Graphics, Container, Rectangle } from 'pixi.js';
+import { Graphics, Container, Rectangle, Text } from 'pixi.js';
 import { Unit, Team, Vec2, ElevationZone } from './types';
-import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ZONE_DEPTH_RATIO } from './constants';
+import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ZONE_DEPTH_RATIO, ROUND_DURATION_S } from './constants';
 import { getElevationLevel } from './units';
 
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
@@ -24,6 +24,41 @@ function distancePt(a: Vec2, b: Vec2): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+/** Sum of all segment lengths in a polyline. */
+function polylineLength(pts: Vec2[]): number {
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) {
+    len += distancePt(pts[i - 1], pts[i]);
+  }
+  return len;
+}
+
+/** Return position and angle at a given distance along a polyline. */
+function pointAtDistance(pts: Vec2[], dist: number): { pos: Vec2; angle: number } {
+  let remaining = dist;
+  for (let i = 1; i < pts.length; i++) {
+    const segLen = distancePt(pts[i - 1], pts[i]);
+    if (remaining <= segLen && segLen > 0) {
+      const t = remaining / segLen;
+      return {
+        pos: {
+          x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t,
+          y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * t,
+        },
+        angle: Math.atan2(pts[i].y - pts[i - 1].y, pts[i].x - pts[i - 1].x),
+      };
+    }
+    remaining -= segLen;
+  }
+  // Past the end — return last point
+  const last = pts[pts.length - 1];
+  const prev = pts.length >= 2 ? pts[pts.length - 2] : pts[0];
+  return {
+    pos: { x: last.x, y: last.y },
+    angle: Math.atan2(last.y - prev.y, last.x - prev.x),
+  };
+}
+
 export class PathDrawer {
   private stage: Container;
   private units: Unit[] = [];
@@ -38,13 +73,18 @@ export class PathDrawer {
   private enabled = false;
   private canvas: HTMLCanvasElement | null = null;
   private _zoneControl = false;
+  private labelContainer: Container;
+  private labelPool: Text[] = [];
+  private labelIndex = 0;
 
   constructor(stage: Container, canvas?: HTMLCanvasElement) {
     this.stage = stage;
     this.gfx = new Graphics();
     this.hoverGfx = new Graphics();
+    this.labelContainer = new Container();
     this.stage.addChild(this.gfx);
     this.stage.addChild(this.hoverGfx);
+    this.stage.addChild(this.labelContainer);
 
     // Suppress context menu on canvas
     if (canvas) {
@@ -67,6 +107,24 @@ export class PathDrawer {
     this._zoneControl = value;
   }
 
+  private acquireLabel(): Text {
+    if (this.labelIndex < this.labelPool.length) {
+      const label = this.labelPool[this.labelIndex];
+      label.visible = true;
+      this.labelIndex++;
+      return label;
+    }
+    const label = new Text({
+      text: '',
+      style: { fontSize: 11, fontFamily: 'monospace', fill: 0xffffff },
+    });
+    label.anchor.set(0.5, 1);
+    this.labelContainer.addChild(label);
+    this.labelPool.push(label);
+    this.labelIndex++;
+    return label;
+  }
+
   enable(team: Team, units: Unit[], elevationZones: ElevationZone[] = []): void {
     this.team = team;
     this.units = units;
@@ -87,6 +145,7 @@ export class PathDrawer {
     this.hoveredEnemy = null;
     this.rawPoints = [];
     this.hoverGfx.clear();
+    for (const label of this.labelPool) label.visible = false;
   }
 
   /** Clear all waypoints for a team (called at start of their planning phase). */
@@ -102,6 +161,7 @@ export class PathDrawer {
 
   renderPaths(): void {
     this.gfx.clear();
+    this.labelIndex = 0;
 
     for (const unit of this.units) {
       if (!unit.alive || unit.waypoints.length === 0) continue;
@@ -120,6 +180,29 @@ export class PathDrawer {
       const last = unit.waypoints[unit.waypoints.length - 1];
       this.gfx.circle(last.x, last.y, 4);
       this.gfx.fill({ color, alpha });
+
+      // Tick marks at 1-second intervals + time label
+      const fullPath: Vec2[] = [unit.pos, ...unit.waypoints];
+      const pathLen = polylineLength(fullPath);
+      const travelTime = pathLen / unit.speed;
+      const tickAlpha = alpha * 0.5;
+      const tickDist = unit.speed; // 1 second of travel
+      for (let d = tickDist; d < pathLen; d += tickDist) {
+        const { pos: tp, angle: ta } = pointAtDistance(fullPath, d);
+        const nx = Math.cos(ta + Math.PI / 2) * 4;
+        const ny = Math.sin(ta + Math.PI / 2) * 4;
+        this.gfx.setStrokeStyle({ width: 1, color, alpha: tickAlpha });
+        this.gfx.moveTo(tp.x - nx, tp.y - ny);
+        this.gfx.lineTo(tp.x + nx, tp.y + ny);
+        this.gfx.stroke();
+      }
+
+      const overLimit = travelTime > ROUND_DURATION_S;
+      const timeLabel = this.acquireLabel();
+      timeLabel.text = overLimit ? `${travelTime.toFixed(1)}s!` : `${travelTime.toFixed(1)}s`;
+      timeLabel.style.fill = overLimit ? 0xff4444 : 0xffffff;
+      timeLabel.position.set(last.x, last.y - 12);
+      timeLabel.alpha = alpha;
     }
 
     // Draw in-progress raw line (thicker + brighter than finalized paths)
@@ -131,6 +214,33 @@ export class PathDrawer {
         this.gfx.lineTo(this.rawPoints[i].x, this.rawPoints[i].y);
       }
       this.gfx.stroke();
+
+      // Tick marks + live time label for in-progress path
+      const rawLen = polylineLength(this.rawPoints);
+      const rawTime = rawLen / this.selectedUnit.speed;
+      const tickDist = this.selectedUnit.speed;
+      for (let d = tickDist; d < rawLen; d += tickDist) {
+        const { pos: tp, angle: ta } = pointAtDistance(this.rawPoints, d);
+        const nx = Math.cos(ta + Math.PI / 2) * 5;
+        const ny = Math.sin(ta + Math.PI / 2) * 5;
+        this.gfx.setStrokeStyle({ width: 1.5, color, alpha: 0.8 });
+        this.gfx.moveTo(tp.x - nx, tp.y - ny);
+        this.gfx.lineTo(tp.x + nx, tp.y + ny);
+        this.gfx.stroke();
+      }
+
+      const endpoint = this.rawPoints[this.rawPoints.length - 1];
+      const rawOverLimit = rawTime > ROUND_DURATION_S;
+      const liveLabel = this.acquireLabel();
+      liveLabel.text = rawOverLimit ? `${rawTime.toFixed(1)}s!` : `${rawTime.toFixed(1)}s`;
+      liveLabel.style.fill = rawOverLimit ? 0xff4444 : 0xffffff;
+      liveLabel.position.set(endpoint.x, endpoint.y - 12);
+      liveLabel.alpha = 1.0;
+    }
+
+    // Hide unused pool labels
+    for (let i = this.labelIndex; i < this.labelPool.length; i++) {
+      this.labelPool[i].visible = false;
     }
 
     this.renderHoverLayer();
@@ -267,6 +377,7 @@ export class PathDrawer {
   clearGraphics(): void {
     this.gfx.clear();
     this.hoverGfx.clear();
+    for (const label of this.labelPool) label.visible = false;
   }
 
   destroy(): void {
@@ -280,8 +391,10 @@ export class PathDrawer {
     }
     this.stage.removeChild(this.gfx);
     this.stage.removeChild(this.hoverGfx);
+    this.stage.removeChild(this.labelContainer);
     this.gfx.destroy();
     this.hoverGfx.destroy();
+    this.labelContainer.destroy();
   }
 
   private onContextMenu = (e: Event): void => {
