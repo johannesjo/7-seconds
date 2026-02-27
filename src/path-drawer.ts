@@ -375,7 +375,35 @@ export class PathDrawer {
       this.hoverGfx.circle(this.hoveredEnemy.pos.x, this.hoveredEnemy.pos.y, this.hoveredEnemy.radius + 4);
       this.hoverGfx.setStrokeStyle({ width: 2, color: enemyColor, alpha: 0.6 });
       this.hoverGfx.stroke();
-      this.drawRangeCircle(this.hoveredEnemy, this.hoveredEnemy.pos, enemyColor);
+
+      // Show enemy path + time on hover
+      if (this.hoveredEnemy.waypoints.length > 0) {
+        this.hoverGfx.setStrokeStyle({ width: 2, color: enemyColor, alpha: 0.5 });
+        this.hoverGfx.moveTo(this.hoveredEnemy.pos.x, this.hoveredEnemy.pos.y);
+        for (const wp of this.hoveredEnemy.waypoints) {
+          this.hoverGfx.lineTo(wp.x, wp.y);
+        }
+        this.hoverGfx.stroke();
+
+        const last = this.hoveredEnemy.waypoints[this.hoveredEnemy.waypoints.length - 1];
+        this.hoverGfx.circle(last.x, last.y, 4);
+        this.hoverGfx.fill({ color: enemyColor, alpha: 0.5 });
+
+        const fullPath: Vec2[] = [this.hoveredEnemy.pos, ...this.hoveredEnemy.waypoints];
+        const pathLen = polylineLength(fullPath);
+        const travelTime = pathLen / this.hoveredEnemy.speed;
+        const overLimit = travelTime > ROUND_DURATION_S;
+        this.hoverLabel.text = overLimit ? `${travelTime.toFixed(1)}s!` : `${travelTime.toFixed(1)}s`;
+        this.hoverLabel.style.fill = overLimit ? 0xff4444 : 0xffffff;
+        this.hoverLabel.position.set(last.x, last.y - 12);
+        this.hoverLabel.alpha = 0.6;
+        this.hoverLabel.visible = true;
+      }
+
+      const enemyEndPos = this.hoveredEnemy.waypoints.length > 0
+        ? this.hoveredEnemy.waypoints[this.hoveredEnemy.waypoints.length - 1]
+        : this.hoveredEnemy.pos;
+      this.drawRangeCircle(this.hoveredEnemy, enemyEndPos, enemyColor);
     }
   }
 
