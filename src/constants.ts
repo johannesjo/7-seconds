@@ -34,7 +34,7 @@ export const FLANK_DAMAGE_MULTIPLIER = 1.5;
 export const COVER_PROXIMITY = 20;
 export const COVER_DAMAGE_REDUCTION = 0.5;
 
-export const HORDE_MAX_WAVES = 10;
+export const HORDE_MAX_WAVES = 12;
 export const HORDE_STARTING_ARMY: { type: UnitType; count: number }[] = [
   { type: 'soldier', count: 2 },
 ];

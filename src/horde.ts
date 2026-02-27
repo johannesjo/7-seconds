@@ -13,6 +13,8 @@ export const HORDE_WAVES: HordeWave[] = [
   { wave: 8, enemies: [{ type: 'tank', count: 3 }, { type: 'scout', count: 4 }] },
   { wave: 9, enemies: [{ type: 'soldier', count: 4 }, { type: 'tank', count: 2 }, { type: 'sniper', count: 2 }] },
   { wave: 10, enemies: [{ type: 'tank', count: 3 }, { type: 'sniper', count: 3 }, { type: 'soldier', count: 4 }] },
+  { wave: 11, enemies: [{ type: 'tank', count: 4 }, { type: 'soldier', count: 5 }, { type: 'scout', count: 6 }] },
+  { wave: 12, enemies: [{ type: 'tank', count: 5 }, { type: 'sniper', count: 4 }, { type: 'soldier', count: 6 }, { type: 'scout', count: 4 }] },
 ];
 
 function makeStatUpgrade(
