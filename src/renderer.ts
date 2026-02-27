@@ -1,6 +1,6 @@
 import { Application, Graphics, Container, Text } from 'pixi.js';
-import { Unit, Obstacle, Projectile, ElevationZone, CoverBlock } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, setMapSize, ZONE_DEPTH_RATIO, COVER_PROXIMITY } from './constants';
+import { Unit, Obstacle, Projectile, ElevationZone, DefenseZone, Vec2 } from './types';
+import { MAP_WIDTH, MAP_HEIGHT, setMapSize, ZONE_DEPTH_RATIO } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 
 export class Renderer {
@@ -13,8 +13,8 @@ export class Renderer {
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
-  private coverIndicatorGfx: Graphics | null = null;
   private zoneStatusGfx: Graphics | null = null;
+  private zoneLabels: { rect: Obstacle; label: Text; hovered: boolean; dragActive: boolean }[] = [];
   bloodEnabled = true;
 
   constructor() {
@@ -70,6 +70,7 @@ export class Renderer {
   }
 
   renderElevationZones(zones: ElevationZone[]): void {
+    this.zoneLabels = [];
     if (this.elevationGraphics) {
       this.app.stage.removeChild(this.elevationGraphics);
       this.elevationGraphics.destroy({ children: true });
@@ -92,20 +93,20 @@ export class Renderer {
       gfx.roundRect(z.x + m2, z.y + m2, z.w - m2 * 2, z.h - m2 * 2, 2);
       gfx.fill({ color: 0x3a3a68, alpha: 0.25 });
 
-      // Invisible hit area for hover detection
+      // Hit area for hover detection
       const hitArea = new Graphics();
       hitArea.roundRect(z.x, z.y, z.w, z.h, 6);
       hitArea.fill({ color: 0x000000, alpha: 0.001 });
       hitArea.eventMode = 'static';
       hitArea.cursor = 'default';
 
-      // Label (hidden until hover)
       const label = new Text({
         text: '+20% Range',
         style: {
-          fontSize: 10,
+          fontSize: 14,
           fontFamily: 'monospace',
           fill: '#66ff88',
+          fontWeight: 'bold',
         },
       });
       label.alpha = 0;
@@ -113,8 +114,11 @@ export class Renderer {
       label.x = z.x + z.w / 2;
       label.y = z.y + z.h / 2;
 
-      hitArea.on('pointerenter', () => { label.alpha = 0.5; });
-      hitArea.on('pointerleave', () => { label.alpha = 0; });
+      const entry = { rect: z, label, hovered: false, dragActive: false };
+      this.zoneLabels.push(entry);
+
+      hitArea.on('pointerenter', () => { entry.hovered = true; label.alpha = 0.7; });
+      hitArea.on('pointerleave', () => { entry.hovered = false; label.alpha = entry.dragActive ? 0.7 : 0; });
 
       container.addChild(label);
       container.addChild(hitArea);
@@ -161,79 +165,80 @@ export class Renderer {
     this.app.stage.addChildAt(this.obstacleGraphics, 3);
   }
 
-  renderCoverBlocks(covers: CoverBlock[]): void {
+  renderDefenseZones(zones: DefenseZone[]): void {
     if (this.coverGraphics) {
       this.app.stage.removeChild(this.coverGraphics);
       this.coverGraphics.destroy({ children: true });
     }
     const container = new Container();
+    const gfx = new Graphics();
 
-    // Bottom layer: dashed borders
-    const borderGfx = new Graphics();
-    for (const c of covers) {
-      const dashLen = 5;
-      const gapLen = 4;
-      const edges: [number, number, number, number][] = [
-        [c.x, c.y, c.x + c.w, c.y],
-        [c.x + c.w, c.y, c.x + c.w, c.y + c.h],
-        [c.x + c.w, c.y + c.h, c.x, c.y + c.h],
-        [c.x, c.y + c.h, c.x, c.y],
-      ];
-      borderGfx.setStrokeStyle({ width: 1, color: 0x7788aa });
-      for (const [x1, y1, x2, y2] of edges) {
-        const edgeLen = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-        const dx = (x2 - x1) / edgeLen;
-        const dy = (y2 - y1) / edgeLen;
-        let d = 0;
-        while (d < edgeLen) {
-          const end = Math.min(d + dashLen, edgeLen);
-          borderGfx.moveTo(x1 + dx * d, y1 + dy * d);
-          borderGfx.lineTo(x1 + dx * end, y1 + dy * end);
-          borderGfx.stroke();
-          d = end + gapLen;
-        }
+    for (const z of zones) {
+      // Very faint fill
+      gfx.roundRect(z.x, z.y, z.w, z.h, 6);
+      gfx.fill({ color: 0x44aaaa, alpha: 0.04 });
+
+      // Dotted perimeter — small circles along edges
+      const dotSpacing = 16;
+      const dotR = 2;
+      // Top and bottom edges
+      for (let x = z.x + dotSpacing / 2; x <= z.x + z.w - dotSpacing / 2; x += dotSpacing) {
+        gfx.circle(x, z.y, dotR);
+        gfx.fill({ color: 0x44aaaa, alpha: 0.25 });
+        gfx.circle(x, z.y + z.h, dotR);
+        gfx.fill({ color: 0x44aaaa, alpha: 0.25 });
       }
-    }
-    container.addChild(borderGfx);
+      // Left and right edges (skip corners to avoid overlap)
+      for (let y = z.y + dotSpacing; y <= z.y + z.h - dotSpacing / 2; y += dotSpacing) {
+        gfx.circle(z.x, y, dotR);
+        gfx.fill({ color: 0x44aaaa, alpha: 0.25 });
+        gfx.circle(z.x + z.w, y, dotR);
+        gfx.fill({ color: 0x44aaaa, alpha: 0.25 });
+      }
 
-    // Top layer: fills — covers internal borders between overlapping blocks
-    const fillGfx = new Graphics();
-    for (const c of covers) {
-      fillGfx.roundRect(c.x, c.y, c.w, c.h, 3);
-      fillGfx.fill({ color: 0x4a4a68 });
-    }
-    container.addChild(fillGfx);
-
-    for (const c of covers) {
-      const cx = c.x + c.w / 2;
-      const cy = c.y + c.h / 2;
-
-      // Hover label — "-50% Damage"
+      // Hit area for hover detection
       const hitArea = new Graphics();
-      hitArea.roundRect(c.x - 10, c.y - 10, c.w + 20, c.h + 20, 6);
+      hitArea.roundRect(z.x, z.y, z.w, z.h, 6);
       hitArea.fill({ color: 0x000000, alpha: 0.001 });
       hitArea.eventMode = 'static';
       hitArea.cursor = 'default';
 
       const label = new Text({
         text: '-50% Dmg',
-        style: { fontSize: 9, fontFamily: 'monospace', fill: '#88aacc' },
+        style: { fontSize: 14, fontFamily: 'monospace', fill: '#66cccc', fontWeight: 'bold' },
       });
       label.alpha = 0;
       label.anchor.set(0.5, 0.5);
-      label.x = cx;
-      label.y = cy;
+      label.x = z.x + z.w / 2;
+      label.y = z.y + z.h / 2;
 
-      hitArea.on('pointerenter', () => { label.alpha = 0.7; });
-      hitArea.on('pointerleave', () => { label.alpha = 0; });
+      const entry = { rect: z, label, hovered: false, dragActive: false };
+      this.zoneLabels.push(entry);
+
+      hitArea.on('pointerenter', () => { entry.hovered = true; label.alpha = 0.7; });
+      hitArea.on('pointerleave', () => { entry.hovered = false; label.alpha = entry.dragActive ? 0.7 : 0; });
 
       container.addChild(label);
       container.addChild(hitArea);
     }
 
+    container.addChild(gfx);
+    container.setChildIndex(gfx, 0);
+
     this.coverGraphics = container;
     // Index 4: after obstacles (3)
     this.app.stage.addChildAt(this.coverGraphics, 4);
+  }
+
+  /** Show zone labels for zones containing pos; hide the rest (unless hovered). */
+  highlightZonesAt(pos: Vec2 | null): void {
+    for (const zl of this.zoneLabels) {
+      const inside = pos !== null &&
+        pos.x >= zl.rect.x && pos.x <= zl.rect.x + zl.rect.w &&
+        pos.y >= zl.rect.y && pos.y <= zl.rect.y + zl.rect.h;
+      zl.dragActive = inside;
+      zl.label.alpha = (zl.hovered || zl.dragActive) ? 0.7 : 0;
+    }
   }
 
   renderUnits(units: Unit[], dt = 0): void {

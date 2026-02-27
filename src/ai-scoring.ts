@@ -1,13 +1,13 @@
-import { Unit, Vec2, Obstacle, ElevationZone, CoverBlock, UnitType } from './types';
-import { ROUND_DURATION_S, COVER_PROXIMITY, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { hasLineOfSight, getElevationLevel, distToRect, isNearCover, flankScore } from './units';
+import { Unit, Vec2, Obstacle, ElevationZone, DefenseZone, UnitType } from './types';
+import { ROUND_DURATION_S, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { hasLineOfSight, getElevationLevel, isInDefenseZone, flankScore } from './units';
 
 export interface ScoringContext {
   candidate: Vec2;
   unit: Unit;
   enemies: Unit[];
   obstacles: Obstacle[];
-  coverBlocks: CoverBlock[];
+  defenseZones: DefenseZone[];
   elevationZones: ElevationZone[];
 }
 
@@ -28,7 +28,7 @@ const WEIGHTS: Record<UnitType, {
 
 /** Score a candidate position for a given unit. Higher is better. */
 export function scorePosition(ctx: ScoringContext): number {
-  const { candidate, unit, enemies, obstacles, elevationZones, coverBlocks } = ctx;
+  const { candidate, unit, enemies, obstacles, elevationZones, defenseZones } = ctx;
   const w = WEIGHTS[unit.type];
 
   // Check reachability: can the unit reach this position within ROUND_DURATION_S?
@@ -75,8 +75,8 @@ export function scorePosition(ctx: ScoringContext): number {
   const elevLevel = getElevationLevel(candidate, elevationZones);
   score += elevLevel * w.elevation;
 
-  // Cover proximity bonus
-  if (isNearCover(candidate, coverBlocks)) {
+  // Defense zone bonus
+  if (isInDefenseZone(candidate, defenseZones)) {
     score += w.cover;
   }
 
@@ -87,12 +87,11 @@ export function scorePosition(ctx: ScoringContext): number {
 export function generateCandidates(
   unit: Unit,
   obstacles: Obstacle[],
-  coverBlocks: CoverBlock[],
+  defenseZones: DefenseZone[],
   elevationZones: ElevationZone[],
 ): Vec2[] {
   const maxDist = unit.speed * ROUND_DURATION_S;
   const padding = unit.radius + 4;
-  const allBlockers = [...obstacles, ...coverBlocks];
   const candidates: Vec2[] = [];
 
   // 50px grid across reachable area
@@ -105,33 +104,24 @@ export function generateCandidates(
   for (let x = minX; x <= maxX; x += gridStep) {
     for (let y = minY; y <= maxY; y += gridStep) {
       const pos = { x, y };
-      if (!isInsideObstacle(pos, allBlockers, padding)) {
+      if (!isInsideObstacle(pos, obstacles, padding)) {
         candidates.push(pos);
       }
     }
   }
 
-  // Positions adjacent to each cover block (one per side)
-  for (const cover of coverBlocks) {
-    const adjacent: Vec2[] = [
-      { x: cover.x - COVER_PROXIMITY * 0.5, y: cover.y + cover.h / 2 },  // left
-      { x: cover.x + cover.w + COVER_PROXIMITY * 0.5, y: cover.y + cover.h / 2 }, // right
-      { x: cover.x + cover.w / 2, y: cover.y - COVER_PROXIMITY * 0.5 },  // top
-      { x: cover.x + cover.w / 2, y: cover.y + cover.h + COVER_PROXIMITY * 0.5 }, // bottom
-    ];
-    for (const pos of adjacent) {
-      if (pos.x >= padding && pos.x <= MAP_WIDTH - padding &&
-          pos.y >= padding && pos.y <= MAP_HEIGHT - padding &&
-          !isInsideObstacle(pos, allBlockers, padding)) {
-        candidates.push(pos);
-      }
+  // Center of each reachable defense zone
+  for (const zone of defenseZones) {
+    const center = { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 };
+    if (!isInsideObstacle(center, obstacles, padding)) {
+      candidates.push(center);
     }
   }
 
   // Center of each reachable elevation zone
   for (const zone of elevationZones) {
     const center = { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 };
-    if (!isInsideObstacle(center, allBlockers, padding)) {
+    if (!isInsideObstacle(center, obstacles, padding)) {
       candidates.push(center);
     }
   }

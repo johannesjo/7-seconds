@@ -71,7 +71,7 @@ export interface ElevationZone {
   h: number;
 }
 
-export type CoverBlock = Obstacle;
+export type DefenseZone = Obstacle;
 
 export interface AiUnitOrder {
   id: string;
@@ -149,7 +149,7 @@ export interface ReplayData {
   events: ReplayEvent[];
   obstacles: Obstacle[];
   elevationZones: ElevationZone[];
-  coverBlocks: CoverBlock[];
+  defenseZones: DefenseZone[];
 }
 
 export interface HordeUpgrade {

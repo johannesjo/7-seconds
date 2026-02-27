@@ -1,7 +1,7 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, CoverBlock, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, DefenseZone, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
 import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect } from './units';
-import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
+import { generateObstacles, generateElevationZones, generateDefenseZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
 import { scorePosition, generateCandidates } from './ai-scoring';
@@ -15,7 +15,7 @@ export class GameEngine {
   private units: Unit[] = [];
   private obstacles: Obstacle[] = [];
   private elevationZones: ElevationZone[] = [];
-  private coverBlocks: CoverBlock[] = [];
+  private defenseZones: DefenseZone[] = [];
   private projectiles: Projectile[] = [];
   private renderer: Renderer;
   private running = false;
@@ -41,7 +41,7 @@ export class GameEngine {
   private hordeStartDelay = 0;
   private hordeBlueUnits: Unit[] | null = null;
   private hordeRedArmy: { type: UnitType; count: number }[] | null = null;
-  private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] } | null = null;
+  private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; defenseZones: DefenseZone[] } | null = null;
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
 
@@ -53,7 +53,7 @@ export class GameEngine {
     horde?: boolean;
     hordeBlueUnits?: Unit[];
     hordeRedArmy?: { type: UnitType; count: number }[];
-    hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] };
+    hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; defenseZones: DefenseZone[] };
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -78,14 +78,14 @@ export class GameEngine {
     if (this.hordeMap) {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
-      this.coverBlocks = this.hordeMap.coverBlocks;
+      this.defenseZones = this.hordeMap.defenseZones;
     } else {
       this.obstacles = generateObstacles();
       this.elevationZones = generateElevationZones();
-      this.coverBlocks = generateCoverBlocks(this.obstacles);
+      this.defenseZones = generateDefenseZones(this.obstacles);
     }
 
-    const allBlocks = [...this.obstacles, ...this.coverBlocks];
+    const allBlocks = this.obstacles;
 
     if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
       // Horde mode: use pre-created blue units + spawn wave enemies
@@ -110,13 +110,13 @@ export class GameEngine {
     this.roundTimer = 0;
     this.running = true;
 
-    this.pathDrawer = new PathDrawer(this.renderer.stage, this.renderer.canvas);
+    this.pathDrawer = new PathDrawer(this.renderer.stage, this.renderer.canvas, (pos) => this.renderer.highlightZonesAt(pos));
     this.pathDrawer.zoneControl = this.zoneControlEnabled;
 
     // Render initial state — hills under obstacles
     this.renderer.renderElevationZones(this.elevationZones);
     this.renderer.renderObstacles(this.obstacles);
-    this.renderer.renderCoverBlocks(this.coverBlocks);
+    this.renderer.renderDefenseZones(this.defenseZones);
     this.renderer.renderUnits(this.units);
 
     // Start ticker for rendering during planning
@@ -189,14 +189,14 @@ export class GameEngine {
 
   /** Generate AI paths for red units using position-scoring system. */
   private generateAiPaths(): void {
-    const allBlockers = [...this.obstacles, ...this.coverBlocks];
+    const allBlockers = this.obstacles;
     const redUnits = this.units.filter(u => u.alive && u.team === 'red');
     const enemies = this.units.filter(u => u.alive && u.team === 'blue');
 
     const candidates = generateCandidates(
-      redUnits[0] ?? { pos: { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 }, speed: 120, radius: 10 } as Unit,
+      redUnits[0] ?? { pos: { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 }, speed: 100, radius: 10 } as Unit,
       this.obstacles,
-      this.coverBlocks,
+      this.defenseZones,
       this.elevationZones,
     );
 
@@ -212,7 +212,7 @@ export class GameEngine {
           unit,
           enemies,
           obstacles: this.obstacles,
-          coverBlocks: this.coverBlocks,
+          defenseZones: this.defenseZones,
           elevationZones: this.elevationZones,
         });
         scored.push({ pos: candidate, score: s });
@@ -285,9 +285,9 @@ export class GameEngine {
       if (!unit.alive) continue;
       if (redDelayed && unit.team === 'red') continue;
       advanceWaypoint(unit, dt);
-      moveUnit(unit, dt, [...this.obstacles, ...this.coverBlocks], this.units);
+      moveUnit(unit, dt, this.obstacles, this.units);
     }
-    separateUnits(this.units, [...this.obstacles, ...this.coverBlocks]);
+    separateUnits(this.units, this.obstacles);
 
     // Combat — auto-target nearest enemy, fire projectiles
     for (const unit of this.units) {
@@ -330,7 +330,7 @@ export class GameEngine {
       }
     }
 
-    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles, this.coverBlocks);
+    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles, this.defenseZones);
     this.projectiles = aliveProjectiles;
 
     // Trigger effects for hits + record replay events
@@ -485,7 +485,7 @@ export class GameEngine {
       events: this.replayEvents,
       obstacles: this.obstacles,
       elevationZones: this.elevationZones,
-      coverBlocks: this.coverBlocks,
+      defenseZones: this.defenseZones,
     };
   }
 
@@ -528,8 +528,8 @@ export class GameEngine {
     return this.units;
   }
 
-  getMapData(): { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] } {
-    return { obstacles: this.obstacles, elevationZones: this.elevationZones, coverBlocks: this.coverBlocks };
+  getMapData(): { obstacles: Obstacle[]; elevationZones: ElevationZone[]; defenseZones: DefenseZone[] } {
+    return { obstacles: this.obstacles, elevationZones: this.elevationZones, defenseZones: this.defenseZones };
   }
 
   stop(): void {

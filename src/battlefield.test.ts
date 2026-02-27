@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { generateObstacles, generateElevationZones, generateCoverBlocks, generateHordeObstacles, generateHordeElevationZones, generateHordeCoverBlocks } from './battlefield';
+import { generateObstacles, generateElevationZones, generateDefenseZones, generateHordeObstacles, generateHordeElevationZones, generateHordeDefenseZones } from './battlefield';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 describe('generateObstacles', () => {
-  it('generates 3-5 obstacles', () => {
-    const obstacles = generateObstacles();
-    expect(obstacles.length).toBeGreaterThanOrEqual(3);
-    expect(obstacles.length).toBeLessThanOrEqual(5);
+  it('generates 2-3 obstacles', () => {
+    for (let i = 0; i < 20; i++) {
+      const obstacles = generateObstacles();
+      expect(obstacles.length).toBeGreaterThanOrEqual(2);
+      expect(obstacles.length).toBeLessThanOrEqual(3);
+    }
   });
 
   it('obstacles are symmetrical (mirrored top-bottom)', () => {
@@ -30,6 +32,18 @@ describe('generateObstacles', () => {
       expect(obs.x + obs.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
       expect(obs.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.25);
       expect(obs.y + obs.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.75);
+    }
+  });
+
+  it('obstacle sizes are in the 30-60 range', () => {
+    for (let i = 0; i < 20; i++) {
+      const obstacles = generateObstacles();
+      for (const obs of obstacles) {
+        expect(obs.w).toBeGreaterThanOrEqual(30);
+        expect(obs.w).toBeLessThanOrEqual(60);
+        expect(obs.h).toBeGreaterThanOrEqual(30);
+        expect(obs.h).toBeLessThanOrEqual(60);
+      }
     }
   });
 });
@@ -70,59 +84,49 @@ describe('generateElevationZones', () => {
   });
 });
 
-describe('generateCoverBlocks', () => {
-  it('generates 2-4 cover blocks (always even, mirrored pairs)', () => {
+describe('generateDefenseZones', () => {
+  it('generates 4-6 defense zones (always even, mirrored pairs)', () => {
     for (let i = 0; i < 20; i++) {
-      const covers = generateCoverBlocks();
-      expect(covers.length).toBeGreaterThanOrEqual(2);
-      expect(covers.length).toBeLessThanOrEqual(4);
-      expect(covers.length % 2).toBe(0);
+      const zones = generateDefenseZones();
+      expect(zones.length).toBeGreaterThanOrEqual(4);
+      expect(zones.length).toBeLessThanOrEqual(6);
+      expect(zones.length % 2).toBe(0);
     }
   });
 
-  it('cover blocks have a narrow dimension of at most 12', () => {
-    for (let i = 0; i < 20; i++) {
-      const covers = generateCoverBlocks();
-      for (const c of covers) {
-        const narrow = Math.min(c.w, c.h);
-        expect(narrow).toBeLessThanOrEqual(12);
-      }
-    }
-  });
-
-  it('cover blocks are symmetrical (mirrored top-bottom)', () => {
-    const covers = generateCoverBlocks();
-    for (const c of covers) {
-      const centerY = c.y + c.h / 2;
+  it('defense zones are symmetrical (mirrored top-bottom)', () => {
+    const zones = generateDefenseZones();
+    for (const z of zones) {
+      const centerY = z.y + z.h / 2;
       const mirrorCenterY = MAP_HEIGHT - centerY;
-      const hasMirror = covers.some(other => {
+      const hasMirror = zones.some(other => {
         const otherCenterY = other.y + other.h / 2;
-        return Math.abs(otherCenterY - mirrorCenterY) < 1 && other !== c;
+        return Math.abs(otherCenterY - mirrorCenterY) < 1 && other !== z;
       });
       expect(hasMirror).toBe(true);
     }
   });
 
-  it('cover blocks are within map bounds', () => {
+  it('defense zones are within map bounds', () => {
     for (let i = 0; i < 20; i++) {
-      const covers = generateCoverBlocks();
-      for (const c of covers) {
-        expect(c.x).toBeGreaterThanOrEqual(50);
-        expect(c.x + c.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
-        expect(c.y).toBeGreaterThanOrEqual(0);
-        expect(c.y + c.h).toBeLessThanOrEqual(MAP_HEIGHT);
+      const zones = generateDefenseZones();
+      for (const z of zones) {
+        expect(z.x).toBeGreaterThanOrEqual(50);
+        expect(z.x + z.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
+        expect(z.y).toBeGreaterThanOrEqual(0);
+        expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT);
       }
     }
   });
 
-  it('cover blocks do not overlap obstacles', () => {
+  it('defense zones do not overlap obstacles', () => {
     for (let i = 0; i < 20; i++) {
       const obstacles = generateObstacles();
-      const covers = generateCoverBlocks(obstacles);
-      for (const c of covers) {
+      const zones = generateDefenseZones(obstacles);
+      for (const z of zones) {
         for (const obs of obstacles) {
-          const overlaps = c.x < obs.x + obs.w && c.x + c.w > obs.x
-            && c.y < obs.y + obs.h && c.y + c.h > obs.y;
+          const overlaps = z.x < obs.x + obs.w && z.x + z.w > obs.x
+            && z.y < obs.y + obs.h && z.y + z.h > obs.y;
           expect(overlaps).toBe(false);
         }
       }
@@ -133,11 +137,11 @@ describe('generateCoverBlocks', () => {
 // --- Horde-specific generators ---
 
 describe('generateHordeObstacles', () => {
-  it('generates 4-6 obstacles', () => {
+  it('generates 2-4 obstacles', () => {
     for (let i = 0; i < 20; i++) {
       const obstacles = generateHordeObstacles();
-      expect(obstacles.length).toBeGreaterThanOrEqual(4);
-      expect(obstacles.length).toBeLessThanOrEqual(6);
+      expect(obstacles.length).toBeGreaterThanOrEqual(2);
+      expect(obstacles.length).toBeLessThanOrEqual(4);
     }
   });
 
@@ -157,6 +161,18 @@ describe('generateHordeObstacles', () => {
       for (const obs of obstacles) {
         expect(obs.x).toBeGreaterThanOrEqual(50);
         expect(obs.x + obs.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
+      }
+    }
+  });
+
+  it('obstacle sizes are in the 30-60 range', () => {
+    for (let i = 0; i < 20; i++) {
+      const obstacles = generateHordeObstacles();
+      for (const obs of obstacles) {
+        expect(obs.w).toBeGreaterThanOrEqual(30);
+        expect(obs.w).toBeLessThanOrEqual(60);
+        expect(obs.h).toBeGreaterThanOrEqual(30);
+        expect(obs.h).toBeLessThanOrEqual(60);
       }
     }
   });
@@ -182,35 +198,35 @@ describe('generateHordeElevationZones', () => {
   });
 });
 
-describe('generateHordeCoverBlocks', () => {
-  it('generates 3-5 cover blocks', () => {
+describe('generateHordeDefenseZones', () => {
+  it('generates 2-4 defense zones', () => {
     for (let i = 0; i < 20; i++) {
-      const covers = generateHordeCoverBlocks();
-      expect(covers.length).toBeGreaterThanOrEqual(3);
-      expect(covers.length).toBeLessThanOrEqual(5);
+      const zones = generateHordeDefenseZones();
+      expect(zones.length).toBeGreaterThanOrEqual(2);
+      expect(zones.length).toBeLessThanOrEqual(4);
     }
   });
 
-  it('cover blocks do not overlap horde obstacles', () => {
+  it('defense zones do not overlap horde obstacles', () => {
     for (let i = 0; i < 20; i++) {
       const obstacles = generateHordeObstacles();
-      const covers = generateHordeCoverBlocks(obstacles);
-      for (const c of covers) {
+      const zones = generateHordeDefenseZones(obstacles);
+      for (const z of zones) {
         for (const obs of obstacles) {
-          const overlaps = c.x < obs.x + obs.w && c.x + c.w > obs.x
-            && c.y < obs.y + obs.h && c.y + c.h > obs.y;
+          const overlaps = z.x < obs.x + obs.w && z.x + z.w > obs.x
+            && z.y < obs.y + obs.h && z.y + z.h > obs.y;
           expect(overlaps).toBe(false);
         }
       }
     }
   });
 
-  it('cover blocks are in the player half (y >= MAP_HEIGHT * 0.35)', () => {
+  it('defense zones are in the player half (y >= MAP_HEIGHT * 0.35)', () => {
     for (let i = 0; i < 20; i++) {
-      const covers = generateHordeCoverBlocks();
-      for (const c of covers) {
-        expect(c.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.35);
-        expect(c.y + c.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.92);
+      const zones = generateHordeDefenseZones();
+      for (const z of zones) {
+        expect(z.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.35);
+        expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.92);
       }
     }
   });

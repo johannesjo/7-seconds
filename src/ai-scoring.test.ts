@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { scorePosition, generateCandidates } from './ai-scoring';
 import { createUnit } from './units';
-import { Obstacle, ElevationZone, CoverBlock } from './types';
+import { Obstacle, ElevationZone, DefenseZone } from './types';
 
 describe('scorePosition', () => {
   const enemies = [
     createUnit('e1', 'soldier', 'blue', { x: 600, y: 600 }),
   ];
   const obstacles: Obstacle[] = [];
-  const coverBlocks: CoverBlock[] = [];
+  const defenseZones: DefenseZone[] = [];
   const elevationZones: ElevationZone[] = [];
 
   it('snipers prefer far positions over close ones', () => {
@@ -19,7 +19,7 @@ describe('scorePosition', () => {
       unit: sniper,
       enemies,
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones,
     });
 
@@ -28,7 +28,7 @@ describe('scorePosition', () => {
       unit: sniper,
       enemies,
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones,
     });
 
@@ -43,7 +43,7 @@ describe('scorePosition', () => {
       unit: tank,
       enemies,
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones,
     });
 
@@ -52,7 +52,7 @@ describe('scorePosition', () => {
       unit: tank,
       enemies,
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones,
     });
 
@@ -70,7 +70,7 @@ describe('scorePosition', () => {
       unit: scout,
       enemies: [enemy],
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones,
     });
 
@@ -79,7 +79,7 @@ describe('scorePosition', () => {
       unit: scout,
       enemies: [enemy],
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones,
     });
 
@@ -94,7 +94,7 @@ describe('scorePosition', () => {
       unit: scout,
       enemies,
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones,
     });
 
@@ -110,7 +110,7 @@ describe('scorePosition', () => {
       unit: sniper,
       enemies,
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones: [zone],
     });
 
@@ -119,7 +119,7 @@ describe('scorePosition', () => {
       unit: sniper,
       enemies,
       obstacles,
-      coverBlocks,
+      defenseZones,
       elevationZones: [zone],
     });
 
@@ -145,21 +145,16 @@ describe('generateCandidates', () => {
     }
   });
 
-  it('includes positions adjacent to cover blocks', () => {
+  it('includes defense zone centers', () => {
     const unit = createUnit('u1', 'soldier', 'red', { x: 600, y: 400 });
-    const cover: CoverBlock = { x: 580, y: 380, w: 30, h: 10 };
+    const zone: DefenseZone = { x: 550, y: 350, w: 100, h: 100 };
 
-    const candidates = generateCandidates(unit, [], [cover], []);
+    const candidates = generateCandidates(unit, [], [zone], []);
 
-    // Should have candidates near cover (within COVER_PROXIMITY)
-    const nearCover = candidates.some(c => {
-      const cx = Math.max(cover.x, Math.min(cover.x + cover.w, c.x));
-      const cy = Math.max(cover.y, Math.min(cover.y + cover.h, c.y));
-      const dx = c.x - cx;
-      const dy = c.y - cy;
-      return Math.sqrt(dx * dx + dy * dy) <= 20;
-    });
-    expect(nearCover).toBe(true);
+    const hasCenter = candidates.some(c =>
+      Math.abs(c.x - 600) < 1 && Math.abs(c.y - 400) < 1,
+    );
+    expect(hasCenter).toBe(true);
   });
 
   it('includes elevation zone centers', () => {

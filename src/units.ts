@@ -1,4 +1,4 @@
-import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone, CoverBlock } from './types';
+import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone, DefenseZone } from './types';
 
 export interface ProjectileHit {
   pos: Vec2;
@@ -9,7 +9,7 @@ export interface ProjectileHit {
   damage: number;
   flanked: boolean;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, COVER_PROXIMITY, COVER_DAMAGE_REDUCTION } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, DEFENSE_ZONE_REDUCTION } from './constants';
 
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
@@ -199,9 +199,11 @@ export function distToRect(pos: Vec2, rect: Obstacle): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-/** True if pos is within COVER_PROXIMITY of any cover block. */
-export function isNearCover(pos: Vec2, coverBlocks: CoverBlock[]): boolean {
-  return coverBlocks.some(c => distToRect(pos, c) <= COVER_PROXIMITY);
+/** True if pos is inside any defense zone rect. */
+export function isInDefenseZone(pos: Vec2, defenseZones: DefenseZone[]): boolean {
+  return defenseZones.some(z =>
+    pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h,
+  );
 }
 
 /** Returns 0 (frontal approach) to 1 (perfect rear flank). */
@@ -656,32 +658,6 @@ export function isFlanked(projectileVelAngle: number, targetGunAngle: number): b
   return Math.abs(diff) > FLANK_ANGLE_THRESHOLD;
 }
 
-/** Check if a unit is protected by cover (near a cover block that the shot passes through). */
-export function isProtectedByCover(
-  hitPos: Vec2,
-  projVel: Vec2,
-  targetPos: Vec2,
-  coverBlocks: CoverBlock[],
-): boolean {
-  const speed = Math.sqrt(projVel.x * projVel.x + projVel.y * projVel.y);
-  if (speed < 1) return false;
-  // Trace backward from hit along projectile path
-  const traceBack = {
-    x: hitPos.x - (projVel.x / speed) * 200,
-    y: hitPos.y - (projVel.y / speed) * 200,
-  };
-  for (const cover of coverBlocks) {
-    // Is the target within proximity of this cover?
-    const cx = Math.max(cover.x, Math.min(cover.x + cover.w, targetPos.x));
-    const cy = Math.max(cover.y, Math.min(cover.y + cover.h, targetPos.y));
-    const dx = targetPos.x - cx;
-    const dy = targetPos.y - cy;
-    if (dx * dx + dy * dy > COVER_PROXIMITY * COVER_PROXIMITY) continue;
-    // Did the projectile path cross this cover?
-    if (segmentHitsRect(traceBack, hitPos, cover, 0)) return true;
-  }
-  return false;
-}
 
 export function applyDamage(unit: Unit, amount: number): void {
   unit.hp = Math.max(0, unit.hp - amount);
@@ -738,7 +714,7 @@ export function updateProjectiles(
   units: Unit[],
   dt: number,
   obstacles: Obstacle[] = [],
-  coverBlocks: CoverBlock[] = [],
+  defenseZones: DefenseZone[] = [],
 ): { alive: Projectile[]; hits: ProjectileHit[] } {
   const alive: Projectile[] = [];
   const hits: ProjectileHit[] = [];
@@ -775,9 +751,8 @@ export function updateProjectiles(
         const projAngle = Math.atan2(p.vel.y, p.vel.x);
         const flanked = isFlanked(projAngle, unit.gunAngle);
         let actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
-        // Cover reduction
-        const inCover = isProtectedByCover(p.pos, p.vel, unit.pos, coverBlocks);
-        if (inCover) actualDamage *= COVER_DAMAGE_REDUCTION;
+        // Defense zone reduction
+        if (isInDefenseZone(unit.pos, defenseZones)) actualDamage *= DEFENSE_ZONE_REDUCTION;
         // Knockback — push hit unit in projectile direction, scaled by raw damage
         const knockback = p.damage * 0.4;
         const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);

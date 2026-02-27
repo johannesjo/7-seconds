@@ -77,9 +77,11 @@ export class PathDrawer {
   private labelPool: Text[] = [];
   private labelIndex = 0;
   private hoverLabel: Text;
+  private onZoneHighlight: ((pos: Vec2 | null) => void) | null = null;
 
-  constructor(stage: Container, canvas?: HTMLCanvasElement) {
+  constructor(stage: Container, canvas?: HTMLCanvasElement, onZoneHighlight?: (pos: Vec2 | null) => void) {
     this.stage = stage;
+    this.onZoneHighlight = onZoneHighlight ?? null;
     this.gfx = new Graphics();
     this.hoverGfx = new Graphics();
     this.labelContainer = new Container();
@@ -154,6 +156,7 @@ export class PathDrawer {
     this.rawPoints = [];
     this.hoverGfx.clear();
     for (const label of this.labelPool) label.visible = false;
+    this.onZoneHighlight?.(null);
   }
 
   /** Clear all waypoints for a team (called at start of their planning phase). */
@@ -238,12 +241,15 @@ export class PathDrawer {
       }
 
       const endpoint = this.rawPoints[this.rawPoints.length - 1];
+      this.onZoneHighlight?.(endpoint);
       const rawOverLimit = rawTime > ROUND_DURATION_S;
       const liveLabel = this.acquireLabel();
       liveLabel.text = rawOverLimit ? `${rawTime.toFixed(1)}s!` : `${rawTime.toFixed(1)}s`;
       liveLabel.style.fill = rawOverLimit ? 0xff4444 : 0xffffff;
       liveLabel.position.set(endpoint.x, endpoint.y - 12);
       liveLabel.alpha = 1.0;
+    } else {
+      this.onZoneHighlight?.(null);
     }
 
     // Hide unused pool labels
