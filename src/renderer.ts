@@ -1,4 +1,4 @@
-import { Application, Graphics, Container } from 'pixi.js';
+import { Application, Graphics, Container, Text } from 'pixi.js';
 import { Unit, Obstacle, Projectile, ElevationZone } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, setMapSize, ZONE_DEPTH_RATIO } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
@@ -7,7 +7,7 @@ export class Renderer {
   private app: Application;
   private unitGraphics: Map<string, Container> = new Map();
   private dyingUnits: Map<string, { container: Container; age: number }> = new Map();
-  private elevationGraphics: Graphics | null = null;
+  private elevationGraphics: Container | null = null;
   private obstacleGraphics: Graphics | null = null;
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
@@ -70,13 +70,51 @@ export class Renderer {
   renderElevationZones(zones: ElevationZone[]): void {
     if (this.elevationGraphics) {
       this.app.stage.removeChild(this.elevationGraphics);
+      this.elevationGraphics.destroy({ children: true });
     }
-    this.elevationGraphics = new Graphics();
+    const container = new Container();
+    const gfx = new Graphics();
+
     for (const z of zones) {
-      this.elevationGraphics.roundRect(z.x, z.y, z.w, z.h, 6);
-      this.elevationGraphics.fill({ color: 0x2a2a3e, alpha: 0.6 });
+      // Outer layer — blends with background
+      gfx.roundRect(z.x, z.y, z.w, z.h, 6);
+      gfx.fill({ color: 0x2e2e48, alpha: 0.5 });
+
+      // Middle layer
+      const m = 8;
+      gfx.roundRect(z.x + m, z.y + m, z.w - m * 2, z.h - m * 2, 4);
+      gfx.fill({ color: 0x333358, alpha: 0.35 });
+
+      // Inner layer — lightest
+      const m2 = 16;
+      gfx.roundRect(z.x + m2, z.y + m2, z.w - m2 * 2, z.h - m2 * 2, 2);
+      gfx.fill({ color: 0x3a3a68, alpha: 0.25 });
+
+      // Subtle border
+      gfx.roundRect(z.x, z.y, z.w, z.h, 6);
+      gfx.setStrokeStyle({ width: 1, color: 0x66ff88, alpha: 0.15 });
+      gfx.stroke();
+
+      // Label
+      const label = new Text({
+        text: '+20% Range',
+        style: {
+          fontSize: 10,
+          fontFamily: 'monospace',
+          fill: '#66ff88',
+        },
+      });
+      label.alpha = 0.5;
+      label.anchor.set(0.5, 0);
+      label.x = z.x + z.w / 2;
+      label.y = z.y + 4;
+      container.addChild(label);
     }
-    // Index 2: right after bg grid (0) and spawn zones (1)
+
+    container.addChild(gfx);
+    container.setChildIndex(gfx, 0);
+
+    this.elevationGraphics = container;
     this.app.stage.addChildAt(this.elevationGraphics, 2);
   }
 
