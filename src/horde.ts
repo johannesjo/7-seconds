@@ -68,7 +68,7 @@ function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
     category: 'recruit',
     apply(units: Unit[], blocks?: Obstacle[]): Unit[] {
       const tag = Date.now() % 100000;
-      let pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.85 };
+      let pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.92 };
       if (blocks) pos = nudgeOutOfBlocks(pos, blocks);
       const newUnit = createUnit(`blue_${type}_r${tag}`, type, 'blue', pos);
       return [...units, newUnit];
@@ -143,7 +143,7 @@ export function repositionBlueUnits(units: Unit[], blocks?: Obstacle[]): void {
   const spacing = 60;
   const groupWidth = spacing * (blueAlive.length - 1);
   const startX = (MAP_WIDTH - groupWidth) / 2;
-  const baseY = MAP_HEIGHT * 0.85;
+  const baseY = MAP_HEIGHT * 0.92;
 
   for (let i = 0; i < blueAlive.length; i++) {
     const u = blueAlive[i];

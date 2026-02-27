@@ -56,7 +56,7 @@ export class Renderer {
 
   private drawSpawnZones(): void {
     const zones = new Graphics();
-    const zoneHeight = MAP_HEIGHT * 0.15;
+    const zoneHeight = MAP_HEIGHT * ZONE_DEPTH_RATIO;
 
     // Red spawn zone (top)
     zones.rect(0, 0, MAP_WIDTH, zoneHeight);

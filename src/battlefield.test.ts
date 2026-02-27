@@ -141,12 +141,12 @@ describe('generateHordeObstacles', () => {
     }
   });
 
-  it('obstacles are in the bottom 60% of the map (y >= MAP_HEIGHT * 0.35)', () => {
+  it('obstacles are in the player half of the map (y >= MAP_HEIGHT * 0.35)', () => {
     for (let i = 0; i < 20; i++) {
       const obstacles = generateHordeObstacles();
       for (const obs of obstacles) {
         expect(obs.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.35);
-        expect(obs.y + obs.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.85);
+        expect(obs.y + obs.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.92);
       }
     }
   });
@@ -210,7 +210,7 @@ describe('generateHordeCoverBlocks', () => {
       const covers = generateHordeCoverBlocks();
       for (const c of covers) {
         expect(c.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.35);
-        expect(c.y + c.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.85);
+        expect(c.y + c.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.92);
       }
     }
   });

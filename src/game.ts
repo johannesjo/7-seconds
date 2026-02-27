@@ -180,8 +180,6 @@ export class GameEngine {
       this.idleTime = 0;
       this.blueHoldsZone = true;
       this.redHoldsZone = true;
-      this.replayFrames = [];
-      this.replayEvents = [];
       this.renderer.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
       if (this.hordeMode && this.roundNumber === 1) this.hordeStartDelay = 1;
     }

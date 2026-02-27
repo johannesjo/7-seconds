@@ -217,7 +217,7 @@ export function flankScore(attackerPos: Vec2, targetPos: Vec2, targetGunAngle: n
 export function createArmy(team: Team): Unit[] {
   const units: Unit[] = [];
   const isBlue = team === 'blue';
-  const baseY = isBlue ? MAP_HEIGHT * 0.85 : MAP_HEIGHT * 0.15;
+  const baseY = isBlue ? MAP_HEIGHT * 0.92 : MAP_HEIGHT * 0.08;
   const totalUnits = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
   const spacing = 60;
   const groupWidth = spacing * (totalUnits - 1);
@@ -245,7 +245,7 @@ export function createMissionArmy(team: Team, composition: { type: UnitType; cou
 
   if (isBlue) {
     // Blue spawns at bottom, single row like createArmy
-    const baseY = MAP_HEIGHT * 0.85;
+    const baseY = MAP_HEIGHT * 0.92;
     const groupWidth = spacing * (totalUnits - 1);
     const startX = (MAP_WIDTH - groupWidth) / 2;
     let index = 0;
@@ -350,31 +350,37 @@ function rectContainsCircle(obs: Obstacle, pos: Vec2, radius: number): boolean {
   return dx * dx + dy * dy < radius * radius;
 }
 
-/** Push a position out of any overlapping obstacles. */
+/** Push a position out of any overlapping obstacles. Iterates to handle cascades. */
 function pushOutOfObstacles(pos: Vec2, radius: number, obstacles: Obstacle[]): void {
-  for (const obs of obstacles) {
-    const closestX = clamp(pos.x, obs.x, obs.x + obs.w);
-    const closestY = clamp(pos.y, obs.y, obs.y + obs.h);
-    const dx = pos.x - closestX;
-    const dy = pos.y - closestY;
-    const dist2 = dx * dx + dy * dy;
-    if (dist2 < radius * radius && dist2 > 0.001) {
-      const dist = Math.sqrt(dist2);
-      const push = radius - dist + 0.5;
-      pos.x += (dx / dist) * push;
-      pos.y += (dy / dist) * push;
-    } else if (dist2 <= 0.001) {
-      // Center is exactly inside obstacle — push to nearest edge
-      const toLeft = pos.x - obs.x;
-      const toRight = obs.x + obs.w - pos.x;
-      const toTop = pos.y - obs.y;
-      const toBottom = obs.y + obs.h - pos.y;
-      const minDist = Math.min(toLeft, toRight, toTop, toBottom);
-      if (minDist === toLeft) pos.x = obs.x - radius - 0.5;
-      else if (minDist === toRight) pos.x = obs.x + obs.w + radius + 0.5;
-      else if (minDist === toTop) pos.y = obs.y - radius - 0.5;
-      else pos.y = obs.y + obs.h + radius + 0.5;
+  for (let pass = 0; pass < 3; pass++) {
+    let pushed = false;
+    for (const obs of obstacles) {
+      const closestX = clamp(pos.x, obs.x, obs.x + obs.w);
+      const closestY = clamp(pos.y, obs.y, obs.y + obs.h);
+      const dx = pos.x - closestX;
+      const dy = pos.y - closestY;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 < radius * radius && dist2 > 0.001) {
+        const dist = Math.sqrt(dist2);
+        const push = radius - dist + 0.5;
+        pos.x += (dx / dist) * push;
+        pos.y += (dy / dist) * push;
+        pushed = true;
+      } else if (dist2 <= 0.001) {
+        // Center is exactly inside obstacle — push to nearest edge
+        const toLeft = pos.x - obs.x;
+        const toRight = obs.x + obs.w - pos.x;
+        const toTop = pos.y - obs.y;
+        const toBottom = obs.y + obs.h - pos.y;
+        const minDist = Math.min(toLeft, toRight, toTop, toBottom);
+        if (minDist === toLeft) pos.x = obs.x - radius - 0.5;
+        else if (minDist === toRight) pos.x = obs.x + obs.w + radius + 0.5;
+        else if (minDist === toTop) pos.y = obs.y - radius - 0.5;
+        else pos.y = obs.y + obs.h + radius + 0.5;
+        pushed = true;
+      }
     }
+    if (!pushed) break;
   }
 }
 
@@ -452,17 +458,24 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
   // Obstacle avoidance with sliding
   const blocked = obstacles.some(o => rectContainsCircle(o, { x: newX, y: newY }, unit.radius));
   if (blocked) {
-    const hBlocked = obstacles.some(o => rectContainsCircle(o, { x: newX, y: oldY }, unit.radius));
-    const vBlocked = obstacles.some(o => rectContainsCircle(o, { x: oldX, y: newY }, unit.radius));
-    if (!hBlocked) {
+    const hOnly = !obstacles.some(o => rectContainsCircle(o, { x: newX, y: oldY }, unit.radius));
+    const vOnly = !obstacles.some(o => rectContainsCircle(o, { x: oldX, y: newY }, unit.radius));
+    if (hOnly) {
       newY = oldY;
-    } else if (!vBlocked) {
+    } else if (vOnly) {
       newX = oldX;
     } else {
-      // Both axes blocked — push out of obstacle instead of freezing
-      pushOutOfObstacles(unit.pos, unit.radius, obstacles);
-      unit.vel = { x: 0, y: 0 };
-      return;
+      // Both axes blocked — try half-step diagonal before giving up
+      const halfX = oldX + moveX * 0.5;
+      const halfY = oldY + moveY * 0.5;
+      if (!obstacles.some(o => rectContainsCircle(o, { x: halfX, y: halfY }, unit.radius))) {
+        newX = halfX;
+        newY = halfY;
+      } else {
+        pushOutOfObstacles(unit.pos, unit.radius, obstacles);
+        unit.vel = { x: 0, y: 0 };
+        return;
+      }
     }
   }
 
@@ -472,6 +485,9 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
 
   unit.pos.x = newX;
   unit.pos.y = newY;
+
+  // Final safety — ensure unit isn't inside any obstacle after move
+  pushOutOfObstacles(unit.pos, unit.radius, obstacles);
 
   // Velocity from actual displacement (accurate for prediction)
   unit.vel = dt > 0
@@ -504,9 +520,10 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
           b.pos.y += ny * overlap;
 
           // Bounce — reflect converging velocity outward (soft elastic collision)
+          // Stronger bounce for same-team to prevent friendly stacking
           const relVelDot = (a.vel.x - b.vel.x) * nx + (a.vel.y - b.vel.y) * ny;
           if (relVelDot < 0) {
-            const bounce = 0.3;
+            const bounce = a.team === b.team ? 0.5 : 0.3;
             a.vel.x -= nx * relVelDot * (0.5 + bounce);
             a.vel.y -= ny * relVelDot * (0.5 + bounce);
             b.vel.x += nx * relVelDot * (0.5 + bounce);

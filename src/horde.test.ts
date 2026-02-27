@@ -96,8 +96,8 @@ describe('repositionBlueUnits', () => {
 
     repositionBlueUnits(units);
 
-    expect(units[0].pos.y).toBe(MAP_HEIGHT * 0.85);
-    expect(units[1].pos.y).toBe(MAP_HEIGHT * 0.85);
+    expect(units[0].pos.y).toBe(MAP_HEIGHT * 0.92);
+    expect(units[1].pos.y).toBe(MAP_HEIGHT * 0.92);
     expect(units[0].waypoints).toEqual([]);
     expect(units[0].vel).toEqual({ x: 0, y: 0 });
     expect(units[0].moveTarget).toBeNull();
