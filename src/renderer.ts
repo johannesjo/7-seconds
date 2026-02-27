@@ -90,10 +90,6 @@ export class Renderer {
       gfx.roundRect(z.x + m2, z.y + m2, z.w - m2 * 2, z.h - m2 * 2, 2);
       gfx.fill({ color: 0x3a3a68, alpha: 0.25 });
 
-      // Subtle border
-      gfx.roundRect(z.x, z.y, z.w, z.h, 6);
-      gfx.setStrokeStyle({ width: 1, color: 0x66ff88, alpha: 0.15 });
-      gfx.stroke();
 
       // Label
       const label = new Text({
