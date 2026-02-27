@@ -68,6 +68,8 @@ export interface ElevationZone {
   h: number;
 }
 
+export type CoverBlock = Obstacle;
+
 export interface AiUnitOrder {
   id: string;
   move_to: [number, number];
