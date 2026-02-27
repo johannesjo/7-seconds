@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, CoverBlock, UnitType } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
-import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
+import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect } from './units';
 import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
@@ -242,7 +242,16 @@ export class GameEngine {
         refined.push(...detours, wp);
       }
 
-      unit.waypoints = refined.slice(1); // remove starting pos
+      // Validate: truncate path at first segment that still crosses an obstacle
+      let validEnd = refined.length;
+      for (let i = 0; i < refined.length - 1; i++) {
+        if (allBlockers.some(obs => segmentHitsRect(refined[i], refined[i + 1], obs, padding))) {
+          validEnd = i + 1;
+          break;
+        }
+      }
+
+      unit.waypoints = refined.slice(1, validEnd);
     }
   }
 

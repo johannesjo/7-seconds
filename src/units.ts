@@ -62,7 +62,7 @@ function pointHitsObstacle(p: Vec2, obstacles: Obstacle[], padding: number): boo
 
 /** Insert detour waypoints around obstacles blocking the segment from a to b. */
 export function detourWaypoints(a: Vec2, b: Vec2, obstacles: Obstacle[], padding: number, depth = 0): Vec2[] {
-  const MAX_DEPTH = 6;
+  const MAX_DEPTH = 10;
   if (depth >= MAX_DEPTH) return [];
 
   // Find the first blocking obstacle (closest to a by projecting obstacle center onto segment)
