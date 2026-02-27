@@ -67,9 +67,9 @@ function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
     description: `Add a ${label} to your squad`,
     category: 'recruit',
     apply(units: Unit[]): Unit[] {
-      const count = units.filter(u => u.team === 'blue' && u.type === type).length;
+      const tag = Date.now() % 100000;
       const pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.85 };
-      const newUnit = createUnit(`blue_${type}_h${count}`, type, 'blue', pos);
+      const newUnit = createUnit(`blue_${type}_r${tag}`, type, 'blue', pos);
       return [...units, newUnit];
     },
   };

@@ -216,7 +216,7 @@ export class GameEngine {
         let bestClear = false;
         // Try up to 8 times to find a waypoint; prefer clear line-of-sight
         for (let attempt = 0; attempt < 8; attempt++) {
-          const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.3;
+          const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.15;
           const baseX = this.hordeMode ? unit.pos.x + stepX * i : unit.pos.x;
           const wp = {
             x: Math.max(padding, Math.min(MAP_WIDTH - padding, baseX + spreadX)),

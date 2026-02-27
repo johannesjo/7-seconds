@@ -122,17 +122,9 @@ export function detourWaypoints(a: Vec2, b: Vec2, obstacles: Obstacle[], padding
   }
 
   // Pick corner that minimizes total detour distance
-  // Skip corners too close to a or b — they cause no-progress recursion loops
-  const MIN_PROGRESS = padding + 5;
-  const progressCorners = validCorners.filter(c =>
-    Math.hypot(c.x - a.x, c.y - a.y) > MIN_PROGRESS &&
-    Math.hypot(c.x - b.x, c.y - b.y) > MIN_PROGRESS
-  );
-  const candidates = progressCorners.length > 0 ? progressCorners : validCorners;
-
-  let bestCorner = candidates[0];
+  let bestCorner = validCorners[0];
   let bestDist = Infinity;
-  for (const c of candidates) {
+  for (const c of validCorners) {
     const dist = Math.hypot(c.x - a.x, c.y - a.y) + Math.hypot(b.x - c.x, b.y - c.y);
     if (dist < bestDist) {
       bestDist = dist;
@@ -140,7 +132,7 @@ export function detourWaypoints(a: Vec2, b: Vec2, obstacles: Obstacle[], padding
     }
   }
 
-  // If best corner is still too close to a, recursion won't help — give up
+  // If best corner is at the start point, recursion won't make progress — give up
   if (Math.hypot(bestCorner.x - a.x, bestCorner.y - a.y) < 2) return [];
 
   const before = detourWaypoints(a, bestCorner, obstacles, padding, depth + 1);
