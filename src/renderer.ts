@@ -101,9 +101,9 @@ export class Renderer {
         },
       });
       label.alpha = 0.5;
-      label.anchor.set(0.5, 0);
+      label.anchor.set(0.5, 0.5);
       label.x = z.x + z.w / 2;
-      label.y = z.y + 4;
+      label.y = z.y + z.h / 2;
       container.addChild(label);
     }
 
