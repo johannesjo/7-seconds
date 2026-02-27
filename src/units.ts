@@ -312,20 +312,33 @@ export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): vo
 }
 
 /** Pop the next waypoint into moveTarget when the current one is reached or stuck. */
-export function advanceWaypoint(unit: Unit): void {
+export function advanceWaypoint(unit: Unit, dt: number = 0): void {
   if (!unit.alive) return;
 
   const atTarget = !unit.moveTarget ||
     (Math.abs(unit.pos.x - unit.moveTarget.x) < 2 &&
      Math.abs(unit.pos.y - unit.moveTarget.y) < 2);
 
-  // Skip waypoint if unit is stuck (not moving but has a target)
-  const speed = unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y;
-  const stuck = unit.moveTarget && speed < 1 &&
-    (Math.abs(unit.pos.x - unit.moveTarget.x) > 4 ||
-     Math.abs(unit.pos.y - unit.moveTarget.y) > 4);
+  // Track stuck time — increment when barely moving toward target
+  if (unit.moveTarget && dt > 0) {
+    const toTargetX = unit.moveTarget.x - unit.pos.x;
+    const toTargetY = unit.moveTarget.y - unit.pos.y;
+    const toTargetDist = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY);
+    // Progress = how much velocity is toward the target
+    const progress = toTargetDist > 1
+      ? (unit.vel.x * toTargetX + unit.vel.y * toTargetY) / toTargetDist
+      : 0;
+    if (progress < unit.speed * 0.1) {
+      unit.stuckTime = (unit.stuckTime ?? 0) + dt;
+    } else {
+      unit.stuckTime = 0;
+    }
+  }
+
+  const stuck = unit.moveTarget && (unit.stuckTime ?? 0) > 0.4;
 
   if (atTarget || stuck) {
+    unit.stuckTime = 0;
     unit.moveTarget = unit.waypoints.length > 0
       ? unit.waypoints.shift()!
       : null;
@@ -479,6 +492,26 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     }
   }
 
+  // Prevent walking into other units (prevents path-crossing jams)
+  const hitsUnit = (px: number, py: number) => allUnits.some(other => {
+    if (other === unit || !other.alive) return false;
+    const cdx = px - other.pos.x;
+    const cdy = py - other.pos.y;
+    const minR = unit.radius + other.radius;
+    return cdx * cdx + cdy * cdy < minR * minR;
+  });
+  if (hitsUnit(newX, newY)) {
+    if (!hitsUnit(newX, oldY)) {
+      newY = oldY;
+    } else if (!hitsUnit(oldX, newY)) {
+      newX = oldX;
+    } else {
+      // Can't move — stay put
+      unit.vel = { x: 0, y: 0 };
+      return;
+    }
+  }
+
   // Clamp to map bounds
   newX = clamp(newX, unit.radius, MAP_WIDTH - unit.radius);
   newY = clamp(newY, unit.radius, MAP_HEIGHT - unit.radius);
@@ -508,7 +541,7 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const minDist = a.radius + b.radius + 3;
+        const minDist = a.radius + b.radius + 1;
 
         if (dist < minDist && dist > 0.01) {
           const overlap = (minDist - dist) / 2;

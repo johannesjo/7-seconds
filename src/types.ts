@@ -42,6 +42,7 @@ export interface Unit {
   vel: Vec2;
   gunAngle: number;
   turnSpeed: number;
+  stuckTime?: number;
 }
 
 export interface Projectile {

@@ -284,7 +284,7 @@ export class GameEngine {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       if (redDelayed && unit.team === 'red') continue;
-      advanceWaypoint(unit);
+      advanceWaypoint(unit, dt);
       moveUnit(unit, dt, [...this.obstacles, ...this.coverBlocks], this.units);
     }
     separateUnits(this.units, [...this.obstacles, ...this.coverBlocks]);
