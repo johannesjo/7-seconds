@@ -23,6 +23,7 @@ const WEIGHTS: Record<UnitType, {
   tank:    { distIdeal: [0, 60],    distPenaltyScale: 0.2,  los: 15, elevation: 5,  cover: 5,  flank: 10 },
   soldier: { distIdeal: [50, 120],  distPenaltyScale: 0.15, los: 20, elevation: 15, cover: 15, flank: 25 },
   scout:   { distIdeal: [0, 50],    distPenaltyScale: 0.15, los: 10, elevation: 5,  cover: 5,  flank: 40 },
+  zombie:  { distIdeal: [0, 30],    distPenaltyScale: 0.1,  los: 5,  elevation: 0,  cover: 0,  flank: 5 },
 };
 
 /** Score a candidate position for a given unit. Higher is better. */

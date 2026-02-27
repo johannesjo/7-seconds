@@ -118,8 +118,8 @@ describe('stat upgrade apply', () => {
     expect(units[0].hp).toBe(originalMaxHp + 15);
   });
 
-  it('+3 Damage increases damage for blue units', () => {
-    const dmgUpgrade = ALL_STAT_UPGRADES.find(u => u.id === 'dmg_3')!;
+  it('+5 Damage increases damage for blue units', () => {
+    const dmgUpgrade = ALL_STAT_UPGRADES.find(u => u.id === 'dmg_5')!;
     const units = [
       createUnit('blue_soldier_0', 'soldier', 'blue', { x: 400, y: 600 }),
     ];
@@ -127,7 +127,7 @@ describe('stat upgrade apply', () => {
 
     dmgUpgrade.apply(units);
 
-    expect(units[0].damage).toBe(originalDmg + 3);
+    expect(units[0].damage).toBe(originalDmg + 5);
   });
 });
 

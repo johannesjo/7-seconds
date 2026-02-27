@@ -3,18 +3,18 @@ import { MAP_WIDTH, MAP_HEIGHT, UNIT_STATS } from './constants';
 import { createUnit, nudgeOutOfBlocks } from './units';
 
 export const HORDE_WAVES: HordeWave[] = [
-  { wave: 1, enemies: [{ type: 'scout', count: 3 }] },
-  { wave: 2, enemies: [{ type: 'scout', count: 4 }, { type: 'soldier', count: 1 }] },
-  { wave: 3, enemies: [{ type: 'soldier', count: 3 }] },
-  { wave: 4, enemies: [{ type: 'scout', count: 5 }, { type: 'soldier', count: 2 }] },
-  { wave: 5, enemies: [{ type: 'tank', count: 2 }, { type: 'soldier', count: 2 }] },
-  { wave: 6, enemies: [{ type: 'soldier', count: 6 }, { type: 'sniper', count: 1 }] },
-  { wave: 7, enemies: [{ type: 'soldier', count: 4 }, { type: 'sniper', count: 2 }] },
-  { wave: 8, enemies: [{ type: 'tank', count: 3 }, { type: 'scout', count: 4 }] },
-  { wave: 9, enemies: [{ type: 'soldier', count: 4 }, { type: 'tank', count: 2 }, { type: 'sniper', count: 2 }] },
-  { wave: 10, enemies: [{ type: 'tank', count: 3 }, { type: 'sniper', count: 3 }, { type: 'soldier', count: 4 }] },
-  { wave: 11, enemies: [{ type: 'tank', count: 4 }, { type: 'soldier', count: 5 }, { type: 'scout', count: 6 }] },
-  { wave: 12, enemies: [{ type: 'tank', count: 5 }, { type: 'sniper', count: 4 }, { type: 'soldier', count: 6 }, { type: 'scout', count: 4 }] },
+  { wave: 1, enemies: [{ type: 'zombie', count: 5 }] },
+  { wave: 2, enemies: [{ type: 'zombie', count: 7 }, { type: 'soldier', count: 1 }] },
+  { wave: 3, enemies: [{ type: 'soldier', count: 3 }, { type: 'zombie', count: 4 }] },
+  { wave: 4, enemies: [{ type: 'zombie', count: 10 }, { type: 'soldier', count: 2 }] },
+  { wave: 5, enemies: [{ type: 'tank', count: 2 }, { type: 'zombie', count: 8 }] },
+  { wave: 6, enemies: [{ type: 'soldier', count: 4 }, { type: 'zombie', count: 8 }, { type: 'sniper', count: 1 }] },
+  { wave: 7, enemies: [{ type: 'soldier', count: 3 }, { type: 'zombie', count: 10 }, { type: 'sniper', count: 2 }] },
+  { wave: 8, enemies: [{ type: 'tank', count: 3 }, { type: 'zombie', count: 12 }] },
+  { wave: 9, enemies: [{ type: 'soldier', count: 3 }, { type: 'tank', count: 2 }, { type: 'zombie', count: 10 }, { type: 'sniper', count: 2 }] },
+  { wave: 10, enemies: [{ type: 'tank', count: 3 }, { type: 'sniper', count: 3 }, { type: 'zombie', count: 12 }, { type: 'soldier', count: 3 }] },
+  { wave: 11, enemies: [{ type: 'tank', count: 4 }, { type: 'soldier', count: 4 }, { type: 'zombie', count: 15 }] },
+  { wave: 12, enemies: [{ type: 'tank', count: 5 }, { type: 'sniper', count: 4 }, { type: 'soldier', count: 5 }, { type: 'zombie', count: 18 }] },
 ];
 
 function makeStatUpgrade(
@@ -42,11 +42,11 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
     u.maxHp += 15;
     u.hp += 15;
   }),
-  makeStatUpgrade('dmg_3', '+3 Damage', 'All units deal +3 damage', u => {
-    u.damage += 3;
-  }),
   makeStatUpgrade('dmg_5', '+5 Damage', 'All units deal +5 damage', u => {
     u.damage += 5;
+  }),
+  makeStatUpgrade('dmg_10', '+10 Damage', 'All units deal +10 damage', u => {
+    u.damage += 10;
   }),
   makeStatUpgrade('range_20', '+20 Range', 'All units gain +20 range', u => {
     u.range += 20;

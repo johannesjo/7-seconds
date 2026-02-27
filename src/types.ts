@@ -1,4 +1,4 @@
-export type UnitType = 'scout' | 'soldier' | 'tank' | 'sniper';
+export type UnitType = 'scout' | 'soldier' | 'tank' | 'sniper' | 'zombie';
 export type Team = 'blue' | 'red';
 export type GamePhase = 'prompt' | 'battle' | 'result';
 export type TurnPhase = 'blue-planning' | 'cover' | 'red-planning' | 'playing';

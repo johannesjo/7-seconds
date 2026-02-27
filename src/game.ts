@@ -177,7 +177,6 @@ export class GameEngine {
       this.blueHoldsZone = true;
       this.redHoldsZone = true;
       this.renderer.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
-      if (this.hordeMode && this.roundNumber === 1) this.hordeStartDelay = 1;
     }
 
     this.onEvent('phase-change', { phase, round: this.roundNumber });

@@ -211,7 +211,7 @@ export class Renderer {
       // Rotate gun barrel
       (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
       // Rotate body with the gun for person-shaped units
-      if (unit.type === 'scout' || unit.type === 'soldier' || unit.type === 'sniper') {
+      if (unit.type === 'scout' || unit.type === 'soldier' || unit.type === 'sniper' || unit.type === 'zombie') {
         (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
       }
 
@@ -274,6 +274,10 @@ export class Renderer {
         points.push(r * Math.cos(angle), r * Math.sin(angle));
       }
       shape.poly(points);
+      shape.fill(color);
+    } else if (unit.type === 'zombie') {
+      // Zombie: simple circle blob
+      shape.circle(0, 0, unit.radius);
       shape.fill(color);
     } else {
       // Scout / Soldier: oval (wider shoulders, person from above)

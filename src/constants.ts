@@ -13,6 +13,7 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
   soldier: { hp: 60,  speed: 100, damage: 10, range: 120, radius: 10, fireCooldown: 1.0, projectileSpeed: 300, projectileRadius: 5, turnSpeed: 2.5 },
   tank:    { hp: 120, speed: 50,  damage: 20, range: 40,  radius: 14, fireCooldown: 1.5, projectileSpeed: 250, projectileRadius: 7, turnSpeed: 2.0 },
   sniper:  { hp: 1,   speed: 70,  damage: 30, range: 300, radius: 7, fireCooldown: 2.5, projectileSpeed: 1200, projectileRadius: 5, turnSpeed: 1.2 },
+  zombie:  { hp: 20,  speed: 55,  damage: 14, range: 20,  radius: 8, fireCooldown: 0.8, projectileSpeed: 300, projectileRadius: 4, turnSpeed: 3.0 },
 };
 
 export const ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
