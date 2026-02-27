@@ -69,16 +69,26 @@ export function generateHordeObstacles(): Obstacle[] {
   return obstacles;
 }
 
-/** Generate 2-4 elevation zones in the player's half (y: 0.30–0.80). No mirroring. */
+/** Generate 2-4 elevation zones in the player's half. Always one near spawn. */
 export function generateHordeElevationZones(): ElevationZone[] {
   const zones: ElevationZone[] = [];
-  const count = randomInRange(2, 5); // 2-4
 
-  for (let i = 0; i < count; i++) {
+  // Guaranteed zone near player spawn (bottom area, y: 0.75–0.85)
+  const spawnW = randomInRange(100, 180);
+  const spawnH = randomInRange(60, 80);
+  const spawnX = randomInRange(50, MAP_WIDTH - 50 - spawnW);
+  const spawnYMin = Math.round(MAP_HEIGHT * 0.75);
+  const spawnYMax = Math.round(MAP_HEIGHT * 0.85) - spawnH;
+  const spawnY = randomInRange(spawnYMin, Math.max(spawnYMin + 1, spawnYMax));
+  zones.push({ x: spawnX, y: spawnY, w: spawnW, h: spawnH });
+
+  // 1-3 additional zones further up (y: 0.30–0.70)
+  const extra = randomInRange(1, 4); // 1-3
+  for (let i = 0; i < extra; i++) {
     const w = randomInRange(80, 160);
     const h = randomInRange(60, 120);
     const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = randomInRange(MAP_HEIGHT * 0.30, MAP_HEIGHT * 0.80 - h);
+    const y = randomInRange(MAP_HEIGHT * 0.30, MAP_HEIGHT * 0.70 - h);
     zones.push({ x, y, w, h });
   }
 

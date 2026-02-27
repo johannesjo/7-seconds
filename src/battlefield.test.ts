@@ -137,12 +137,22 @@ describe('generateHordeElevationZones', () => {
     }
   });
 
-  it('zones are in the bottom 65% of the map (y >= MAP_HEIGHT * 0.30)', () => {
+  it('always has at least one zone near spawn (y >= MAP_HEIGHT * 0.75)', () => {
+    for (let i = 0; i < 20; i++) {
+      const zones = generateHordeElevationZones();
+      const nearSpawn = zones.some(z => z.y >= MAP_HEIGHT * 0.75);
+      expect(nearSpawn).toBe(true);
+    }
+  });
+
+  it('zones are within map bounds', () => {
     for (let i = 0; i < 20; i++) {
       const zones = generateHordeElevationZones();
       for (const z of zones) {
+        expect(z.x).toBeGreaterThanOrEqual(50);
+        expect(z.x + z.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
         expect(z.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.30);
-        expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.80);
+        expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.85);
       }
     }
   });
