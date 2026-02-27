@@ -90,8 +90,14 @@ export class Renderer {
       gfx.roundRect(z.x + m2, z.y + m2, z.w - m2 * 2, z.h - m2 * 2, 2);
       gfx.fill({ color: 0x3a3a68, alpha: 0.25 });
 
+      // Invisible hit area for hover detection
+      const hitArea = new Graphics();
+      hitArea.roundRect(z.x, z.y, z.w, z.h, 6);
+      hitArea.fill({ color: 0x000000, alpha: 0.001 });
+      hitArea.eventMode = 'static';
+      hitArea.cursor = 'default';
 
-      // Label
+      // Label (hidden until hover)
       const label = new Text({
         text: '+20% Range',
         style: {
@@ -100,11 +106,16 @@ export class Renderer {
           fill: '#66ff88',
         },
       });
-      label.alpha = 0.5;
+      label.alpha = 0;
       label.anchor.set(0.5, 0.5);
       label.x = z.x + z.w / 2;
       label.y = z.y + z.h / 2;
+
+      hitArea.on('pointerenter', () => { label.alpha = 0.5; });
+      hitArea.on('pointerleave', () => { label.alpha = 0; });
+
       container.addChild(label);
+      container.addChild(hitArea);
     }
 
     container.addChild(gfx);
