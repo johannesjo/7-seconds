@@ -230,7 +230,7 @@ function startReplay(data: ReplayData): void {
 
   showScreen('battle');
   replayOverlay.classList.add('active');
-  replayPauseBtn.textContent = 'Pause';
+  replayPauseBtn.textContent = '\u23F8';
   replaySpeedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.replaySpeed === '1'));
 
   replayPlayer = new ReplayPlayer(renderer!, data, (event, eventData) => {
@@ -238,7 +238,7 @@ function startReplay(data: ReplayData): void {
       replayProgress.textContent = `${eventData.time.toFixed(1)}s / ${eventData.duration.toFixed(1)}s`;
     }
     if (event === 'end') {
-      replayPauseBtn.textContent = 'Play';
+      replayPauseBtn.textContent = '\u25B6';
     }
   });
   replayPlayer.start();
@@ -442,13 +442,13 @@ replayBtn.addEventListener('click', () => {
 // Replay control buttons
 replayRestartBtn.addEventListener('click', () => {
   replayPlayer?.restart();
-  replayPauseBtn.textContent = 'Pause';
+  replayPauseBtn.textContent = '\u23F8';
 });
 
 replayPauseBtn.addEventListener('click', () => {
   if (!replayPlayer) return;
   replayPlayer.togglePause();
-  replayPauseBtn.textContent = replayPlayer.isPaused ? 'Play' : 'Pause';
+  replayPauseBtn.textContent = replayPlayer.isPaused ? '\u25B6' : '\u23F8';
 });
 
 replayExitBtn.addEventListener('click', () => {
