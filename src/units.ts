@@ -160,6 +160,7 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
     projectileRadius: stats.projectileRadius,
     vel: { x: 0, y: 0 },
     gunAngle: team === 'blue' ? -Math.PI / 2 : Math.PI / 2,
+    turnSpeed: stats.turnSpeed,
   };
 }
 
@@ -239,12 +240,11 @@ export function createMissionArmy(team: Team, composition: { type: UnitType; cou
 
 /** Smoothly rotate unit.gunAngle toward desiredAngle via shortest arc, capped at ~2 rad/s. */
 export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): void {
-  const MAX_TURN_SPEED = 2; // rad/s (~1.6s for full 180° turn)
   let diff = desiredAngle - unit.gunAngle;
   // Normalize to [-PI, PI] for shortest arc
   diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
   if (diff < -Math.PI) diff += 2 * Math.PI;
-  const maxStep = MAX_TURN_SPEED * dt;
+  const maxStep = unit.turnSpeed * dt;
   if (Math.abs(diff) <= maxStep) {
     unit.gunAngle = desiredAngle;
   } else {

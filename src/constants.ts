@@ -9,10 +9,10 @@ export function setMapSize(w: number, h: number): void {
 }
 
 export const UNIT_STATS: Record<UnitType, UnitStats> = {
-  scout:   { hp: 30,  speed: 180, damage: 5,  range: 30,  radius: 6,  fireCooldown: 0.5, projectileSpeed: 400, projectileRadius: 3 },
-  soldier: { hp: 60,  speed: 120, damage: 10, range: 120, radius: 10, fireCooldown: 1.0, projectileSpeed: 300, projectileRadius: 5 },
-  tank:    { hp: 120, speed: 60,  damage: 20, range: 40,  radius: 14, fireCooldown: 1.5, projectileSpeed: 250, projectileRadius: 7 },
-  sniper:  { hp: 1,   speed: 80,  damage: 30, range: 300, radius: 7, fireCooldown: 2.5, projectileSpeed: 1200, projectileRadius: 5 },
+  scout:   { hp: 30,  speed: 180, damage: 5,  range: 30,  radius: 6,  fireCooldown: 0.5, projectileSpeed: 400, projectileRadius: 3, turnSpeed: 4.0 },
+  soldier: { hp: 60,  speed: 120, damage: 10, range: 120, radius: 10, fireCooldown: 1.0, projectileSpeed: 300, projectileRadius: 5, turnSpeed: 2.5 },
+  tank:    { hp: 120, speed: 60,  damage: 20, range: 40,  radius: 14, fireCooldown: 1.5, projectileSpeed: 250, projectileRadius: 7, turnSpeed: 2.0 },
+  sniper:  { hp: 1,   speed: 80,  damage: 30, range: 300, radius: 7, fireCooldown: 2.5, projectileSpeed: 1200, projectileRadius: 5, turnSpeed: 1.2 },
 };
 
 export const ARMY_COMPOSITION: { type: UnitType; count: number }[] = [

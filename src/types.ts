@@ -17,6 +17,7 @@ export interface UnitStats {
   fireCooldown: number;
   projectileSpeed: number;
   projectileRadius: number;
+  turnSpeed: number;
 }
 
 export interface Unit {
@@ -40,6 +41,7 @@ export interface Unit {
   projectileRadius: number;
   vel: Vec2;
   gunAngle: number;
+  turnSpeed: number;
 }
 
 export interface Projectile {
