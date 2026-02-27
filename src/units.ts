@@ -399,8 +399,8 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
   let dirX = dx / dist;
   let dirY = dy / dist;
 
-  // Steer around nearby units in our path
-  const lookAhead = unit.radius * 3;
+  // Steer around nearby units
+  const lookAhead = unit.radius * 5;
   let steerX = 0;
   let steerY = 0;
   for (const other of allUnits) {
@@ -408,18 +408,23 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     const ox = other.pos.x - unit.pos.x;
     const oy = other.pos.y - unit.pos.y;
     const oDist = Math.sqrt(ox * ox + oy * oy);
-    const minSep = unit.radius + other.radius + 2;
+    const minSep = unit.radius + other.radius + 4;
     if (oDist >= lookAhead + other.radius || oDist < 0.01) continue;
 
-    // Is the other unit ahead of us? (dot product with direction)
-    const dot = ox * dirX + oy * dirY;
-    if (dot < 0) continue; // behind us
+    // Proximity push — steer away from any unit that's too close, regardless of direction
+    if (oDist < minSep * 1.5) {
+      const pushStrength = (minSep * 1.5 - oDist) / (minSep * 1.5);
+      steerX -= (ox / oDist) * pushStrength * 1.2;
+      steerY -= (oy / oDist) * pushStrength * 1.2;
+    }
 
-    // Perpendicular distance to our movement line
+    // Directional steering — avoid units ahead in our path
+    const dot = ox * dirX + oy * dirY;
+    if (dot < 0) continue;
+
     const perpDist = Math.abs(-dirY * ox + dirX * oy);
     if (perpDist < minSep) {
-      // Steer perpendicular — away from the blocking unit
-      const side = -dirY * ox + dirX * oy; // signed perpendicular
+      const side = -dirY * ox + dirX * oy;
       const steerDir = side >= 0 ? 1 : -1;
       const strength = (minSep - perpDist) / minSep;
       steerX += -dirY * steerDir * strength;
@@ -429,8 +434,8 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
 
   // Blend steering into direction
   if (steerX !== 0 || steerY !== 0) {
-    dirX += steerX * 0.6;
-    dirY += steerY * 0.6;
+    dirX += steerX * 0.8;
+    dirY += steerY * 0.8;
     const len = Math.sqrt(dirX * dirX + dirY * dirY);
     if (len > 0.01) { dirX /= len; dirY /= len; }
   }
@@ -477,7 +482,7 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
 /** Push overlapping units apart so they don't stack on the same spot. */
 export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
   const alive = units.filter(u => u.alive);
-  const ITERATIONS = 3;
+  const ITERATIONS = 5;
 
   for (let iter = 0; iter < ITERATIONS; iter++) {
     for (let i = 0; i < alive.length; i++) {
@@ -487,7 +492,7 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const minDist = a.radius + b.radius + 1; // +1 small buffer to prevent touching
+        const minDist = a.radius + b.radius + 3;
 
         if (dist < minDist && dist > 0.01) {
           const overlap = (minDist - dist) / 2;
@@ -498,15 +503,27 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
           b.pos.x += nx * overlap;
           b.pos.y += ny * overlap;
 
+          // Bounce — reflect converging velocity outward (soft elastic collision)
+          const relVelDot = (a.vel.x - b.vel.x) * nx + (a.vel.y - b.vel.y) * ny;
+          if (relVelDot < 0) {
+            const bounce = 0.3;
+            a.vel.x -= nx * relVelDot * (0.5 + bounce);
+            a.vel.y -= ny * relVelDot * (0.5 + bounce);
+            b.vel.x += nx * relVelDot * (0.5 + bounce);
+            b.vel.y += ny * relVelDot * (0.5 + bounce);
+          }
+
           // Keep within bounds
           a.pos.x = clamp(a.pos.x, a.radius, MAP_WIDTH - a.radius);
           a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
           b.pos.x = clamp(b.pos.x, b.radius, MAP_WIDTH - b.radius);
           b.pos.y = clamp(b.pos.y, b.radius, MAP_HEIGHT - b.radius);
         } else if (dist <= 0.01) {
-          // Exactly overlapping — nudge apart with small random offset
+          // Exactly overlapping — nudge apart diagonally
           a.pos.x -= 1;
+          a.pos.y -= 1;
           b.pos.x += 1;
+          b.pos.y += 1;
         }
       }
     }
@@ -711,6 +728,16 @@ export function updateProjectiles(
         // Cover reduction
         const inCover = isProtectedByCover(p.pos, p.vel, unit.pos, coverBlocks);
         if (inCover) actualDamage *= COVER_DAMAGE_REDUCTION;
+        // Knockback — push hit unit in projectile direction, scaled by raw damage
+        const knockback = p.damage * 0.4;
+        const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
+        if (projSpeed > 0) {
+          unit.pos.x += (p.vel.x / projSpeed) * knockback;
+          unit.pos.y += (p.vel.y / projSpeed) * knockback;
+          unit.pos.x = clamp(unit.pos.x, unit.radius, MAP_WIDTH - unit.radius);
+          unit.pos.y = clamp(unit.pos.y, unit.radius, MAP_HEIGHT - unit.radius);
+        }
+
         const wasBefore = unit.hp;
         applyDamage(unit, actualDamage);
         hits.push({
