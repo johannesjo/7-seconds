@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked } from './units';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, isProtectedByCover } from './units';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 
@@ -255,6 +255,39 @@ describe('isFlanked', () => {
   });
 });
 
+describe('isProtectedByCover', () => {
+  it('returns true when target is near cover and shot passes through it', () => {
+    const hitPos = { x: 170, y: 100 };
+    const projVel = { x: 300, y: 0 };
+    const targetPos = { x: 170, y: 100 };
+    const cover = { x: 145, y: 90, w: 10, h: 20 };
+    expect(isProtectedByCover(hitPos, projVel, targetPos, [cover])).toBe(true);
+  });
+
+  it('returns false when target is far from cover', () => {
+    const hitPos = { x: 170, y: 100 };
+    const projVel = { x: 300, y: 0 };
+    const targetPos = { x: 170, y: 100 };
+    const cover = { x: 50, y: 50, w: 10, h: 20 }; // far away
+    expect(isProtectedByCover(hitPos, projVel, targetPos, [cover])).toBe(false);
+  });
+
+  it('returns false when cover is near but not in shot path', () => {
+    const hitPos = { x: 170, y: 100 };
+    const projVel = { x: 300, y: 0 };
+    const targetPos = { x: 170, y: 100 };
+    const cover = { x: 165, y: 130, w: 10, h: 20 }; // near target but not in path
+    expect(isProtectedByCover(hitPos, projVel, targetPos, [cover])).toBe(false);
+  });
+
+  it('returns false when no covers exist', () => {
+    const hitPos = { x: 170, y: 100 };
+    const projVel = { x: 300, y: 0 };
+    const targetPos = { x: 170, y: 100 };
+    expect(isProtectedByCover(hitPos, projVel, targetPos, [])).toBe(false);
+  });
+});
+
 describe('updateProjectiles', () => {
   it('moves projectiles and removes those past max range', () => {
     const proj = {
@@ -363,5 +396,48 @@ describe('updateProjectiles', () => {
     expect(hits[0].flanked).toBe(false);
     expect(hits[0].damage).toBe(10);
     expect(target.hp).toBe(50); // 60 - 10
+  });
+
+  it('cover reduces damage by 50%', () => {
+    const target = createUnit('e1', 'soldier', 'red', { x: 170, y: 100 });
+    target.gunAngle = Math.PI; // facing left (head-on, no flank)
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 170, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 500,
+      distanceTraveled: 0,
+    };
+    const cover = { x: 145, y: 90, w: 10, h: 20 };
+    // dt=0.25 moves projectile from x=100 to x=175, within hit range of target at x=170
+    const { hits } = updateProjectiles([proj], [target], 0.25, [], [cover]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].damage).toBe(5); // 10 * 0.5
+    expect(target.hp).toBe(55); // 60 - 5
+  });
+
+  it('applies flanking and cover combined', () => {
+    const target = createUnit('e1', 'soldier', 'red', { x: 170, y: 100 });
+    target.gunAngle = 0; // facing right, projectile comes from left = flanked
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 170, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 500,
+      distanceTraveled: 0,
+    };
+    const cover = { x: 145, y: 90, w: 10, h: 20 };
+    // dt=0.25 moves projectile from x=100 to x=175, within hit range of target at x=170
+    const { hits } = updateProjectiles([proj], [target], 0.25, [], [cover]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].flanked).toBe(true);
+    expect(hits[0].damage).toBe(7.5); // 10 * 1.5 * 0.5
+    expect(target.hp).toBe(52.5); // 60 - 7.5
   });
 });

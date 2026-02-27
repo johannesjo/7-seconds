@@ -1,4 +1,4 @@
-import { Obstacle, ElevationZone } from './types';
+import { Obstacle, ElevationZone, CoverBlock } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 function randomInRange(min: number, max: number): number {
@@ -49,4 +49,25 @@ export function generateElevationZones(): ElevationZone[] {
   }
 
   return zones;
+}
+
+/** Generate 1-2 symmetric pairs of narrow cover blocks (2-4 total). */
+export function generateCoverBlocks(): CoverBlock[] {
+  const covers: CoverBlock[] = [];
+  const pairCount = randomInRange(1, 3); // 1 or 2 pairs
+
+  for (let i = 0; i < pairCount; i++) {
+    const horizontal = Math.random() > 0.5;
+    const long = randomInRange(40, 80);
+    const narrow = randomInRange(8, 12);
+    const w = horizontal ? long : narrow;
+    const h = horizontal ? narrow : long;
+    const x = randomInRange(50, MAP_WIDTH - 50 - w);
+    const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
+
+    covers.push({ x, y, w, h });
+    covers.push({ x, y: MAP_HEIGHT - y - h, w, h });
+  }
+
+  return covers;
 }

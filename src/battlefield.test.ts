@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateObstacles, generateElevationZones } from './battlefield';
+import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 describe('generateObstacles', () => {
@@ -65,6 +65,52 @@ describe('generateElevationZones', () => {
         expect(z.x + z.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
         expect(z.y).toBeGreaterThanOrEqual(0);
         expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT);
+      }
+    }
+  });
+});
+
+describe('generateCoverBlocks', () => {
+  it('generates 2-4 cover blocks (always even, mirrored pairs)', () => {
+    for (let i = 0; i < 20; i++) {
+      const covers = generateCoverBlocks();
+      expect(covers.length).toBeGreaterThanOrEqual(2);
+      expect(covers.length).toBeLessThanOrEqual(4);
+      expect(covers.length % 2).toBe(0);
+    }
+  });
+
+  it('cover blocks have a narrow dimension of at most 12', () => {
+    for (let i = 0; i < 20; i++) {
+      const covers = generateCoverBlocks();
+      for (const c of covers) {
+        const narrow = Math.min(c.w, c.h);
+        expect(narrow).toBeLessThanOrEqual(12);
+      }
+    }
+  });
+
+  it('cover blocks are symmetrical (mirrored top-bottom)', () => {
+    const covers = generateCoverBlocks();
+    for (const c of covers) {
+      const centerY = c.y + c.h / 2;
+      const mirrorCenterY = MAP_HEIGHT - centerY;
+      const hasMirror = covers.some(other => {
+        const otherCenterY = other.y + other.h / 2;
+        return Math.abs(otherCenterY - mirrorCenterY) < 1 && other !== c;
+      });
+      expect(hasMirror).toBe(true);
+    }
+  });
+
+  it('cover blocks are within map bounds', () => {
+    for (let i = 0; i < 20; i++) {
+      const covers = generateCoverBlocks();
+      for (const c of covers) {
+        expect(c.x).toBeGreaterThanOrEqual(50);
+        expect(c.x + c.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
+        expect(c.y).toBeGreaterThanOrEqual(0);
+        expect(c.y + c.h).toBeLessThanOrEqual(MAP_HEIGHT);
       }
     }
   });

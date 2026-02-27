@@ -1,4 +1,4 @@
-import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone } from './types';
+import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone, CoverBlock } from './types';
 
 export interface ProjectileHit {
   pos: Vec2;
@@ -9,7 +9,7 @@ export interface ProjectileHit {
   damage: number;
   flanked: boolean;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, COVER_PROXIMITY, COVER_DAMAGE_REDUCTION } from './constants';
 
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
@@ -533,6 +533,33 @@ export function isFlanked(projectileVelAngle: number, targetGunAngle: number): b
   return Math.abs(diff) > FLANK_ANGLE_THRESHOLD;
 }
 
+/** Check if a unit is protected by cover (near a cover block that the shot passes through). */
+export function isProtectedByCover(
+  hitPos: Vec2,
+  projVel: Vec2,
+  targetPos: Vec2,
+  coverBlocks: CoverBlock[],
+): boolean {
+  const speed = Math.sqrt(projVel.x * projVel.x + projVel.y * projVel.y);
+  if (speed < 1) return false;
+  // Trace backward from hit along projectile path
+  const traceBack = {
+    x: hitPos.x - (projVel.x / speed) * 200,
+    y: hitPos.y - (projVel.y / speed) * 200,
+  };
+  for (const cover of coverBlocks) {
+    // Is the target within proximity of this cover?
+    const cx = Math.max(cover.x, Math.min(cover.x + cover.w, targetPos.x));
+    const cy = Math.max(cover.y, Math.min(cover.y + cover.h, targetPos.y));
+    const dx = targetPos.x - cx;
+    const dy = targetPos.y - cy;
+    if (dx * dx + dy * dy > COVER_PROXIMITY * COVER_PROXIMITY) continue;
+    // Did the projectile path cross this cover?
+    if (segmentHitsRect(traceBack, hitPos, cover, 0)) return true;
+  }
+  return false;
+}
+
 export function applyDamage(unit: Unit, amount: number): void {
   unit.hp = Math.max(0, unit.hp - amount);
   if (unit.hp === 0) {
@@ -588,6 +615,7 @@ export function updateProjectiles(
   units: Unit[],
   dt: number,
   obstacles: Obstacle[] = [],
+  coverBlocks: CoverBlock[] = [],
 ): { alive: Projectile[]; hits: ProjectileHit[] } {
   const alive: Projectile[] = [];
   const hits: ProjectileHit[] = [];
@@ -623,7 +651,10 @@ export function updateProjectiles(
       if (dx * dx + dy * dy <= hitDist * hitDist) {
         const projAngle = Math.atan2(p.vel.y, p.vel.x);
         const flanked = isFlanked(projAngle, unit.gunAngle);
-        const actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
+        let actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
+        // Cover reduction
+        const inCover = isProtectedByCover(p.pos, p.vel, unit.pos, coverBlocks);
+        if (inCover) actualDamage *= COVER_DAMAGE_REDUCTION;
         const wasBefore = unit.hp;
         applyDamage(unit, actualDamage);
         hits.push({
