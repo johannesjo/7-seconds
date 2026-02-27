@@ -29,3 +29,5 @@ export const UNIT_SELECT_RADIUS = 30;
 export const COVER_SCREEN_DURATION_MS = 1500;
 export const ELEVATION_RANGE_BONUS = 0.2;
 export const ZONE_DEPTH_RATIO = 0.15;
+export const FLANK_ANGLE_THRESHOLD = Math.PI / 3; // 60° half-cone = 120° front
+export const FLANK_DAMAGE_MULTIPLIER = 1.5;
