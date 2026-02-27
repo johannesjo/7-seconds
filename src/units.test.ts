@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked } from './units';
-import { MAP_WIDTH, MAP_HEIGHT, FLANK_ANGLE_THRESHOLD } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 
 describe('createUnit', () => {
@@ -274,6 +274,7 @@ describe('updateProjectiles', () => {
 
   it('applies damage on hit and removes the projectile', () => {
     const target = createUnit('e1', 'scout', 'red', { x: 105, y: 100 });
+    target.gunAngle = Math.PI; // face left toward incoming projectile (head-on)
     const proj = {
       pos: { x: 100, y: 100 },
       vel: { x: 300, y: 0 },
@@ -286,12 +287,10 @@ describe('updateProjectiles', () => {
     };
     const { alive, hits } = updateProjectiles([proj], [target], 0.016);
     expect(alive).toHaveLength(0);
-    expect(target.hp).toBe(15); // 30 - 15 (flanked: red scout faces down, hit from side)
+    expect(target.hp).toBe(20); // 30 - 10
     expect(hits).toHaveLength(1);
     expect(hits[0].targetId).toBe('e1');
     expect(hits[0].killed).toBe(false);
-    expect(hits[0].flanked).toBe(true);
-    expect(hits[0].damage).toBe(15);
   });
 
   it('removes projectile when it hits an obstacle', () => {

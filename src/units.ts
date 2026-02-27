@@ -523,10 +523,13 @@ export function isInRange(attacker: Unit, target: Unit, elevationZones: Elevatio
 
 /** Check if a projectile hit is a flank (outside the target's 120° front cone). */
 export function isFlanked(projectileVelAngle: number, targetGunAngle: number): boolean {
+  // Direction the projectile is coming FROM (reverse of its travel direction)
   const incomingAngle = projectileVelAngle + Math.PI;
+  // Angle difference between incoming direction and target's facing
   let diff = incomingAngle - targetGunAngle;
   diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
   if (diff < -Math.PI) diff += 2 * Math.PI;
+  // If incoming direction is within ±threshold of target's facing → front hit (not flanked)
   return Math.abs(diff) > FLANK_ANGLE_THRESHOLD;
 }
 
