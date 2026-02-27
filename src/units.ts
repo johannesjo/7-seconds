@@ -190,6 +190,30 @@ export function nudgeOutOfBlocks(pos: Vec2, blocks: Obstacle[], padding = 4): Ve
   return pos;
 }
 
+/** Distance from a point to the nearest edge of a rect. */
+export function distToRect(pos: Vec2, rect: Obstacle): number {
+  const cx = Math.max(rect.x, Math.min(rect.x + rect.w, pos.x));
+  const cy = Math.max(rect.y, Math.min(rect.y + rect.h, pos.y));
+  const dx = pos.x - cx;
+  const dy = pos.y - cy;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/** True if pos is within COVER_PROXIMITY of any cover block. */
+export function isNearCover(pos: Vec2, coverBlocks: CoverBlock[]): boolean {
+  return coverBlocks.some(c => distToRect(pos, c) <= COVER_PROXIMITY);
+}
+
+/** Returns 0 (frontal approach) to 1 (perfect rear flank). */
+export function flankScore(attackerPos: Vec2, targetPos: Vec2, targetGunAngle: number): number {
+  const approachAngle = Math.atan2(attackerPos.y - targetPos.y, attackerPos.x - targetPos.x);
+  let diff = approachAngle - targetGunAngle;
+  diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
+  if (diff < -Math.PI) diff += 2 * Math.PI;
+  // 0 = directly behind target's facing (perfect flank), PI = directly in front
+  return Math.abs(diff) / Math.PI;
+}
+
 export function createArmy(team: Team): Unit[] {
   const units: Unit[] = [];
   const isBlue = team === 'blue';

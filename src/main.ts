@@ -2,9 +2,10 @@ import { Renderer } from './renderer';
 import { GameEngine } from './game';
 import { createArmy, createMissionArmy } from './units';
 import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
-import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, CoverBlock } from './types';
+import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, CoverBlock, ReplayData } from './types';
 import { ARMY_COMPOSITION, HORDE_MAX_WAVES, HORDE_STARTING_ARMY } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits } from './horde';
+import { ReplayPlayer } from './replay';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -31,6 +32,7 @@ const winnerTextEl = document.getElementById('winner-text')!;
 const resultStatsEl = document.getElementById('result-stats')!;
 const rematchBtn = document.getElementById('rematch-btn')!;
 const newBattleBtn = document.getElementById('new-battle-btn')!;
+const replayBtn = document.getElementById('replay-btn')!;
 
 const waveCounterEl = document.getElementById('wave-counter')!;
 const upgradeScreen = document.getElementById('upgrade-screen')!;
@@ -40,6 +42,14 @@ const zoneControlCb = document.getElementById('zone-control-cb') as HTMLInputEle
 const oneShotCb = document.getElementById('one-shot-cb') as HTMLInputElement;
 const bloodCb = document.getElementById('blood-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
+
+// Replay controls
+const replayOverlay = document.getElementById('replay-overlay')!;
+const replayRestartBtn = document.getElementById('replay-restart-btn')!;
+const replayPauseBtn = document.getElementById('replay-pause-btn')!;
+const replayExitBtn = document.getElementById('replay-exit-btn')!;
+const replayProgress = document.getElementById('replay-progress')!;
+const replaySpeedButtons = document.querySelectorAll<HTMLButtonElement>('[data-replay-speed]');
 
 // State
 let renderer: Renderer | null = null;
@@ -51,6 +61,11 @@ let hordeActive = false;
 let hordeWave = 0;
 let hordeUnits: Unit[] = [];
 let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] } | null = null;
+
+// Replay state
+let replayPlayer: ReplayPlayer | null = null;
+let lastReplayData: ReplayData | null = null;
+let returnToScreen: 'result' | 'horde-upgrade' = 'result';
 
 function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
   promptScreen.classList.toggle('active', screen === 'prompt');
@@ -81,6 +96,10 @@ function onPhaseChange(phase: TurnPhase): void {
 
   // Cover screen — skip in horde mode (no red planning)
   coverScreen.classList.toggle('active', phase === 'cover' && !hordeActive);
+}
+
+function captureReplayData(): void {
+  lastReplayData = engine?.getReplayData() ?? null;
 }
 
 function onGameEvent(
@@ -121,6 +140,7 @@ function onGameEvent(
   }
 
   if (event === 'wave-clear' && hordeActive) {
+    captureReplayData();
     // Store surviving blue units
     hordeUnits = engine!.getUnits().filter(u => u.team === 'blue' && u.alive);
     healAllBlue(hordeUnits);
@@ -134,6 +154,7 @@ function onGameEvent(
   }
 
   if (event === 'end' && data && 'winner' in data) {
+    captureReplayData();
     const result = data as BattleResult;
 
     // Horde defeat
@@ -158,6 +179,8 @@ function onGameEvent(
 
     rematchBtn.textContent = 'Rematch';
     newBattleBtn.textContent = 'New Battle';
+    replayBtn.style.display = lastReplayData ? '' : 'none';
+    returnToScreen = 'result';
 
     showScreen('result');
   }
@@ -179,6 +202,7 @@ function showPreview(): void {
 }
 
 function startGame(): void {
+  lastReplayData = null;
   engine?.stop();
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode,
@@ -192,11 +216,50 @@ function startGame(): void {
   engine.startBattle();
 }
 
+// --- Replay functions ---
+
+function startReplay(data: ReplayData): void {
+  // Hide other overlays
+  resultScreen.classList.remove('active');
+  upgradeScreen.style.display = 'none';
+  planningOverlay.classList.remove('active');
+  confirmBtn.classList.remove('active');
+  battleHud.style.display = 'none';
+
+  showScreen('battle');
+  replayOverlay.classList.add('active');
+  replayPauseBtn.textContent = 'Pause';
+  replaySpeedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.replaySpeed === '1'));
+
+  replayPlayer = new ReplayPlayer(renderer!, data, (event, eventData) => {
+    if (event === 'frame' && eventData) {
+      replayProgress.textContent = `${eventData.time.toFixed(1)}s / ${eventData.duration.toFixed(1)}s`;
+    }
+    if (event === 'end') {
+      replayPauseBtn.textContent = 'Play';
+    }
+  });
+  replayPlayer.start();
+}
+
+function stopReplay(): void {
+  replayPlayer?.stop();
+  replayPlayer = null;
+  replayOverlay.classList.remove('active');
+
+  if (returnToScreen === 'horde-upgrade') {
+    showUpgradeSelection();
+  } else {
+    showScreen('result');
+  }
+}
+
 // --- Horde mode functions ---
 
 function startHorde(): void {
   hordeActive = true;
   hordeWave = 0;
+  lastReplayData = null;
 
   // Generate map once for the whole run (before spawning so units avoid blocks)
   const obstacles = generateObstacles();
@@ -255,6 +318,24 @@ function showUpgradeSelection(): void {
     upgradeCardsEl.appendChild(card);
   }
 
+  // Add Watch Replay button to upgrade screen if replay data exists
+  if (lastReplayData) {
+    const replayCard = document.createElement('div');
+    replayCard.className = 'upgrade-card';
+    replayCard.style.borderColor = '#666';
+    replayCard.style.opacity = '0.8';
+    replayCard.innerHTML = `
+      <div class="card-label">Watch Replay</div>
+      <div class="card-desc">Rewatch the last wave</div>
+      <div class="card-category">replay</div>
+    `;
+    replayCard.addEventListener('click', () => {
+      returnToScreen = 'horde-upgrade';
+      startReplay(lastReplayData!);
+    });
+    upgradeCardsEl.appendChild(replayCard);
+  }
+
   showScreen('horde-upgrade');
 }
 
@@ -277,6 +358,8 @@ function showHordeResult(victory: boolean): void {
 
   rematchBtn.textContent = 'Try Again';
   newBattleBtn.textContent = 'Main Menu';
+  replayBtn.style.display = lastReplayData ? '' : 'none';
+  returnToScreen = 'result';
 
   showScreen('result');
 }
@@ -331,6 +414,7 @@ newBattleBtn.addEventListener('click', () => {
   confirmBtn.classList.remove('active');
   coverScreen.classList.remove('active');
   roundTimerEl.textContent = '';
+  lastReplayData = null;
 
   // Reset horde state
   hordeActive = false;
@@ -341,6 +425,37 @@ newBattleBtn.addEventListener('click', () => {
 
   showPreview();
   showScreen('prompt');
+});
+
+// Replay button on result screen
+replayBtn.addEventListener('click', () => {
+  if (lastReplayData) {
+    startReplay(lastReplayData);
+  }
+});
+
+// Replay control buttons
+replayRestartBtn.addEventListener('click', () => {
+  replayPlayer?.restart();
+  replayPauseBtn.textContent = 'Pause';
+});
+
+replayPauseBtn.addEventListener('click', () => {
+  if (!replayPlayer) return;
+  replayPlayer.togglePause();
+  replayPauseBtn.textContent = replayPlayer.isPaused ? 'Play' : 'Pause';
+});
+
+replayExitBtn.addEventListener('click', () => {
+  stopReplay();
+});
+
+replaySpeedButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const speed = Number(btn.dataset.replaySpeed);
+    replayPlayer?.setSpeed(speed);
+    replaySpeedButtons.forEach(b => b.classList.toggle('active', b === btn));
+  });
 });
 
 // Initialize renderer and show battlefield preview behind start screen

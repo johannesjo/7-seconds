@@ -1,9 +1,10 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, CoverBlock, UnitType } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, CoverBlock, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
-import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect } from './units';
+import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
 import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
+import { scorePosition, generateCandidates } from './ai-scoring';
 
 export type GameEventCallback = (
   event: 'update' | 'end' | 'phase-change' | 'wave-clear',
@@ -40,6 +41,8 @@ export class GameEngine {
   private hordeBlueUnits: Unit[] | null = null;
   private hordeRedArmy: { type: UnitType; count: number }[] | null = null;
   private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; coverBlocks: CoverBlock[] } | null = null;
+  private replayFrames: ReplayFrame[] = [];
+  private replayEvents: ReplayEvent[] = [];
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
@@ -176,86 +179,53 @@ export class GameEngine {
       this.idleTime = 0;
       this.blueHoldsZone = true;
       this.redHoldsZone = true;
+      this.replayFrames = [];
+      this.replayEvents = [];
       this.renderer.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
     }
 
     this.onEvent('phase-change', { phase, round: this.roundNumber });
   }
 
-  /** Generate AI paths for red units: head toward blue side, routing around obstacles. */
+  /** Generate AI paths for red units using position-scoring system. */
   private generateAiPaths(): void {
     const allBlockers = [...this.obstacles, ...this.coverBlocks];
     const redUnits = this.units.filter(u => u.alive && u.team === 'red');
-    const blueAliveUnits = this.units.filter(u => u.alive && u.team === 'blue');
+    const enemies = this.units.filter(u => u.alive && u.team === 'blue');
+
+    const candidates = generateCandidates(
+      redUnits[0] ?? { pos: { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 }, speed: 120, radius: 10 } as Unit,
+      this.obstacles,
+      this.coverBlocks,
+      this.elevationZones,
+    );
+
     for (const unit of redUnits) {
       const margin = 8;
       const padding = unit.radius + margin;
-      const rawWaypoints: { x: number; y: number }[] = [];
-      const steps = 2 + Math.floor(Math.random() * 2); // 2-3 waypoints
 
-      // Horde mode: target nearest blue unit instead of fixed Y
-      let targetY = MAP_HEIGHT * 0.85;
-      let targetX = unit.pos.x;
-      if (this.hordeMode && blueAliveUnits.length > 0) {
-        let nearest = blueAliveUnits[0];
-        let nearestDist = Infinity;
-        for (const blue of blueAliveUnits) {
-          const dx = blue.pos.x - unit.pos.x;
-          const dy = blue.pos.y - unit.pos.y;
-          const dist = dx * dx + dy * dy;
-          if (dist < nearestDist) {
-            nearestDist = dist;
-            nearest = blue;
-          }
+      // Score each candidate for this unit
+      let bestPos = unit.pos;
+      let bestScore = -Infinity;
+
+      for (const candidate of candidates) {
+        const s = scorePosition({
+          candidate,
+          unit,
+          enemies,
+          obstacles: this.obstacles,
+          coverBlocks: this.coverBlocks,
+          elevationZones: this.elevationZones,
+        });
+        if (s > bestScore) {
+          bestScore = s;
+          bestPos = candidate;
         }
-        targetY = nearest.pos.y;
-        targetX = nearest.pos.x;
-      }
-      const stepY = (targetY - unit.pos.y) / steps;
-
-      const stepX = (targetX - unit.pos.x) / steps;
-      for (let i = 1; i <= steps; i++) {
-        const lastPos = rawWaypoints.length > 0 ? rawWaypoints[rawWaypoints.length - 1] : unit.pos;
-        let bestWp: { x: number; y: number } | null = null;
-        let bestClear = false;
-        // Try up to 8 times to find a waypoint; prefer clear line-of-sight
-        for (let attempt = 0; attempt < 8; attempt++) {
-          const spreadX = (Math.random() - 0.5) * MAP_WIDTH * 0.15;
-          const baseX = this.hordeMode ? unit.pos.x + stepX * i : unit.pos.x;
-          const wp = {
-            x: Math.max(padding, Math.min(MAP_WIDTH - padding, baseX + spreadX)),
-            y: Math.min(MAP_HEIGHT - padding, unit.pos.y + stepY * i),
-          };
-          const onObstacle = allBlockers.some(obs => {
-            const cx = Math.max(obs.x, Math.min(obs.x + obs.w, wp.x));
-            const cy = Math.max(obs.y, Math.min(obs.y + obs.h, wp.y));
-            const dx = wp.x - cx;
-            const dy = wp.y - cy;
-            return dx * dx + dy * dy < padding * padding;
-          });
-          if (onObstacle) continue;
-          const clearPath = !allBlockers.some(obs => segmentHitsRect(lastPos, wp, obs, padding));
-          if (clearPath) {
-            bestWp = wp;
-            bestClear = true;
-            break;
-          }
-          // Keep first valid-position waypoint as fallback (detour will handle routing)
-          if (!bestWp) bestWp = wp;
-        }
-        if (bestWp) rawWaypoints.push(bestWp);
       }
 
-      // Post-process: insert detour waypoints around obstacles
-      const refined: { x: number; y: number }[] = [{ ...unit.pos }];
-
-      for (const wp of rawWaypoints) {
-        const last = refined[refined.length - 1];
-        const detours = detourWaypoints(last, wp, allBlockers, padding);
-        refined.push(...detours, wp);
-      }
-
-      unit.waypoints = refined.slice(1);
+      // Route to best position via detour waypoints
+      const detours = detourWaypoints(unit.pos, bestPos, allBlockers, padding);
+      unit.waypoints = [...detours, bestPos];
     }
   }
 
@@ -309,6 +279,15 @@ export class GameEngine {
         if (projectile) {
           this.projectiles.push(projectile);
           this.renderer.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
+          this.replayEvents.push({
+            frame: this.replayFrames.length,
+            type: 'fire',
+            pos: { x: unit.pos.x, y: unit.pos.y },
+            angle: unit.gunAngle,
+            damage: projectile.damage,
+            flanked: false,
+            team: unit.team,
+          });
         }
       } else {
         unit.fireTimer = Math.max(0, unit.fireTimer - dt);
@@ -329,11 +308,22 @@ export class GameEngine {
     const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles, this.coverBlocks);
     this.projectiles = aliveProjectiles;
 
-    // Trigger effects for hits
+    // Trigger effects for hits + record replay events
     const fx = this.renderer.effects;
     for (const hit of hits) {
       const unitGfx = this.renderer.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
+
+      this.replayEvents.push({
+        frame: this.replayFrames.length,
+        type: hit.killed ? 'kill' : 'hit',
+        pos: { ...hit.pos },
+        angle: hit.angle,
+        damage: hit.damage,
+        flanked: hit.flanked,
+        team: hit.team,
+        targetId: hit.targetId,
+      });
 
       if (this.bloodEnabled) {
         const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
@@ -348,6 +338,9 @@ export class GameEngine {
         if (hit.killed) fx?.addKillText(hit.pos, hit.team);
       }
     }
+
+    // Record replay frame after all state updates
+    this.recordFrame();
 
     this.renderer.renderProjectiles(this.projectiles);
 
@@ -428,6 +421,48 @@ export class GameEngine {
       this.setPhase('blue-planning');
     }
   };
+
+  private recordFrame(): void {
+    this.replayFrames.push({
+      units: this.units.map(u => ({
+        id: u.id,
+        type: u.type,
+        team: u.team,
+        x: u.pos.x,
+        y: u.pos.y,
+        vx: u.vel.x,
+        vy: u.vel.y,
+        gunAngle: u.gunAngle,
+        hp: u.hp,
+        maxHp: u.maxHp,
+        alive: u.alive,
+        radius: u.radius,
+      })),
+      projectiles: this.projectiles.map(p => ({
+        x: p.pos.x,
+        y: p.pos.y,
+        vx: p.vel.x,
+        vy: p.vel.y,
+        damage: p.damage,
+        radius: p.radius,
+        team: p.team,
+        maxRange: p.maxRange,
+        distanceTraveled: p.distanceTraveled,
+        trail: p.trail ? p.trail.map(t => ({ ...t })) : undefined,
+      })),
+    });
+  }
+
+  getReplayData(): ReplayData | null {
+    if (this.replayFrames.length === 0) return null;
+    return {
+      frames: this.replayFrames,
+      events: this.replayEvents,
+      obstacles: this.obstacles,
+      elevationZones: this.elevationZones,
+      coverBlocks: this.coverBlocks,
+    };
+  }
 
   private endBattle(winner: Team, winCondition: 'elimination' | 'zone-control' = 'elimination'): void {
     this.running = false;

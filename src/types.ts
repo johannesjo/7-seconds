@@ -97,6 +97,60 @@ export interface HordeWave {
   enemies: { type: UnitType; count: number }[];
 }
 
+// Replay types
+
+export interface ReplayUnitSnapshot {
+  id: string;
+  type: UnitType;
+  team: Team;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  gunAngle: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  radius: number;
+}
+
+export interface ReplayProjectileSnapshot {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  damage: number;
+  radius: number;
+  team: Team;
+  maxRange: number;
+  distanceTraveled: number;
+  trail?: Vec2[];
+}
+
+export interface ReplayEvent {
+  frame: number;
+  type: 'fire' | 'hit' | 'kill';
+  pos: Vec2;
+  angle: number;
+  damage: number;
+  flanked: boolean;
+  team: Team;
+  targetId?: string;
+}
+
+export interface ReplayFrame {
+  units: ReplayUnitSnapshot[];
+  projectiles: ReplayProjectileSnapshot[];
+}
+
+export interface ReplayData {
+  frames: ReplayFrame[];
+  events: ReplayEvent[];
+  obstacles: Obstacle[];
+  elevationZones: ElevationZone[];
+  coverBlocks: CoverBlock[];
+}
+
 export interface HordeUpgrade {
   id: string;
   label: string;

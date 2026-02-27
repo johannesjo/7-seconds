@@ -213,6 +213,40 @@
       opacity: 0.5;
     }
 
+    /* Replay overlay */
+    #replay-overlay {
+      display: none;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: rgba(0,0,0,0.7);
+      z-index: 14;
+    }
+    #replay-overlay.active { display: flex; }
+    #replay-overlay button {
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      border-radius: 3px;
+    }
+    #replay-overlay button:hover { background: #3a3a5a; border-color: #777; }
+    #replay-overlay button.active { background: #4a4a7a; border-color: #88f; }
+    #replay-progress {
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.7;
+      min-width: 100px;
+      text-align: center;
+    }
+
     /* Mobile */
     @media (max-width: 900px) {
       #prompt-screen { padding: 24px 16px; gap: 16px; }
@@ -293,6 +327,18 @@
       <span id="planning-instructions">Click a unit, drag to draw a path. Repeat for each unit.</span>
     </div>
     <button id="confirm-btn">Done</button>
+
+    <div id="replay-overlay">
+      <button id="replay-restart-btn">Restart</button>
+      <button id="replay-pause-btn">Pause</button>
+      <div id="replay-speed-controls" style="display:flex;gap:4px">
+        <button data-replay-speed="1" class="active">1x</button>
+        <button data-replay-speed="2">2x</button>
+        <button data-replay-speed="3">3x</button>
+      </div>
+      <span id="replay-progress">0.0s / 0.0s</span>
+      <button id="replay-exit-btn">Exit</button>
+    </div>
   </div>
 
   <div id="cover-screen">
@@ -312,6 +358,7 @@
     <h2 id="winner-text">Blue Wins!</h2>
     <div class="stats" id="result-stats"></div>
     <div class="buttons">
+      <button id="replay-btn" style="display:none">Watch Replay</button>
       <button id="rematch-btn">Rematch</button>
       <button id="new-battle-btn">New Battle</button>
     </div>
