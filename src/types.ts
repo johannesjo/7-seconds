@@ -80,15 +80,6 @@ export interface AiResponse {
   orders: AiUnitOrder[];
 }
 
-export interface MissionDef {
-  id: number;
-  name: string;
-  description: string;
-  blueArmy: { type: UnitType; count: number }[];
-  redArmy: { type: UnitType; count: number }[];
-  redStatic: boolean;
-}
-
 export interface BattleResult {
   winner: Team;
   blueAlive: number;

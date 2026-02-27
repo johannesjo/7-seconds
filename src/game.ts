@@ -1,4 +1,4 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, MissionDef, CoverBlock, UnitType } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, CoverBlock, UnitType } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
 import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints } from './units';
 import { generateObstacles, generateElevationZones, generateCoverBlocks } from './battlefield';
@@ -26,7 +26,6 @@ export class GameEngine {
   private _phase: TurnPhase = 'blue-planning';
   private roundNumber = 1;
   private aiMode = false;
-  private mission: MissionDef | null = null;
   private idleTime = 0;
   private blueHoldsZone = false;
   private redHoldsZone = false;
@@ -44,7 +43,6 @@ export class GameEngine {
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
-    mission?: MissionDef;
     zoneControl?: boolean;
     oneShot?: boolean;
     blood?: boolean;
@@ -56,7 +54,6 @@ export class GameEngine {
     this.renderer = renderer;
     this.onEvent = onEvent;
     this.aiMode = opts?.aiMode ?? false;
-    this.mission = opts?.mission ?? null;
     this.zoneControlEnabled = opts?.zoneControl ?? false;
     this.oneShotEnabled = opts?.oneShot ?? false;
     this.bloodEnabled = opts?.blood ?? true;
@@ -81,11 +78,6 @@ export class GameEngine {
         u.id = u.id.replace('red_', `red_${waveTag}_`);
       }
       this.units = [...this.hordeBlueUnits, ...redUnits];
-    } else if (this.mission) {
-      this.units = [
-        ...createMissionArmy('blue', this.mission.blueArmy),
-        ...createMissionArmy('red', this.mission.redArmy),
-      ];
     } else {
       this.units = [...createArmy('blue'), ...createArmy('red')];
     }
@@ -157,12 +149,13 @@ export class GameEngine {
 
     if (phase === 'blue-planning') {
       this.pathDrawer?.clearPaths('blue');
+      if (this.hordeMode) this.generateAiPaths();
       this.pathDrawer?.enable('blue', this.units, this.elevationZones);
     } else if (phase === 'cover') {
       this.pathDrawer?.disable();
       if (this.aiMode) {
-        // Skip cover screen, generate AI paths (unless static), go straight to playing
-        if (!this.mission?.redStatic) {
+        // Skip cover screen, generate AI paths, go straight to playing
+        if (!this.hordeMode) {
           this.generateAiPaths();
         }
         this.onEvent('phase-change', { phase, round: this.roundNumber });
@@ -433,12 +426,8 @@ export class GameEngine {
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
-    const blueTotal = this.mission
-      ? this.mission.blueArmy.reduce((s, c) => s + c.count, 0)
-      : ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
-    const redTotal = this.mission
-      ? this.mission.redArmy.reduce((s, c) => s + c.count, 0)
-      : ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
+    const blueTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
+    const redTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
 
     this.onEvent('end', {
       winner,
