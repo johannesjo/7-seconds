@@ -1,4 +1,4 @@
-import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone, DefenseZone } from './types';
+import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone } from './types';
 
 export interface ProjectileHit {
   pos: Vec2;
@@ -9,7 +9,7 @@ export interface ProjectileHit {
   damage: number;
   flanked: boolean;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, DEFENSE_ZONE_REDUCTION } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER } from './constants';
 
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
@@ -197,13 +197,6 @@ export function distToRect(pos: Vec2, rect: Obstacle): number {
   const dx = pos.x - cx;
   const dy = pos.y - cy;
   return Math.sqrt(dx * dx + dy * dy);
-}
-
-/** True if pos is inside any defense zone rect. */
-export function isInDefenseZone(pos: Vec2, defenseZones: DefenseZone[]): boolean {
-  return defenseZones.some(z =>
-    pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h,
-  );
 }
 
 /** Returns 0 (frontal approach) to 1 (perfect rear flank). */
@@ -714,7 +707,6 @@ export function updateProjectiles(
   units: Unit[],
   dt: number,
   obstacles: Obstacle[] = [],
-  defenseZones: DefenseZone[] = [],
 ): { alive: Projectile[]; hits: ProjectileHit[] } {
   const alive: Projectile[] = [];
   const hits: ProjectileHit[] = [];
@@ -751,8 +743,6 @@ export function updateProjectiles(
         const projAngle = Math.atan2(p.vel.y, p.vel.x);
         const flanked = isFlanked(projAngle, unit.gunAngle);
         let actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
-        // Defense zone reduction
-        if (isInDefenseZone(unit.pos, defenseZones)) actualDamage *= DEFENSE_ZONE_REDUCTION;
         // Knockback — push hit unit in projectile direction, scaled by raw damage
         const knockback = p.damage * 0.4;
         const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);

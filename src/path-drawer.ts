@@ -15,6 +15,14 @@ export function samplePath(raw: Vec2[], minDist: number): Vec2[] {
       result.push(raw[i]);
     }
   }
+  // Always include the actual endpoint (release position)
+  if (raw.length > 1) {
+    const end = raw[raw.length - 1];
+    const last = result[result.length - 1];
+    if (end.x !== last.x || end.y !== last.y) {
+      result.push(end);
+    }
+  }
   return result;
 }
 

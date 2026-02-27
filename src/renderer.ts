@@ -1,5 +1,5 @@
 import { Application, Graphics, Container, Text } from 'pixi.js';
-import { Unit, Obstacle, Projectile, ElevationZone, DefenseZone, Vec2 } from './types';
+import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, setMapSize, ZONE_DEPTH_RATIO } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 
@@ -9,7 +9,6 @@ export class Renderer {
   private dyingUnits: Map<string, { container: Container; age: number }> = new Map();
   private elevationGraphics: Container | null = null;
   private obstacleGraphics: Container | null = null;
-  private coverGraphics: Container | null = null;
   private bgGraphics: Graphics | null = null;
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
@@ -163,71 +162,6 @@ export class Renderer {
 
     // Index 3: right after elevation (2)
     this.app.stage.addChildAt(this.obstacleGraphics, 3);
-  }
-
-  renderDefenseZones(zones: DefenseZone[]): void {
-    if (this.coverGraphics) {
-      this.app.stage.removeChild(this.coverGraphics);
-      this.coverGraphics.destroy({ children: true });
-    }
-    const container = new Container();
-    const gfx = new Graphics();
-
-    for (const z of zones) {
-      // Very faint fill
-      gfx.roundRect(z.x, z.y, z.w, z.h, 6);
-      gfx.fill({ color: 0x44aaaa, alpha: 0.04 });
-
-      // Dotted perimeter — small circles along edges
-      const dotSpacing = 16;
-      const dotR = 2;
-      // Top and bottom edges
-      for (let x = z.x + dotSpacing / 2; x <= z.x + z.w - dotSpacing / 2; x += dotSpacing) {
-        gfx.circle(x, z.y, dotR);
-        gfx.fill({ color: 0x44aaaa, alpha: 0.25 });
-        gfx.circle(x, z.y + z.h, dotR);
-        gfx.fill({ color: 0x44aaaa, alpha: 0.25 });
-      }
-      // Left and right edges (skip corners to avoid overlap)
-      for (let y = z.y + dotSpacing; y <= z.y + z.h - dotSpacing / 2; y += dotSpacing) {
-        gfx.circle(z.x, y, dotR);
-        gfx.fill({ color: 0x44aaaa, alpha: 0.25 });
-        gfx.circle(z.x + z.w, y, dotR);
-        gfx.fill({ color: 0x44aaaa, alpha: 0.25 });
-      }
-
-      // Hit area for hover detection
-      const hitArea = new Graphics();
-      hitArea.roundRect(z.x, z.y, z.w, z.h, 6);
-      hitArea.fill({ color: 0x000000, alpha: 0.001 });
-      hitArea.eventMode = 'static';
-      hitArea.cursor = 'default';
-
-      const label = new Text({
-        text: '-50% Dmg',
-        style: { fontSize: 14, fontFamily: 'monospace', fill: '#66cccc', fontWeight: 'bold' },
-      });
-      label.alpha = 0;
-      label.anchor.set(0.5, 0.5);
-      label.x = z.x + z.w / 2;
-      label.y = z.y + z.h / 2;
-
-      const entry = { rect: z, label, hovered: false, dragActive: false };
-      this.zoneLabels.push(entry);
-
-      hitArea.on('pointerenter', () => { entry.hovered = true; label.alpha = 0.7; });
-      hitArea.on('pointerleave', () => { entry.hovered = false; label.alpha = entry.dragActive ? 0.7 : 0; });
-
-      container.addChild(label);
-      container.addChild(hitArea);
-    }
-
-    container.addChild(gfx);
-    container.setChildIndex(gfx, 0);
-
-    this.coverGraphics = container;
-    // Index 4: after obstacles (3)
-    this.app.stage.addChildAt(this.coverGraphics, 4);
   }
 
   /** Show zone labels for zones containing pos; hide the rest (unless hovered). */

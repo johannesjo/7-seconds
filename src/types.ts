@@ -71,8 +71,6 @@ export interface ElevationZone {
   h: number;
 }
 
-export type DefenseZone = Obstacle;
-
 export interface AiUnitOrder {
   id: string;
   move_to: [number, number];
@@ -149,7 +147,6 @@ export interface ReplayData {
   events: ReplayEvent[];
   obstacles: Obstacle[];
   elevationZones: ElevationZone[];
-  defenseZones: DefenseZone[];
 }
 
 export interface HordeUpgrade {

@@ -1,7 +1,7 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, DefenseZone, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ZONE_DEPTH_RATIO } from './constants';
 import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect } from './units';
-import { generateObstacles, generateElevationZones, generateDefenseZones } from './battlefield';
+import { generateObstacles, generateElevationZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
 import { scorePosition, generateCandidates } from './ai-scoring';
@@ -15,7 +15,6 @@ export class GameEngine {
   private units: Unit[] = [];
   private obstacles: Obstacle[] = [];
   private elevationZones: ElevationZone[] = [];
-  private defenseZones: DefenseZone[] = [];
   private projectiles: Projectile[] = [];
   private renderer: Renderer;
   private running = false;
@@ -41,7 +40,7 @@ export class GameEngine {
   private hordeStartDelay = 0;
   private hordeBlueUnits: Unit[] | null = null;
   private hordeRedArmy: { type: UnitType; count: number }[] | null = null;
-  private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; defenseZones: DefenseZone[] } | null = null;
+  private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
 
@@ -53,7 +52,7 @@ export class GameEngine {
     horde?: boolean;
     hordeBlueUnits?: Unit[];
     hordeRedArmy?: { type: UnitType; count: number }[];
-    hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; defenseZones: DefenseZone[] };
+    hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[] };
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -78,11 +77,9 @@ export class GameEngine {
     if (this.hordeMap) {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
-      this.defenseZones = this.hordeMap.defenseZones;
     } else {
       this.obstacles = generateObstacles();
       this.elevationZones = generateElevationZones();
-      this.defenseZones = generateDefenseZones(this.obstacles);
     }
 
     const allBlocks = this.obstacles;
@@ -116,7 +113,6 @@ export class GameEngine {
     // Render initial state — hills under obstacles
     this.renderer.renderElevationZones(this.elevationZones);
     this.renderer.renderObstacles(this.obstacles);
-    this.renderer.renderDefenseZones(this.defenseZones);
     this.renderer.renderUnits(this.units);
 
     // Start ticker for rendering during planning
@@ -196,7 +192,6 @@ export class GameEngine {
     const candidates = generateCandidates(
       redUnits[0] ?? { pos: { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 }, speed: 100, radius: 10 } as Unit,
       this.obstacles,
-      this.defenseZones,
       this.elevationZones,
     );
 
@@ -212,7 +207,6 @@ export class GameEngine {
           unit,
           enemies,
           obstacles: this.obstacles,
-          defenseZones: this.defenseZones,
           elevationZones: this.elevationZones,
         });
         scored.push({ pos: candidate, score: s });
@@ -330,7 +324,7 @@ export class GameEngine {
       }
     }
 
-    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles, this.defenseZones);
+    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
     this.projectiles = aliveProjectiles;
 
     // Trigger effects for hits + record replay events
@@ -485,7 +479,6 @@ export class GameEngine {
       events: this.replayEvents,
       obstacles: this.obstacles,
       elevationZones: this.elevationZones,
-      defenseZones: this.defenseZones,
     };
   }
 
@@ -528,8 +521,8 @@ export class GameEngine {
     return this.units;
   }
 
-  getMapData(): { obstacles: Obstacle[]; elevationZones: ElevationZone[]; defenseZones: DefenseZone[] } {
-    return { obstacles: this.obstacles, elevationZones: this.elevationZones, defenseZones: this.defenseZones };
+  getMapData(): { obstacles: Obstacle[]; elevationZones: ElevationZone[] } {
+    return { obstacles: this.obstacles, elevationZones: this.elevationZones };
   }
 
   stop(): void {

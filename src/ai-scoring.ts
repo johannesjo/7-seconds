@@ -1,13 +1,12 @@
-import { Unit, Vec2, Obstacle, ElevationZone, DefenseZone, UnitType } from './types';
+import { Unit, Vec2, Obstacle, ElevationZone, UnitType } from './types';
 import { ROUND_DURATION_S, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { hasLineOfSight, getElevationLevel, isInDefenseZone, flankScore } from './units';
+import { hasLineOfSight, getElevationLevel, flankScore } from './units';
 
 export interface ScoringContext {
   candidate: Vec2;
   unit: Unit;
   enemies: Unit[];
   obstacles: Obstacle[];
-  defenseZones: DefenseZone[];
   elevationZones: ElevationZone[];
 }
 
@@ -28,7 +27,7 @@ const WEIGHTS: Record<UnitType, {
 
 /** Score a candidate position for a given unit. Higher is better. */
 export function scorePosition(ctx: ScoringContext): number {
-  const { candidate, unit, enemies, obstacles, elevationZones, defenseZones } = ctx;
+  const { candidate, unit, enemies, obstacles, elevationZones } = ctx;
   const w = WEIGHTS[unit.type];
 
   // Check reachability: can the unit reach this position within ROUND_DURATION_S?
@@ -75,11 +74,6 @@ export function scorePosition(ctx: ScoringContext): number {
   const elevLevel = getElevationLevel(candidate, elevationZones);
   score += elevLevel * w.elevation;
 
-  // Defense zone bonus
-  if (isInDefenseZone(candidate, defenseZones)) {
-    score += w.cover;
-  }
-
   return score;
 }
 
@@ -87,7 +81,6 @@ export function scorePosition(ctx: ScoringContext): number {
 export function generateCandidates(
   unit: Unit,
   obstacles: Obstacle[],
-  defenseZones: DefenseZone[],
   elevationZones: ElevationZone[],
 ): Vec2[] {
   const maxDist = unit.speed * ROUND_DURATION_S;
@@ -107,14 +100,6 @@ export function generateCandidates(
       if (!isInsideObstacle(pos, obstacles, padding)) {
         candidates.push(pos);
       }
-    }
-  }
-
-  // Center of each reachable defense zone
-  for (const zone of defenseZones) {
-    const center = { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 };
-    if (!isInsideObstacle(center, obstacles, padding)) {
-      candidates.push(center);
     }
   }
 

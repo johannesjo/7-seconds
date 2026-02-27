@@ -1,14 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { scorePosition, generateCandidates } from './ai-scoring';
 import { createUnit } from './units';
-import { Obstacle, ElevationZone, DefenseZone } from './types';
+import { Obstacle, ElevationZone } from './types';
 
 describe('scorePosition', () => {
   const enemies = [
     createUnit('e1', 'soldier', 'blue', { x: 600, y: 600 }),
   ];
   const obstacles: Obstacle[] = [];
-  const defenseZones: DefenseZone[] = [];
   const elevationZones: ElevationZone[] = [];
 
   it('snipers prefer far positions over close ones', () => {
@@ -19,7 +18,6 @@ describe('scorePosition', () => {
       unit: sniper,
       enemies,
       obstacles,
-      defenseZones,
       elevationZones,
     });
 
@@ -28,7 +26,6 @@ describe('scorePosition', () => {
       unit: sniper,
       enemies,
       obstacles,
-      defenseZones,
       elevationZones,
     });
 
@@ -43,7 +40,6 @@ describe('scorePosition', () => {
       unit: tank,
       enemies,
       obstacles,
-      defenseZones,
       elevationZones,
     });
 
@@ -52,7 +48,6 @@ describe('scorePosition', () => {
       unit: tank,
       enemies,
       obstacles,
-      defenseZones,
       elevationZones,
     });
 
@@ -70,7 +65,6 @@ describe('scorePosition', () => {
       unit: scout,
       enemies: [enemy],
       obstacles,
-      defenseZones,
       elevationZones,
     });
 
@@ -79,7 +73,6 @@ describe('scorePosition', () => {
       unit: scout,
       enemies: [enemy],
       obstacles,
-      defenseZones,
       elevationZones,
     });
 
@@ -94,7 +87,6 @@ describe('scorePosition', () => {
       unit: scout,
       enemies,
       obstacles,
-      defenseZones,
       elevationZones,
     });
 
@@ -110,7 +102,6 @@ describe('scorePosition', () => {
       unit: sniper,
       enemies,
       obstacles,
-      defenseZones,
       elevationZones: [zone],
     });
 
@@ -119,7 +110,6 @@ describe('scorePosition', () => {
       unit: sniper,
       enemies,
       obstacles,
-      defenseZones,
       elevationZones: [zone],
     });
 
@@ -132,7 +122,7 @@ describe('generateCandidates', () => {
     const unit = createUnit('u1', 'soldier', 'red', { x: 600, y: 400 });
     const obstacle: Obstacle = { x: 580, y: 380, w: 40, h: 40 };
 
-    const candidates = generateCandidates(unit, [obstacle], [], []);
+    const candidates = generateCandidates(unit, [obstacle], []);
 
     // No candidate should be inside the obstacle
     for (const c of candidates) {
@@ -145,23 +135,11 @@ describe('generateCandidates', () => {
     }
   });
 
-  it('includes defense zone centers', () => {
-    const unit = createUnit('u1', 'soldier', 'red', { x: 600, y: 400 });
-    const zone: DefenseZone = { x: 550, y: 350, w: 100, h: 100 };
-
-    const candidates = generateCandidates(unit, [], [zone], []);
-
-    const hasCenter = candidates.some(c =>
-      Math.abs(c.x - 600) < 1 && Math.abs(c.y - 400) < 1,
-    );
-    expect(hasCenter).toBe(true);
-  });
-
   it('includes elevation zone centers', () => {
     const unit = createUnit('u1', 'soldier', 'red', { x: 600, y: 400 });
     const zone: ElevationZone = { x: 550, y: 350, w: 100, h: 100 };
 
-    const candidates = generateCandidates(unit, [], [], [zone]);
+    const candidates = generateCandidates(unit, [], [zone]);
 
     const hasCenter = candidates.some(c =>
       Math.abs(c.x - 600) < 1 && Math.abs(c.y - 400) < 1,

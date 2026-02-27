@@ -1,4 +1,4 @@
-import { Obstacle, ElevationZone, DefenseZone } from './types';
+import { Obstacle, ElevationZone } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 function randomInRange(min: number, max: number): number {
@@ -51,38 +51,6 @@ export function generateElevationZones(): ElevationZone[] {
   return zones;
 }
 
-function rectsOverlap(a: Obstacle, b: Obstacle, margin = 10): boolean {
-  return a.x < b.x + b.w + margin && a.x + a.w + margin > b.x
-    && a.y < b.y + b.h + margin && a.y + a.h + margin > b.y;
-}
-
-/** Generate 2-3 symmetric pairs of defense zones (4-6 total), avoiding obstacles. */
-export function generateDefenseZones(obstacles: Obstacle[] = []): DefenseZone[] {
-  const zones: DefenseZone[] = [];
-  const pairCount = randomInRange(2, 4); // 2 or 3 pairs
-
-  for (let i = 0; i < pairCount; i++) {
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const w = randomInRange(80, 140);
-      const h = randomInRange(60, 100);
-      const x = randomInRange(50, MAP_WIDTH - 50 - w);
-      const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
-
-      const top = { x, y, w, h };
-      const bottom = { x, y: MAP_HEIGHT - y - h, w, h };
-      const blocked = [...obstacles, ...zones].some(
-        obs => rectsOverlap(top, obs) || rectsOverlap(bottom, obs),
-      );
-      if (!blocked) {
-        zones.push(top, bottom);
-        break;
-      }
-    }
-  }
-
-  return zones;
-}
-
 // --- Horde-specific generators (player-side terrain only) ---
 
 /** Generate 2-4 obstacles in the player's half (y: 0.35–0.85). No mirroring. */
@@ -117,28 +85,3 @@ export function generateHordeElevationZones(): ElevationZone[] {
   return zones;
 }
 
-/** Generate 2-4 defense zones in the player's half (y: 0.35–0.85), avoiding obstacles. */
-export function generateHordeDefenseZones(obstacles: Obstacle[] = []): DefenseZone[] {
-  const zones: DefenseZone[] = [];
-  const count = randomInRange(2, 5); // 2-4
-
-  for (let i = 0; i < count; i++) {
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const w = randomInRange(80, 140);
-      const h = randomInRange(60, 100);
-      const x = randomInRange(50, MAP_WIDTH - 50 - w);
-      const y = randomInRange(MAP_HEIGHT * 0.35, MAP_HEIGHT * 0.85 - h);
-
-      const zone = { x, y, w, h };
-      const blocked = [...obstacles, ...zones].some(
-        obs => rectsOverlap(zone, obs),
-      );
-      if (!blocked) {
-        zones.push(zone);
-        break;
-      }
-    }
-  }
-
-  return zones;
-}

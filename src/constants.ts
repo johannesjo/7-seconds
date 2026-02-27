@@ -31,8 +31,6 @@ export const ELEVATION_RANGE_BONUS = 0.2;
 export const ZONE_DEPTH_RATIO = 0.08;
 export const FLANK_ANGLE_THRESHOLD = Math.PI / 3; // 60° half-cone = 120° front
 export const FLANK_DAMAGE_MULTIPLIER = 1.5;
-export const DEFENSE_ZONE_REDUCTION = 0.5;
-
 export const HORDE_MAX_WAVES = 12;
 export const HORDE_STARTING_ARMY: { type: UnitType; count: number }[] = [
   { type: 'soldier', count: 2 },

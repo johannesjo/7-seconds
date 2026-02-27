@@ -1,8 +1,8 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
 import { createArmy, createMissionArmy } from './units';
-import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones, generateHordeDefenseZones } from './battlefield';
-import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, DefenseZone, ReplayData } from './types';
+import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
+import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData } from './types';
 import { ARMY_COMPOSITION, HORDE_MAX_WAVES, HORDE_STARTING_ARMY } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits } from './horde';
 import { ReplayPlayer } from './replay';
@@ -60,7 +60,7 @@ let aiMode = false;
 let hordeActive = false;
 let hordeWave = 0;
 let hordeUnits: Unit[] = [];
-let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[]; defenseZones: DefenseZone[] } | null = null;
+let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -266,8 +266,7 @@ function startHorde(): void {
   // Generate map once for the whole run (before spawning so units avoid blocks)
   const obstacles = generateHordeObstacles();
   const elevationZones = generateHordeElevationZones();
-  const defenseZones = generateHordeDefenseZones(obstacles);
-  hordeMap = { obstacles, elevationZones, defenseZones };
+  hordeMap = { obstacles, elevationZones };
 
   const allBlocks = obstacles;
   hordeUnits = createMissionArmy('blue', HORDE_STARTING_ARMY, allBlocks);

@@ -27,7 +27,6 @@ export class ReplayPlayer {
     this.renderer.bloodEnabled = true;
     this.renderer.renderElevationZones(this.data.elevationZones);
     this.renderer.renderObstacles(this.data.obstacles);
-    this.renderer.renderDefenseZones(this.data.defenseZones);
     this.frameIndex = 0;
     this.accumulator = 0;
     this.paused = false;

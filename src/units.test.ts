@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, isInDefenseZone } from './units';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked } from './units';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 
@@ -255,28 +255,6 @@ describe('isFlanked', () => {
   });
 });
 
-describe('isInDefenseZone', () => {
-  it('returns true when pos is inside a defense zone', () => {
-    const zone = { x: 100, y: 100, w: 80, h: 60 };
-    expect(isInDefenseZone({ x: 140, y: 130 }, [zone])).toBe(true);
-  });
-
-  it('returns false when pos is outside all defense zones', () => {
-    const zone = { x: 100, y: 100, w: 80, h: 60 };
-    expect(isInDefenseZone({ x: 50, y: 50 }, [zone])).toBe(false);
-  });
-
-  it('returns true on the zone boundary', () => {
-    const zone = { x: 100, y: 100, w: 80, h: 60 };
-    expect(isInDefenseZone({ x: 100, y: 100 }, [zone])).toBe(true);
-    expect(isInDefenseZone({ x: 180, y: 160 }, [zone])).toBe(true);
-  });
-
-  it('returns false when no zones exist', () => {
-    expect(isInDefenseZone({ x: 100, y: 100 }, [])).toBe(false);
-  });
-});
-
 describe('updateProjectiles', () => {
   it('moves projectiles and removes those past max range', () => {
     const proj = {
@@ -387,7 +365,7 @@ describe('updateProjectiles', () => {
     expect(target.hp).toBe(50); // 60 - 10
   });
 
-  it('defense zone reduces damage by 50%', () => {
+  it('applies normal damage without defense zone', () => {
     const target = createUnit('e1', 'soldier', 'red', { x: 170, y: 100 });
     target.gunAngle = Math.PI; // facing left (head-on, no flank)
     const proj = {
@@ -400,16 +378,14 @@ describe('updateProjectiles', () => {
       maxRange: 500,
       distanceTraveled: 0,
     };
-    // Target is inside the defense zone
-    const zone = { x: 140, y: 80, w: 60, h: 60 };
     // dt=0.25 moves projectile from x=100 to x=175, within hit range of target at x=170
-    const { hits } = updateProjectiles([proj], [target], 0.25, [], [zone]);
+    const { hits } = updateProjectiles([proj], [target], 0.25);
     expect(hits).toHaveLength(1);
-    expect(hits[0].damage).toBe(5); // 10 * 0.5
-    expect(target.hp).toBe(55); // 60 - 5
+    expect(hits[0].damage).toBe(10);
+    expect(target.hp).toBe(50); // 60 - 10
   });
 
-  it('applies flanking and defense zone combined', () => {
+  it('applies flanking damage without defense zone', () => {
     const target = createUnit('e1', 'soldier', 'red', { x: 170, y: 100 });
     target.gunAngle = 0; // facing right, projectile comes from left = flanked
     const proj = {
@@ -422,13 +398,11 @@ describe('updateProjectiles', () => {
       maxRange: 500,
       distanceTraveled: 0,
     };
-    // Target is inside the defense zone
-    const zone = { x: 140, y: 80, w: 60, h: 60 };
     // dt=0.25 moves projectile from x=100 to x=175, within hit range of target at x=170
-    const { hits } = updateProjectiles([proj], [target], 0.25, [], [zone]);
+    const { hits } = updateProjectiles([proj], [target], 0.25);
     expect(hits).toHaveLength(1);
     expect(hits[0].flanked).toBe(true);
-    expect(hits[0].damage).toBe(7.5); // 10 * 1.5 * 0.5
-    expect(target.hp).toBe(52.5); // 60 - 7.5
+    expect(hits[0].damage).toBe(15); // 10 * 1.5
+    expect(target.hp).toBe(45); // 60 - 15
   });
 });

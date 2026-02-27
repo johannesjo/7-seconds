@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateObstacles, generateElevationZones, generateDefenseZones, generateHordeObstacles, generateHordeElevationZones, generateHordeDefenseZones } from './battlefield';
+import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 describe('generateObstacles', () => {
@@ -84,56 +84,6 @@ describe('generateElevationZones', () => {
   });
 });
 
-describe('generateDefenseZones', () => {
-  it('generates 4-6 defense zones (always even, mirrored pairs)', () => {
-    for (let i = 0; i < 20; i++) {
-      const zones = generateDefenseZones();
-      expect(zones.length).toBeGreaterThanOrEqual(4);
-      expect(zones.length).toBeLessThanOrEqual(6);
-      expect(zones.length % 2).toBe(0);
-    }
-  });
-
-  it('defense zones are symmetrical (mirrored top-bottom)', () => {
-    const zones = generateDefenseZones();
-    for (const z of zones) {
-      const centerY = z.y + z.h / 2;
-      const mirrorCenterY = MAP_HEIGHT - centerY;
-      const hasMirror = zones.some(other => {
-        const otherCenterY = other.y + other.h / 2;
-        return Math.abs(otherCenterY - mirrorCenterY) < 1 && other !== z;
-      });
-      expect(hasMirror).toBe(true);
-    }
-  });
-
-  it('defense zones are within map bounds', () => {
-    for (let i = 0; i < 20; i++) {
-      const zones = generateDefenseZones();
-      for (const z of zones) {
-        expect(z.x).toBeGreaterThanOrEqual(50);
-        expect(z.x + z.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
-        expect(z.y).toBeGreaterThanOrEqual(0);
-        expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT);
-      }
-    }
-  });
-
-  it('defense zones do not overlap obstacles', () => {
-    for (let i = 0; i < 20; i++) {
-      const obstacles = generateObstacles();
-      const zones = generateDefenseZones(obstacles);
-      for (const z of zones) {
-        for (const obs of obstacles) {
-          const overlaps = z.x < obs.x + obs.w && z.x + z.w > obs.x
-            && z.y < obs.y + obs.h && z.y + z.h > obs.y;
-          expect(overlaps).toBe(false);
-        }
-      }
-    }
-  });
-});
-
 // --- Horde-specific generators ---
 
 describe('generateHordeObstacles', () => {
@@ -198,36 +148,3 @@ describe('generateHordeElevationZones', () => {
   });
 });
 
-describe('generateHordeDefenseZones', () => {
-  it('generates 2-4 defense zones', () => {
-    for (let i = 0; i < 20; i++) {
-      const zones = generateHordeDefenseZones();
-      expect(zones.length).toBeGreaterThanOrEqual(2);
-      expect(zones.length).toBeLessThanOrEqual(4);
-    }
-  });
-
-  it('defense zones do not overlap horde obstacles', () => {
-    for (let i = 0; i < 20; i++) {
-      const obstacles = generateHordeObstacles();
-      const zones = generateHordeDefenseZones(obstacles);
-      for (const z of zones) {
-        for (const obs of obstacles) {
-          const overlaps = z.x < obs.x + obs.w && z.x + z.w > obs.x
-            && z.y < obs.y + obs.h && z.y + z.h > obs.y;
-          expect(overlaps).toBe(false);
-        }
-      }
-    }
-  });
-
-  it('defense zones are in the player half (y >= MAP_HEIGHT * 0.35)', () => {
-    for (let i = 0; i < 20; i++) {
-      const zones = generateHordeDefenseZones();
-      for (const z of zones) {
-        expect(z.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.35);
-        expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.92);
-      }
-    }
-  });
-});
