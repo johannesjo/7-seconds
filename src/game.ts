@@ -69,9 +69,23 @@ export class GameEngine {
 
   startBattle(): void {
     this.renderer.bloodEnabled = this.bloodEnabled;
+
+    // Load map before spawning units so we can avoid placing them inside blocks
+    if (this.hordeMap) {
+      this.obstacles = this.hordeMap.obstacles;
+      this.elevationZones = this.hordeMap.elevationZones;
+      this.coverBlocks = this.hordeMap.coverBlocks;
+    } else {
+      this.obstacles = generateObstacles();
+      this.elevationZones = generateElevationZones();
+      this.coverBlocks = generateCoverBlocks(this.obstacles);
+    }
+
+    const allBlocks = [...this.obstacles, ...this.coverBlocks];
+
     if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
       // Horde mode: use pre-created blue units + spawn wave enemies
-      const redUnits = createMissionArmy('red', this.hordeRedArmy);
+      const redUnits = createMissionArmy('red', this.hordeRedArmy, allBlocks);
       // Prefix red IDs with wave index to avoid renderer collisions
       const waveTag = `w${Date.now() % 10000}`;
       for (const u of redUnits) {
@@ -86,16 +100,6 @@ export class GameEngine {
       for (const unit of this.units) {
         unit.damage = 9999;
       }
-    }
-
-    if (this.hordeMap) {
-      this.obstacles = this.hordeMap.obstacles;
-      this.elevationZones = this.hordeMap.elevationZones;
-      this.coverBlocks = this.hordeMap.coverBlocks;
-    } else {
-      this.obstacles = generateObstacles();
-      this.elevationZones = generateElevationZones();
-      this.coverBlocks = generateCoverBlocks(this.obstacles);
     }
     this.projectiles = [];
     this.elapsedTime = 0;

@@ -102,5 +102,5 @@ export interface HordeUpgrade {
   label: string;
   description: string;
   category: 'stat' | 'recruit';
-  apply: (units: Unit[]) => Unit[];
+  apply: (units: Unit[], blocks?: Obstacle[]) => Unit[];
 }

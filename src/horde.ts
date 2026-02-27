@@ -1,6 +1,6 @@
-import { HordeWave, HordeUpgrade, Unit, UnitType } from './types';
+import { HordeWave, HordeUpgrade, Unit, UnitType, Obstacle } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, UNIT_STATS } from './constants';
-import { createUnit } from './units';
+import { createUnit, nudgeOutOfBlocks } from './units';
 
 export const HORDE_WAVES: HordeWave[] = [
   { wave: 1, enemies: [{ type: 'scout', count: 3 }] },
@@ -66,9 +66,10 @@ function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
     label: `Recruit ${label}`,
     description: `Add a ${label} to your squad`,
     category: 'recruit',
-    apply(units: Unit[]): Unit[] {
+    apply(units: Unit[], blocks?: Obstacle[]): Unit[] {
       const tag = Date.now() % 100000;
-      const pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.85 };
+      let pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.85 };
+      if (blocks) pos = nudgeOutOfBlocks(pos, blocks);
       const newUnit = createUnit(`blue_${type}_r${tag}`, type, 'blue', pos);
       return [...units, newUnit];
     },
@@ -137,7 +138,7 @@ export function healAllBlue(units: Unit[]): void {
 }
 
 /** Reposition blue units in spawn zone, clear movement state. */
-export function repositionBlueUnits(units: Unit[]): void {
+export function repositionBlueUnits(units: Unit[], blocks?: Obstacle[]): void {
   const blueAlive = units.filter(u => u.team === 'blue' && u.alive);
   const spacing = 60;
   const groupWidth = spacing * (blueAlive.length - 1);
@@ -146,7 +147,9 @@ export function repositionBlueUnits(units: Unit[]): void {
 
   for (let i = 0; i < blueAlive.length; i++) {
     const u = blueAlive[i];
-    u.pos = { x: startX + spacing * i, y: baseY };
+    let pos = { x: startX + spacing * i, y: baseY };
+    if (blocks) pos = nudgeOutOfBlocks(pos, blocks);
+    u.pos = pos;
     u.waypoints = [];
     u.moveTarget = null;
     u.vel = { x: 0, y: 0 };

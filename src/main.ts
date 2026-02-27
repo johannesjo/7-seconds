@@ -197,13 +197,15 @@ function startGame(): void {
 function startHorde(): void {
   hordeActive = true;
   hordeWave = 0;
-  hordeUnits = createMissionArmy('blue', HORDE_STARTING_ARMY);
 
-  // Generate map once for the whole run
+  // Generate map once for the whole run (before spawning so units avoid blocks)
   const obstacles = generateObstacles();
   const elevationZones = generateElevationZones();
   const coverBlocks = generateCoverBlocks(obstacles);
   hordeMap = { obstacles, elevationZones, coverBlocks };
+
+  const allBlocks = [...obstacles, ...coverBlocks];
+  hordeUnits = createMissionArmy('blue', HORDE_STARTING_ARMY, allBlocks);
 
   waveCounterEl.style.display = '';
   startNextHordeWave();
@@ -244,8 +246,9 @@ function showUpgradeSelection(): void {
       <div class="card-category">${upgrade.category}</div>
     `;
     card.addEventListener('click', () => {
-      hordeUnits = upgrade.apply(hordeUnits);
-      repositionBlueUnits(hordeUnits);
+      const allBlocks = [...hordeMap!.obstacles, ...hordeMap!.coverBlocks];
+      hordeUnits = upgrade.apply(hordeUnits, allBlocks);
+      repositionBlueUnits(hordeUnits, allBlocks);
       showScreen('battle');
       startNextHordeWave();
     });

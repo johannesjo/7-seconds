@@ -167,6 +167,29 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
   };
 }
 
+/** If pos is inside any block, nudge it to the nearest edge + padding. */
+export function nudgeOutOfBlocks(pos: Vec2, blocks: Obstacle[], padding = 4): Vec2 {
+  for (const b of blocks) {
+    const left = b.x - padding;
+    const right = b.x + b.w + padding;
+    const top = b.y - padding;
+    const bottom = b.y + b.h + padding;
+    if (pos.x > left && pos.x < right && pos.y > top && pos.y < bottom) {
+      // Find nearest edge
+      const dLeft = pos.x - left;
+      const dRight = right - pos.x;
+      const dTop = pos.y - top;
+      const dBottom = bottom - pos.y;
+      const min = Math.min(dLeft, dRight, dTop, dBottom);
+      if (min === dLeft) return { x: left, y: pos.y };
+      if (min === dRight) return { x: right, y: pos.y };
+      if (min === dTop) return { x: pos.x, y: top };
+      return { x: pos.x, y: bottom };
+    }
+  }
+  return pos;
+}
+
 export function createArmy(team: Team): Unit[] {
   const units: Unit[] = [];
   const isBlue = team === 'blue';
@@ -189,8 +212,8 @@ export function createArmy(team: Team): Unit[] {
   return units;
 }
 
-/** Create an army from a custom composition (used by campaign missions). */
-export function createMissionArmy(team: Team, composition: { type: UnitType; count: number }[]): Unit[] {
+/** Create an army from a custom composition. Nudges units out of blocks if provided. */
+export function createMissionArmy(team: Team, composition: { type: UnitType; count: number }[], blocks?: Obstacle[]): Unit[] {
   const units: Unit[] = [];
   const isBlue = team === 'blue';
   const totalUnits = composition.reduce((sum, c) => sum + c.count, 0);
@@ -235,6 +258,12 @@ export function createMissionArmy(team: Team, composition: { type: UnitType; cou
         }));
         index++;
       }
+    }
+  }
+
+  if (blocks) {
+    for (const u of units) {
+      u.pos = nudgeOutOfBlocks(u.pos, blocks);
     }
   }
 
