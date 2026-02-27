@@ -273,10 +273,11 @@ export class GameEngine {
 
       if (this.bloodEnabled) {
         const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
-        fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, hit.damage);
+        const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
+        fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
         if (hit.killed) {
           fx?.addKillText(hit.pos, hit.team);
-          fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, hit.damage);
+          fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
         }
       } else {
         fx?.addImpactBurst(hit.pos, hit.team);
