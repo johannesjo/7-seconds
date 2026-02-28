@@ -238,7 +238,7 @@ describe('tryFireProjectile', () => {
     const projectiles = tryFireProjectile(attacker, target, 0.016);
     expect(projectiles).toHaveLength(1);
     expect(projectiles[0].damage).toBe(12);
-    expect(projectiles[0].knockback).toBe(30);
+    expect(projectiles[0].knockback).toBe(50);
     expect(projectiles[0].team).toBe('blue');
   });
 });

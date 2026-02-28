@@ -714,7 +714,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
       maxRange,
       distanceTraveled: 0,
       piercing: unit.piercing ?? false,
-      knockback: 30,
+      knockback: 50,
     }];
   }
 
