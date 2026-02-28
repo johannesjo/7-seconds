@@ -381,6 +381,8 @@ export class GameEngine {
         // Wave cleared — don't end the battle, emit wave-clear event
         this.running = false;
         this.renderer.ticker.remove(this.tick, this);
+        this.projectiles = [];
+        this.renderer.renderProjectiles([]);
         this.pathDrawer?.disable();
         this.pathDrawer?.clearGraphics();
         this.onEvent('wave-clear');
@@ -389,6 +391,8 @@ export class GameEngine {
       this.endingBattle = true;
       this.endDelayTimer = 0.6;
       this.pendingWinner = blueAlive === 0 ? 'red' : 'blue';
+      this.projectiles = [];
+      this.renderer.renderProjectiles([]);
       return;
     }
 
@@ -458,6 +462,8 @@ export class GameEngine {
   private endBattle(winner: Team): void {
     this.running = false;
     this.renderer.ticker.remove(this.tick, this);
+    this.projectiles = [];
+    this.renderer.renderProjectiles([]);
     this.pathDrawer?.disable();
     this.pathDrawer?.clearGraphics();
     this.renderer.effects?.clear();
