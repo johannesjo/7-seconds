@@ -64,6 +64,7 @@ export interface Theme {
   paperNoise: boolean;
   sketchyObstacles: boolean;
   bloodAlpha: number;
+  bloodFade: number;
   elevationAlpha: number;
 }
 
@@ -122,6 +123,7 @@ export const NIGHT_THEME: Theme = {
   paperNoise: false,
   sketchyObstacles: false,
   bloodAlpha: 1,
+  bloodFade: 0.6,
   elevationAlpha: 1,
 };
 
@@ -153,10 +155,10 @@ export const DAY_THEME: Theme = {
   blueKill: '#336699',
   redKill: '#994444',
 
-  blueBlood: [0x224488, 0x1a3366, 0x3366aa],
-  redBlood: [0x883322, 0x662211, 0xaa4433],
-  blueStain: 0x1a2d44,
-  redStain: 0x44221a,
+  blueBlood: [0x3388dd, 0x2266bb, 0x55aaee],
+  redBlood: [0xcc4433, 0xaa2222, 0xdd6644],
+  blueStain: 0x2266aa,
+  redStain: 0xaa3322,
 
   muzzleFlash: 0xddcc88,
   muzzleCore: 0xeee8cc,
@@ -179,6 +181,7 @@ export const DAY_THEME: Theme = {
   hoverLabelFill: 0x443322,
   paperNoise: true,
   sketchyObstacles: true,
-  bloodAlpha: 0.4,
+  bloodAlpha: 0.85,
+  bloodFade: 0.9,
   elevationAlpha: 0.6,
 };

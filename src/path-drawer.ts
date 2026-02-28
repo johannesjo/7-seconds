@@ -479,8 +479,10 @@ export class PathDrawer {
     if (closest) {
       this.hoveredEnemy = null;
       this.selectedUnit = closest;
+      closest.waypoints = [];
+      closest.moveTarget = null;
       this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
-      this.renderHoverLayer();
+      this.renderPaths();
       return;
     }
 
