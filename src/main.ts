@@ -476,6 +476,8 @@ replaySpeedToggle.addEventListener('click', () => {
 // Initialize renderer and show battlefield preview behind start screen
 (async () => {
   await initRenderer();
+  document.body.classList.toggle('day-mode', dayModeCb.checked);
+  if (dayModeCb.checked) renderer!.setTheme(DAY_THEME);
   showPreview();
   showScreen('prompt');
 })();

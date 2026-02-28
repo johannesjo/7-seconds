@@ -64,6 +64,7 @@ export interface Theme {
   paperNoise: boolean;
   sketchyObstacles: boolean;
   bloodAlpha: number;
+  elevationAlpha: number;
 }
 
 export const NIGHT_THEME: Theme = {
@@ -121,6 +122,7 @@ export const NIGHT_THEME: Theme = {
   paperNoise: false,
   sketchyObstacles: false,
   bloodAlpha: 1,
+  elevationAlpha: 1,
 };
 
 export const DAY_THEME: Theme = {
@@ -128,9 +130,9 @@ export const DAY_THEME: Theme = {
   grid: 0xc8bfa0,
   gridAlpha: 0.4,
 
-  elevationOuter: 0xe0d8c0,
-  elevationMid: 0xd8d0b8,
-  elevationInner: 0xd0c8b0,
+  elevationOuter: 0xc0b890,
+  elevationMid: 0xb0a878,
+  elevationInner: 0xa09868,
   elevationLabel: '#558844',
 
   obstacleBorder: 0x665544,
@@ -178,4 +180,5 @@ export const DAY_THEME: Theme = {
   paperNoise: true,
   sketchyObstacles: true,
   bloodAlpha: 0.4,
+  elevationAlpha: 0.6,
 };

@@ -100,17 +100,18 @@ export class Renderer {
     const container = new Container();
     const gfx = new Graphics();
 
+    const eA = this.theme.elevationAlpha;
     for (const z of zones) {
       gfx.roundRect(z.x, z.y, z.w, z.h, 6);
-      gfx.fill({ color: this.theme.elevationOuter, alpha: 0.5 });
+      gfx.fill({ color: this.theme.elevationOuter, alpha: 0.5 * eA });
 
       const m = 8;
       gfx.roundRect(z.x + m, z.y + m, z.w - m * 2, z.h - m * 2, 4);
-      gfx.fill({ color: this.theme.elevationMid, alpha: 0.35 });
+      gfx.fill({ color: this.theme.elevationMid, alpha: 0.35 * eA });
 
       const m2 = 16;
       gfx.roundRect(z.x + m2, z.y + m2, z.w - m2 * 2, z.h - m2 * 2, 2);
-      gfx.fill({ color: this.theme.elevationInner, alpha: 0.25 });
+      gfx.fill({ color: this.theme.elevationInner, alpha: 0.25 * eA });
 
       const hitArea = new Graphics();
       hitArea.roundRect(z.x, z.y, z.w, z.h, 6);
@@ -199,18 +200,17 @@ export class Renderer {
     const fills = new Graphics();
     for (const obs of obstacles) {
       fills.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
-      fills.fill({ color: this.theme.obstacleFill, alpha: 0.4 });
+      fills.fill({ color: this.theme.obstacleFill });
     }
     wrapper.addChild(fills);
 
-    // Two overlapping hand-drawn outlines for each obstacle
+    // Two overlapping slightly wobbly outlines per obstacle
     const outlines = new Graphics();
     for (const obs of obstacles) {
       for (let pass = 0; pass < 2; pass++) {
-        const jitter = 1.5;
-        const j = (corner: number) => (seededRandom(obs.x, obs.y, pass * 4 + corner) - 0.5) * jitter * 2;
+        const j = (corner: number) => (seededRandom(obs.x, obs.y, pass * 4 + corner) - 0.5) * 1;
 
-        outlines.setStrokeStyle({ width: 1.5, color: this.theme.obstacleBorder, alpha: 0.7 });
+        outlines.setStrokeStyle({ width: 1.5, color: this.theme.obstacleBorder, alpha: 0.8 });
         outlines.moveTo(obs.x + j(0), obs.y + j(0));
         outlines.lineTo(obs.x + obs.w + j(1), obs.y + j(1));
         outlines.lineTo(obs.x + obs.w + j(2), obs.y + obs.h + j(2));
@@ -336,9 +336,9 @@ export class Renderer {
       shape.fill(color);
     } else if (unit.type === 'zombie') {
       const darkColor = unit.team === 'blue' ? this.theme.blueDark : this.theme.redDark;
-      shape.circle(0, 0, unit.radius * 1.3);
+      shape.ellipse(0, 0, unit.radius * 1.3, unit.radius * 0.9);
       shape.fill({ color: darkColor, alpha: 0.5 });
-      shape.circle(0, 0, unit.radius);
+      shape.ellipse(0, 0, unit.radius, unit.radius * 0.7);
       shape.fill(color);
     } else {
       shape.ellipse(0, 0, unit.radius, unit.radius * 0.7);
