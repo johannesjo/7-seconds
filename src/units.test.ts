@@ -20,7 +20,7 @@ describe('createUnit', () => {
   it('creates a blade with correct stats', () => {
     const unit = createUnit('blade_1', 'blade', 'red', { x: 500, y: 300 });
     expect(unit.hp).toBe(80);
-    expect(unit.speed).toBe(80);
+    expect(unit.speed).toBe(120);
     expect(unit.damage).toBe(12);
   });
 });
