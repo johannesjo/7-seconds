@@ -44,6 +44,10 @@ export interface Theme {
   barrel: number;
   barrelAlpha: number;
 
+  // Special unit types
+  shielder: number;
+  bomber: number;
+
   // HP bar
   hpBg: number;
   hpHigh: number;
@@ -107,6 +111,9 @@ export const NIGHT_THEME: Theme = {
   barrel: 0xffffff,
   barrelAlpha: 0.6,
 
+  shielder: 0x7799aa,
+  bomber: 0xff8844,
+
   hpBg: 0x333333,
   hpHigh: 0x44ff44,
   hpMid: 0xffaa00,
@@ -165,6 +172,9 @@ export const DAY_THEME: Theme = {
 
   barrel: 0x443322,
   barrelAlpha: 0.7,
+
+  shielder: 0x556677,
+  bomber: 0xcc6633,
 
   hpBg: 0x998877,
   hpHigh: 0x448833,

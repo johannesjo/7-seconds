@@ -297,7 +297,7 @@ export class Renderer {
       // Rotate gun barrel
       (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
       // Rotate body with the gun for person-shaped units
-      if (unit.type === 'soldier' || unit.type === 'sniper' || unit.type === 'zombie') {
+      if (unit.type === 'soldier' || unit.type === 'sniper' || unit.type === 'zombie' || unit.type === 'shielder' || unit.type === 'bomber') {
         (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
       }
       if (unit.type === 'blade') {
@@ -368,6 +368,26 @@ export class Renderer {
       }
       shape.poly(points);
       shape.fill(color);
+    } else if (unit.type === 'shielder') {
+      // Wider ellipse body
+      shape.ellipse(0, 0, unit.radius * 1.4, unit.radius * 0.9);
+      shape.fill(this.theme.shielder);
+      // Shield arc on front (120° cone)
+      const arcRadius = unit.radius * 1.6;
+      const shieldColor = unit.team === 'blue' ? 0x88ccff : 0xffcc88;
+      shape.arc(0, 0, arcRadius, -Math.PI / 3, Math.PI / 3);
+      shape.stroke({ width: 3, color: shieldColor, alpha: 0.8 });
+    } else if (unit.type === 'bomber') {
+      // Pulsing circle — pulse speed increases as HP drops
+      const hpRatio = unit.hp / unit.maxHp;
+      const pulseSpeed = 2 + (1 - hpRatio) * 8; // faster as HP drops
+      const pulseScale = 1 + Math.sin(Date.now() / 1000 * pulseSpeed * Math.PI * 2) * 0.15;
+      const r = unit.radius * pulseScale;
+      shape.circle(0, 0, r);
+      shape.fill(this.theme.bomber);
+      // Inner glow
+      shape.circle(0, 0, r * 0.5);
+      shape.fill({ color: 0xffff00, alpha: 0.3 + (1 - hpRatio) * 0.4 });
     } else if (unit.type === 'zombie') {
       const darkColor = unit.team === 'blue' ? this.theme.blueDark : this.theme.redDark;
       shape.ellipse(0, 0, unit.radius * 1.3, unit.radius * 0.9);
@@ -380,7 +400,7 @@ export class Renderer {
     }
 
     const nose = new Graphics();
-    if (unit.type !== 'zombie' && unit.type !== 'blade') {
+    if (unit.type !== 'zombie' && unit.type !== 'blade' && unit.type !== 'shielder' && unit.type !== 'bomber') {
       if (unit.type === 'sniper') {
         const nr = unit.radius * 1.4;
         nose.rect(unit.radius - 1, -1.5, nr + 1, 3);
