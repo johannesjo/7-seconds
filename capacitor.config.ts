@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: "7 Seconds",
   webDir: "dist",
   server: {
-    url: "https://johannesgo.github.io/7-seconds/",
+    url: "https://johannesjo.github.io/7-seconds/",
     cleartext: false,
   },
 };
