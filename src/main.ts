@@ -38,7 +38,6 @@ const waveCounterEl = document.getElementById('wave-counter')!;
 const upgradeScreen = document.getElementById('upgrade-screen')!;
 const upgradeCardsEl = document.getElementById('upgrade-cards')!;
 
-const zoneControlCb = document.getElementById('zone-control-cb') as HTMLInputElement;
 const oneShotCb = document.getElementById('one-shot-cb') as HTMLInputElement;
 const bloodCb = document.getElementById('blood-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
@@ -164,8 +163,7 @@ function onGameEvent(
     }
 
     const color = result.winner === 'blue' ? '#4a9eff' : '#ff4a4a';
-    const conditionLabel = result.winCondition === 'zone-control' ? 'Zone Control!' : 'Elimination!';
-    winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">${conditionLabel}</span>`;
+    winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
     winnerTextEl.style.color = color;
 
     const blueTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
@@ -206,7 +204,6 @@ function startGame(): void {
   engine?.stop();
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode,
-    zoneControl: zoneControlCb.checked,
     oneShot: oneShotCb.checked,
     blood: bloodCb.checked,
   });

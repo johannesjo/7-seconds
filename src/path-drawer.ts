@@ -1,6 +1,6 @@
 import { Graphics, Container, Rectangle, Text } from 'pixi.js';
 import { Unit, Team, Vec2, ElevationZone } from './types';
-import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ZONE_DEPTH_RATIO, ROUND_DURATION_S } from './constants';
+import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S } from './constants';
 import { getElevationLevel } from './units';
 
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
@@ -80,7 +80,6 @@ export class PathDrawer {
   private rawPoints: Vec2[] = [];
   private enabled = false;
   private canvas: HTMLCanvasElement | null = null;
-  private _zoneControl = false;
   private labelContainer: Container;
   private labelPool: Text[] = [];
   private labelIndex = 0;
@@ -119,10 +118,6 @@ export class PathDrawer {
     this.stage.on('pointerup', this.onPointerUp);
     this.stage.on('pointerupoutside', this.onPointerUp);
     this.stage.on('rightdown', this.onRightDown);
-  }
-
-  set zoneControl(value: boolean) {
-    this._zoneControl = value;
   }
 
   private acquireLabel(): Text {
@@ -295,27 +290,6 @@ export class PathDrawer {
       }
     }
 
-    // Enemy presence warning in own zone (only when zone control is enabled)
-    const zoneDepth = MAP_HEIGHT * ZONE_DEPTH_RATIO;
-    if (this._zoneControl) {
-      const enemyTeam: Team = this.team === 'blue' ? 'red' : 'blue';
-      const ownZoneY = this.team === 'blue' ? MAP_HEIGHT - zoneDepth : 0;
-      const enemyInOurZone = this.units.some(u => {
-        if (!u.alive || u.team !== enemyTeam) return false;
-        return this.team === 'blue'
-          ? u.pos.y > MAP_HEIGHT - zoneDepth
-          : u.pos.y < zoneDepth;
-      });
-
-      if (enemyInOurZone) {
-        const warnColor = enemyTeam === 'red' ? 0xff4a4a : 0x4a9eff;
-        const warnPulse = 0.5 + 0.5 * Math.sin(Date.now() / 350);
-        this.hoverGfx.rect(0, ownZoneY, MAP_WIDTH, zoneDepth);
-        this.hoverGfx.setStrokeStyle({ width: 2, color: warnColor, alpha: 0.3 + 0.4 * warnPulse });
-        this.hoverGfx.stroke();
-      }
-    }
-
     // Selection ring on actively drawn unit
     if (this.selectedUnit) {
       this.hoverGfx.circle(this.selectedUnit.pos.x, this.selectedUnit.pos.y, this.selectedUnit.radius + 5);
@@ -326,22 +300,6 @@ export class PathDrawer {
         ? this.rawPoints[this.rawPoints.length - 1]
         : this.selectedUnit.pos;
       this.drawRangeCircle(this.selectedUnit, endPos, teamColor);
-
-      // Highlight enemy zone when dragging into it (only when zone control is enabled)
-      if (this._zoneControl) {
-        const enemyZoneY = this.team === 'blue' ? 0 : MAP_HEIGHT - zoneDepth;
-        const inEnemyZone = this.team === 'blue'
-          ? endPos.y < zoneDepth
-          : endPos.y > MAP_HEIGHT - zoneDepth;
-        if (inEnemyZone) {
-          const capturePulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
-          this.hoverGfx.rect(0, enemyZoneY, MAP_WIDTH, zoneDepth);
-          this.hoverGfx.fill({ color: teamColor, alpha: 0.06 + 0.04 * capturePulse });
-          this.hoverGfx.rect(0, enemyZoneY, MAP_WIDTH, zoneDepth);
-          this.hoverGfx.setStrokeStyle({ width: 2, color: teamColor, alpha: 0.3 + 0.4 * capturePulse });
-          this.hoverGfx.stroke();
-        }
-      }
 
       return; // Don't show hover when drawing
     }

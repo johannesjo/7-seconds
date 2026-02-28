@@ -90,7 +90,6 @@ export interface BattleResult {
   blueKilled: number;
   redKilled: number;
   duration: number;
-  winCondition?: 'elimination' | 'zone-control';
 }
 
 export interface HordeWave {
