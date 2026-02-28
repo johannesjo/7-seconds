@@ -332,7 +332,8 @@ function showUpgradeSelection(): void {
   if (lastReplayData) {
     const replayBtn = document.createElement('button');
     replayBtn.textContent = 'Watch Replay';
-    replayBtn.style.cssText = 'padding:8px 24px;font-size:13px;background:transparent;color:inherit;border:1px solid #555;border-radius:4px;cursor:pointer;opacity:0.6;margin-top:8px';
+    replayBtn.className = 'replay-btn-upgrade';
+    replayBtn.style.cssText = 'padding:8px 24px;font-size:13px;border-radius:4px;cursor:pointer;margin-top:8px';
     replayBtn.addEventListener('click', () => {
       returnToScreen = 'horde-upgrade';
       startReplay(lastReplayData!);
