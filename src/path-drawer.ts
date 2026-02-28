@@ -2,6 +2,7 @@ import { Graphics, Container, Rectangle, Text } from 'pixi.js';
 import { Unit, Team, Vec2, ElevationZone } from './types';
 import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S } from './constants';
 import { getElevationLevel } from './units';
+import { Theme, NIGHT_THEME } from './theme';
 
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
 export function samplePath(raw: Vec2[], minDist: number): Vec2[] {
@@ -80,6 +81,7 @@ export class PathDrawer {
   private rawPoints: Vec2[] = [];
   private enabled = false;
   private canvas: HTMLCanvasElement | null = null;
+  theme: Theme = NIGHT_THEME;
   private labelContainer: Container;
   private labelPool: Text[] = [];
   private labelIndex = 0;
@@ -94,7 +96,7 @@ export class PathDrawer {
     this.labelContainer = new Container();
     this.hoverLabel = new Text({
       text: '',
-      style: { fontSize: 11, fontFamily: 'monospace', fill: 0xffffff },
+      style: { fontSize: 11, fontFamily: 'monospace', fill: this.theme.hoverLabelFill },
     });
     this.hoverLabel.anchor.set(0.5, 1);
     this.hoverLabel.visible = false;
@@ -129,7 +131,7 @@ export class PathDrawer {
     }
     const label = new Text({
       text: '',
-      style: { fontSize: 11, fontFamily: 'monospace', fill: 0xffffff },
+      style: { fontSize: 11, fontFamily: 'monospace', fill: this.theme.labelFill },
     });
     label.anchor.set(0.5, 1);
     this.labelContainer.addChild(label);
@@ -180,7 +182,7 @@ export class PathDrawer {
     for (const unit of this.units) {
       if (!unit.alive || unit.waypoints.length === 0) continue;
 
-      const color = unit.team === 'blue' ? 0x4a9eff : 0xff4a4a;
+      const color = unit.team === 'blue' ? this.theme.bluePath : this.theme.redPath;
       const alpha = unit.team === this.team ? 0.8 : 0.3;
 
       this.gfx.setStrokeStyle({ width: 2, color, alpha });
@@ -214,14 +216,14 @@ export class PathDrawer {
       const overLimit = travelTime > ROUND_DURATION_S;
       const timeLabel = this.acquireLabel();
       timeLabel.text = overLimit ? `${travelTime.toFixed(1)}s!` : `${travelTime.toFixed(1)}s`;
-      timeLabel.style.fill = overLimit ? 0xff4444 : 0xffffff;
+      timeLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.labelFill;
       timeLabel.position.set(last.x, last.y - 12);
       timeLabel.alpha = alpha;
     }
 
     // Draw in-progress raw line (thicker + brighter than finalized paths)
     if (this.selectedUnit && this.rawPoints.length > 1) {
-      const color = this.team === 'blue' ? 0x8ac4ff : 0xff8a8a;
+      const color = this.team === 'blue' ? this.theme.bluePathBright : this.theme.redPathBright;
       this.gfx.setStrokeStyle({ width: 4, color, alpha: 1.0 });
       this.gfx.moveTo(this.rawPoints[0].x, this.rawPoints[0].y);
       for (let i = 1; i < this.rawPoints.length; i++) {
@@ -248,7 +250,7 @@ export class PathDrawer {
       const rawOverLimit = rawTime > ROUND_DURATION_S;
       const liveLabel = this.acquireLabel();
       liveLabel.text = rawOverLimit ? `${rawTime.toFixed(1)}s!` : `${rawTime.toFixed(1)}s`;
-      liveLabel.style.fill = rawOverLimit ? 0xff4444 : 0xffffff;
+      liveLabel.style.fill = rawOverLimit ? this.theme.labelWarn : this.theme.labelFill;
       liveLabel.position.set(endpoint.x, endpoint.y - 12);
       liveLabel.alpha = 1.0;
     } else {
@@ -268,7 +270,7 @@ export class PathDrawer {
     this.hoverLabel.visible = false;
     if (!this.enabled || !this.team) return;
 
-    const teamColor = this.team === 'blue' ? 0x4a9eff : 0xff4a4a;
+    const teamColor = this.team === 'blue' ? this.theme.bluePath : this.theme.redPath;
     const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
 
     for (const unit of this.units) {
@@ -312,7 +314,7 @@ export class PathDrawer {
 
       // Highlight path + time label on hover
       if (this.hoveredUnit.waypoints.length > 0) {
-        const brightColor = this.team === 'blue' ? 0x8ac4ff : 0xff8a8a;
+        const brightColor = this.team === 'blue' ? this.theme.bluePathBright : this.theme.redPathBright;
         this.hoverGfx.setStrokeStyle({ width: 3, color: brightColor, alpha: 1.0 });
         this.hoverGfx.moveTo(this.hoveredUnit.pos.x, this.hoveredUnit.pos.y);
         for (const wp of this.hoveredUnit.waypoints) {
@@ -329,7 +331,7 @@ export class PathDrawer {
         const travelTime = pathLen / this.hoveredUnit.speed;
         const overLimit = travelTime > ROUND_DURATION_S;
         this.hoverLabel.text = overLimit ? `${travelTime.toFixed(1)}s!` : `${travelTime.toFixed(1)}s`;
-        this.hoverLabel.style.fill = overLimit ? 0xff4444 : 0xffffff;
+        this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
         this.hoverLabel.position.set(last.x, last.y - 12);
         this.hoverLabel.visible = true;
       }
@@ -343,7 +345,7 @@ export class PathDrawer {
 
     // Enemy unit range preview (tap or hover)
     if (this.hoveredEnemy && !this.selectedUnit) {
-      const enemyColor = this.hoveredEnemy.team === 'red' ? 0xff4a4a : 0x4a9eff;
+      const enemyColor = this.hoveredEnemy.team === 'red' ? this.theme.redPath : this.theme.bluePath;
       this.hoverGfx.circle(this.hoveredEnemy.pos.x, this.hoveredEnemy.pos.y, this.hoveredEnemy.radius + 4);
       this.hoverGfx.setStrokeStyle({ width: 2, color: enemyColor, alpha: 0.6 });
       this.hoverGfx.stroke();
@@ -366,7 +368,7 @@ export class PathDrawer {
         const travelTime = pathLen / this.hoveredEnemy.speed;
         const overLimit = travelTime > ROUND_DURATION_S;
         this.hoverLabel.text = overLimit ? `${travelTime.toFixed(1)}s!` : `${travelTime.toFixed(1)}s`;
-        this.hoverLabel.style.fill = overLimit ? 0xff4444 : 0xffffff;
+        this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
         this.hoverLabel.position.set(last.x, last.y - 12);
         this.hoverLabel.alpha = 0.6;
         this.hoverLabel.visible = true;
@@ -388,14 +390,13 @@ export class PathDrawer {
     const level = getElevationLevel(pos, this.elevationZones);
     const elevated = level > 0;
     const range = unit.range * (1 + ELEVATION_RANGE_BONUS * level);
-    const ringColor = elevated ? 0x66ff88 : color;
+    const ringColor = elevated ? this.theme.elevationBonus : color;
 
-    // Highlight the elevation zone the position sits on
     if (elevated) {
       for (const z of this.elevationZones) {
         if (pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h) {
           this.hoverGfx.roundRect(z.x, z.y, z.w, z.h, 6);
-          this.hoverGfx.setStrokeStyle({ width: 1.5, color: 0x66ff88, alpha: 0.4 });
+          this.hoverGfx.setStrokeStyle({ width: 1.5, color: this.theme.elevationBonus, alpha: 0.4 });
           this.hoverGfx.stroke();
         }
       }

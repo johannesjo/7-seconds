@@ -1,5 +1,6 @@
 import { Graphics, Container, Text } from 'pixi.js';
 import { Vec2, Team } from './types';
+import { Theme, NIGHT_THEME } from './theme';
 
 interface Effect {
   update(dt: number): boolean; // false = expired
@@ -10,7 +11,7 @@ class ImpactBurst implements Effect {
   private age = 0;
   private readonly duration = 0.3;
 
-  constructor(container: Container, private pos: Vec2, private team: Team) {
+  constructor(container: Container, private pos: Vec2, private color: number) {
     this.gfx = new Graphics();
     container.addChild(this.gfx);
   }
@@ -24,11 +25,10 @@ class ImpactBurst implements Effect {
     const t = this.age / this.duration;
     const radius = 8 + t * 20;
     const alpha = 1 - t;
-    const color = this.team === 'blue' ? 0x88ccff : 0xff8888;
 
     this.gfx.clear();
     this.gfx.circle(this.pos.x, this.pos.y, radius);
-    this.gfx.setStrokeStyle({ width: 2, color, alpha });
+    this.gfx.setStrokeStyle({ width: 2, color: this.color, alpha });
     this.gfx.stroke();
     return true;
   }
@@ -43,7 +43,7 @@ class DeathEffect implements Effect {
     container: Container,
     private pos: Vec2,
     private radius: number,
-    private team: Team,
+    private color: number,
   ) {
     this.gfx = new Graphics();
     container.addChild(this.gfx);
@@ -58,11 +58,10 @@ class DeathEffect implements Effect {
     const t = this.age / this.duration;
     const r = this.radius + t * 30;
     const alpha = 1 - t;
-    const color = this.team === 'blue' ? 0x4a9eff : 0xff4a4a;
 
     this.gfx.clear();
     this.gfx.circle(this.pos.x, this.pos.y, r);
-    this.gfx.setStrokeStyle({ width: 3, color, alpha });
+    this.gfx.setStrokeStyle({ width: 3, color: this.color, alpha });
     this.gfx.stroke();
     return true;
   }
@@ -96,15 +95,14 @@ class KillText implements Effect {
   private readonly duration = 0.8;
   private startY: number;
 
-  constructor(container: Container, pos: Vec2, team: Team) {
-    const color = team === 'blue' ? '#88ccff' : '#ff8888';
+  constructor(container: Container, pos: Vec2, cssColor: string) {
     this.text = new Text({
       text: 'KILL',
       style: {
         fontSize: 14,
         fontFamily: 'monospace',
         fontWeight: 'bold',
-        fill: color,
+        fill: cssColor,
       },
     });
     this.text.anchor.set(0.5);
@@ -132,7 +130,7 @@ class MuzzleFlash implements Effect {
   private age = 0;
   private readonly duration = 0.1;
 
-  constructor(container: Container, private pos: Vec2) {
+  constructor(container: Container, private pos: Vec2, private flash: number, private core: number) {
     this.gfx = new Graphics();
     container.addChild(this.gfx);
   }
@@ -149,9 +147,9 @@ class MuzzleFlash implements Effect {
 
     this.gfx.clear();
     this.gfx.circle(this.pos.x, this.pos.y, radius);
-    this.gfx.fill({ color: 0xffffaa, alpha });
+    this.gfx.fill({ color: this.flash, alpha });
     this.gfx.circle(this.pos.x, this.pos.y, radius * 0.5);
-    this.gfx.fill({ color: 0xffffff, alpha });
+    this.gfx.fill({ color: this.core, alpha });
     return true;
   }
 }
@@ -201,7 +199,8 @@ class BloodParticle implements Effect {
     angle: number,
     spread: number,
     speed: number,
-    team: Team,
+    bloodColors: number[],
+    stainColor: number,
     size: number,
     duration: number,
   ) {
@@ -216,11 +215,8 @@ class BloodParticle implements Effect {
     this.vx = Math.cos(a) * speed;
     this.vy = Math.sin(a) * speed;
 
-    const blueColors = [0x3377dd, 0x2255bb, 0x5599ee];
-    const redColors = [0xdd3333, 0xbb2222, 0xee4444];
-    const colors = team === 'blue' ? blueColors : redColors;
-    this.color = colors[Math.floor(Math.random() * colors.length)];
-    this.stainColor = team === 'blue' ? 0x1a3366 : 0x661a1a;
+    this.color = bloodColors[Math.floor(Math.random() * bloodColors.length)];
+    this.stainColor = stainColor;
 
     container.addChild(this.gfx);
   }
@@ -256,6 +252,7 @@ export class EffectsManager {
   private container: Container;
   private groundStains: Graphics;
   private effects: Effect[] = [];
+  private theme: Theme = NIGHT_THEME;
 
   constructor(stage: Container) {
     this.groundStains = new Graphics();
@@ -264,12 +261,18 @@ export class EffectsManager {
     stage.addChild(this.container);
   }
 
+  setTheme(theme: Theme): void {
+    this.theme = theme;
+  }
+
   addImpactBurst(pos: Vec2, team: Team): void {
-    this.effects.push(new ImpactBurst(this.container, pos, team));
+    const color = team === 'blue' ? this.theme.blueImpact : this.theme.redImpact;
+    this.effects.push(new ImpactBurst(this.container, pos, color));
   }
 
   addDeathEffect(pos: Vec2, radius: number, team: Team): void {
-    this.effects.push(new DeathEffect(this.container, pos, radius, team));
+    const color = team === 'blue' ? this.theme.blue : this.theme.red;
+    this.effects.push(new DeathEffect(this.container, pos, radius, color));
   }
 
   addHitFlash(unitContainer: Container): void {
@@ -277,13 +280,14 @@ export class EffectsManager {
   }
 
   addKillText(pos: Vec2, team: Team): void {
-    this.effects.push(new KillText(this.container, pos, team));
+    const color = team === 'blue' ? this.theme.blueKill : this.theme.redKill;
+    this.effects.push(new KillText(this.container, pos, color));
   }
 
   addMuzzleFlash(pos: Vec2, angle: number, radius: number): void {
     const tipX = pos.x + Math.cos(angle) * (radius + 4);
     const tipY = pos.y + Math.sin(angle) * (radius + 4);
-    this.effects.push(new MuzzleFlash(this.container, { x: tipX, y: tipY }));
+    this.effects.push(new MuzzleFlash(this.container, { x: tipX, y: tipY }, this.theme.muzzleFlash, this.theme.muzzleCore));
   }
 
   addRoundStartFlash(width: number, height: number): void {
@@ -291,6 +295,8 @@ export class EffectsManager {
   }
 
   addBloodSpray(pos: Vec2, angle: number, team: Team, damage: number): void {
+    const bloodColors = team === 'blue' ? this.theme.blueBlood : this.theme.redBlood;
+    const stainColor = team === 'blue' ? this.theme.blueStain : this.theme.redStain;
     const count = Math.min(Math.floor(damage * 0.5) + 2, 15) + Math.floor(Math.random() * 3);
     const dmgScale = Math.min(damage / 10, 3);
     for (let i = 0; i < count; i++) {
@@ -299,12 +305,14 @@ export class EffectsManager {
       const duration = 0.25 + Math.random() * 0.2;
       this.effects.push(new BloodParticle(
         this.container, this.groundStains, pos, angle,
-        Math.PI * 0.35, speed, team, size, duration,
+        Math.PI * 0.35, speed, bloodColors, stainColor, size, duration,
       ));
     }
   }
 
   addBloodBurst(pos: Vec2, angle: number, team: Team, damage: number): void {
+    const bloodColors = team === 'blue' ? this.theme.blueBlood : this.theme.redBlood;
+    const stainColor = team === 'blue' ? this.theme.blueStain : this.theme.redStain;
     const count = Math.min(Math.floor(damage * 1.2) + 8, 35) + Math.floor(Math.random() * 6);
     const dmgScale = Math.min(damage / 10, 3);
     for (let i = 0; i < count; i++) {
@@ -314,17 +322,14 @@ export class EffectsManager {
       const duration = 0.3 + Math.random() * 0.3;
       this.effects.push(new BloodParticle(
         this.container, this.groundStains, pos, a,
-        0, speed, team, size, duration,
+        0, speed, bloodColors, stainColor, size, duration,
       ));
     }
 
-    // Immediate blood pool at death site — scales with damage
-    const stainColor = team === 'blue' ? 0x1a3366 : 0x661a1a;
     const poolSize = (5 + Math.random() * 4) * Math.min(dmgScale, 2);
     this.groundStains.circle(pos.x, pos.y, poolSize);
     this.groundStains.fill({ color: stainColor, alpha: 0.5 + Math.random() * 0.2 });
 
-    // Smaller satellite stains around the pool
     const satellites = Math.min(3 + Math.floor(damage * 0.2), 8);
     for (let i = 0; i < satellites; i++) {
       const spread = 12 * dmgScale;

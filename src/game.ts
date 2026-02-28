@@ -102,6 +102,7 @@ export class GameEngine {
     this.running = true;
 
     this.pathDrawer = new PathDrawer(this.renderer.stage, this.renderer.canvas, (pos) => this.renderer.highlightZonesAt(pos));
+    this.pathDrawer.theme = this.renderer.currentTheme;
 
     // Render initial state — hills under obstacles
     this.renderer.renderElevationZones(this.elevationZones);

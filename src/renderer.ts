@@ -2,6 +2,7 @@ import { Application, Graphics, Container, Text } from 'pixi.js';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, setMapSize } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
+import { Theme, NIGHT_THEME } from './theme';
 
 export class Renderer {
   private app: Application;
@@ -13,6 +14,9 @@ export class Renderer {
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
   private zoneLabels: { rect: Obstacle; label: Text; hovered: boolean; dragActive: boolean }[] = [];
+  private theme: Theme = NIGHT_THEME;
+  private lastElevationZones: ElevationZone[] = [];
+  private lastObstacles: Obstacle[] = [];
   bloodEnabled = true;
 
   constructor() {
@@ -27,7 +31,7 @@ export class Renderer {
     await this.app.init({
       width: MAP_WIDTH,
       height: MAP_HEIGHT,
-      backgroundColor: 0x1a1a2e,
+      backgroundColor: this.theme.bg,
       antialias: true,
     });
     container.appendChild(this.app.canvas);
@@ -36,8 +40,12 @@ export class Renderer {
   }
 
   private drawBackground(): void {
+    if (this.bgGraphics) {
+      this.app.stage.removeChild(this.bgGraphics);
+      this.bgGraphics.destroy();
+    }
     this.bgGraphics = new Graphics();
-    this.bgGraphics.setStrokeStyle({ width: 1, color: 0x222244, alpha: 0.3 });
+    this.bgGraphics.setStrokeStyle({ width: 1, color: this.theme.grid, alpha: this.theme.gridAlpha });
     for (let x = 0; x <= MAP_WIDTH; x += 100) {
       this.bgGraphics.moveTo(x, 0);
       this.bgGraphics.lineTo(x, MAP_HEIGHT);
@@ -48,10 +56,11 @@ export class Renderer {
       this.bgGraphics.lineTo(MAP_WIDTH, y);
       this.bgGraphics.stroke();
     }
-    this.app.stage.addChild(this.bgGraphics);
+    this.app.stage.addChildAt(this.bgGraphics, 0);
   }
 
   renderElevationZones(zones: ElevationZone[]): void {
+    this.lastElevationZones = zones;
     this.zoneLabels = [];
     if (this.elevationGraphics) {
       this.app.stage.removeChild(this.elevationGraphics);
@@ -61,21 +70,17 @@ export class Renderer {
     const gfx = new Graphics();
 
     for (const z of zones) {
-      // Outer layer — blends with background
       gfx.roundRect(z.x, z.y, z.w, z.h, 6);
-      gfx.fill({ color: 0x2e2e48, alpha: 0.5 });
+      gfx.fill({ color: this.theme.elevationOuter, alpha: 0.5 });
 
-      // Middle layer
       const m = 8;
       gfx.roundRect(z.x + m, z.y + m, z.w - m * 2, z.h - m * 2, 4);
-      gfx.fill({ color: 0x333358, alpha: 0.35 });
+      gfx.fill({ color: this.theme.elevationMid, alpha: 0.35 });
 
-      // Inner layer — lightest
       const m2 = 16;
       gfx.roundRect(z.x + m2, z.y + m2, z.w - m2 * 2, z.h - m2 * 2, 2);
-      gfx.fill({ color: 0x3a3a68, alpha: 0.25 });
+      gfx.fill({ color: this.theme.elevationInner, alpha: 0.25 });
 
-      // Hit area for hover detection
       const hitArea = new Graphics();
       hitArea.roundRect(z.x, z.y, z.w, z.h, 6);
       hitArea.fill({ color: 0x000000, alpha: 0.001 });
@@ -87,7 +92,7 @@ export class Renderer {
         style: {
           fontSize: 14,
           fontFamily: 'monospace',
-          fill: '#66ff88',
+          fill: this.theme.elevationLabel,
           fontWeight: 'bold',
         },
       });
@@ -114,6 +119,7 @@ export class Renderer {
   }
 
   renderObstacles(obstacles: Obstacle[]): void {
+    this.lastObstacles = obstacles;
     if (this.obstacleGraphics) {
       this.app.stage.removeChild(this.obstacleGraphics);
       this.obstacleGraphics.destroy({ children: true });
@@ -121,29 +127,26 @@ export class Renderer {
     const wrapper = new Container();
     this.obstacleGraphics = wrapper;
 
-    // Bottom layer: borders
     const borders = new Graphics();
     for (const obs of obstacles) {
       borders.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
-      borders.setStrokeStyle({ width: 2, color: 0x8888aa });
+      borders.setStrokeStyle({ width: 2, color: this.theme.obstacleBorder });
       borders.stroke();
     }
     wrapper.addChild(borders);
 
-    // Top layer: fills + inner highlights — covers internal borders between overlapping blocks
     const fills = new Graphics();
     for (const obs of obstacles) {
       fills.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
-      fills.fill({ color: 0x4a4a6e });
+      fills.fill({ color: this.theme.obstacleFill });
     }
     for (const obs of obstacles) {
       fills.roundRect(obs.x + 2, obs.y + 2, obs.w - 4, obs.h - 4, 2);
-      fills.setStrokeStyle({ width: 1, color: 0x9999bb, alpha: 0.3 });
+      fills.setStrokeStyle({ width: 1, color: this.theme.obstacleHighlight, alpha: 0.3 });
       fills.stroke();
     }
     wrapper.addChild(fills);
 
-    // Index 3: right after elevation (2)
     this.app.stage.addChildAt(this.obstacleGraphics, 3);
   }
 
@@ -243,16 +246,14 @@ export class Renderer {
     const shape = new Graphics();
     const isZombie = unit.type === 'zombie';
     const color = unit.team === 'blue'
-      ? (isZombie ? 0x3a7ecc : 0x4a9eff)
-      : (isZombie ? 0xcc3333 : 0xff4a4a);
+      ? (isZombie ? this.theme.blueZombie : this.theme.blue)
+      : (isZombie ? this.theme.redZombie : this.theme.red);
 
     if (unit.type === 'sniper') {
-      // Diamond: 4-point rotated square
       const r = unit.radius;
       shape.poly([-r, 0, 0, -r, r, 0, 0, r]);
       shape.fill(color);
     } else if (unit.type === 'tank') {
-      // Tank: hexagon
       const r = unit.radius;
       const points: number[] = [];
       for (let i = 0; i < 6; i++) {
@@ -262,38 +263,32 @@ export class Renderer {
       shape.poly(points);
       shape.fill(color);
     } else if (unit.type === 'zombie') {
-      // Zombie: circle with dark decay ring
-      const darkColor = unit.team === 'blue' ? 0x2a5a8a : 0x8a2a2a;
+      const darkColor = unit.team === 'blue' ? this.theme.blueDark : this.theme.redDark;
       shape.circle(0, 0, unit.radius * 1.3);
       shape.fill({ color: darkColor, alpha: 0.5 });
       shape.circle(0, 0, unit.radius);
       shape.fill(color);
     } else {
-      // Scout / Soldier: oval (wider shoulders, person from above)
       shape.ellipse(0, 0, unit.radius, unit.radius * 0.7);
       shape.fill(color);
     }
 
-    // Gun barrel — elongated shape pointing in +X direction
-    // Gun barrel — zombies have none
     const nose = new Graphics();
     if (unit.type !== 'zombie') {
       if (unit.type === 'sniper') {
-        // Sniper: thin straight barrel
         const nr = unit.radius * 1.4;
         nose.rect(unit.radius - 1, -1.5, nr + 1, 3);
-        nose.fill({ color: 0xffffff, alpha: 0.6 });
+        nose.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
       } else {
         const nr = unit.radius * 0.6;
         nose.poly([unit.radius + nr, 0, unit.radius - 1, -nr * 0.35, unit.radius - 1, nr * 0.35]);
-        nose.fill({ color: 0xffffff, alpha: 0.6 });
+        nose.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
       }
     }
 
     container.addChild(shape);
     container.addChild(nose);
 
-    // Health bar (positioned above unit) — child index 2
     const hpBar = new Graphics();
     this.updateHealthBar(hpBar, unit);
     container.addChild(hpBar);
@@ -307,13 +302,11 @@ export class Renderer {
     const h = 3;
     const yOff = -(unit.radius + 6);
 
-    // Background
     bar.rect(-w / 2, yOff, w, h);
-    bar.fill(0x333333);
+    bar.fill(this.theme.hpBg);
 
-    // HP fill
     const hpRatio = unit.hp / unit.maxHp;
-    const hpColor = hpRatio > 0.5 ? 0x44ff44 : hpRatio > 0.25 ? 0xffaa00 : 0xff4444;
+    const hpColor = hpRatio > 0.5 ? this.theme.hpHigh : hpRatio > 0.25 ? this.theme.hpMid : this.theme.hpLow;
     bar.rect(-w / 2, yOff, w * hpRatio, h);
     bar.fill(hpColor);
   }
@@ -325,7 +318,7 @@ export class Renderer {
     this.projectileGraphics = new Graphics();
 
     for (const p of projectiles) {
-      const color = p.team === 'blue' ? 0x88ccff : 0xff8888;
+      const color = p.team === 'blue' ? this.theme.blueProjectile : this.theme.redProjectile;
 
       // Draw trail
       if (p.trail && p.trail.length > 1) {
@@ -347,6 +340,26 @@ export class Renderer {
 
   getUnitContainer(id: string): Container | undefined {
     return this.unitGraphics.get(id);
+  }
+
+  get currentTheme(): Theme {
+    return this.theme;
+  }
+
+  setTheme(theme: Theme): void {
+    this.theme = theme;
+    this.app.renderer.background.color = theme.bg;
+    this.drawBackground();
+    // Re-render terrain with new colors
+    if (this.lastElevationZones.length > 0) this.renderElevationZones(this.lastElevationZones);
+    if (this.lastObstacles.length > 0) this.renderObstacles(this.lastObstacles);
+    // Rebuild unit graphics with new colors
+    for (const [, container] of this.unitGraphics) {
+      this.app.stage.removeChild(container);
+    }
+    this.unitGraphics.clear();
+    // Update effects theme
+    this._effects?.setTheme(theme);
   }
 
   get effects(): EffectsManager | null {

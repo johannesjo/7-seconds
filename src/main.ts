@@ -6,6 +6,7 @@ import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData } fr
 import { ARMY_COMPOSITION, HORDE_MAX_WAVES, HORDE_STARTING_ARMY } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits } from './horde';
 import { ReplayPlayer } from './replay';
+import { DAY_THEME, NIGHT_THEME } from './theme';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -40,6 +41,7 @@ const upgradeCardsEl = document.getElementById('upgrade-cards')!;
 
 const oneShotCb = document.getElementById('one-shot-cb') as HTMLInputElement;
 const bloodCb = document.getElementById('blood-cb') as HTMLInputElement;
+const dayModeCb = document.getElementById('day-mode-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
 
 // Replay controls
@@ -202,6 +204,7 @@ function showPreview(): void {
 function startGame(): void {
   lastReplayData = null;
   engine?.stop();
+  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode,
     oneShot: oneShotCb.checked,
@@ -279,6 +282,7 @@ function startNextHordeWave(): void {
   if (!waveDef) return;
 
   engine?.stop();
+  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: true,
     horde: true,
