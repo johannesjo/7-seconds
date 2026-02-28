@@ -77,7 +77,6 @@ function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
 }
 
 export const ALL_RECRUIT_UPGRADES: HordeUpgrade[] = [
-  makeRecruitUpgrade('scout'),
   makeRecruitUpgrade('soldier'),
   makeRecruitUpgrade('tank'),
   makeRecruitUpgrade('sniper'),
