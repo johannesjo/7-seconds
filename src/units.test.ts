@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, bladeAoeAttack } from './units';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, bladeAoeAttack, bomberExplode } from './units';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 
@@ -466,5 +466,118 @@ describe('updateProjectiles', () => {
     expect(hits[0].flanked).toBe(true);
     expect(hits[0].damage).toBe(15); // 10 * 1.5
     expect(target.hp).toBe(45); // 60 - 15
+  });
+});
+
+describe('shielder', () => {
+  it('blocks projectiles from the front', () => {
+    // Shielder facing right (gunAngle = 0)
+    const shielder = createUnit('sh1', 'shielder', 'red', { x: 200, y: 100 });
+    shielder.gunAngle = 0; // facing right
+
+    // Projectile coming from the right, traveling left (toward shielder's front)
+    // projAngle = atan2(0, -300) = PI — head-on to gunAngle 0 — isFlanked returns false — shield blocks
+    const proj = {
+      pos: { x: 210, y: 100 },
+      vel: { x: -300, y: 0 },
+      target: { x: 200, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 500,
+      distanceTraveled: 0,
+    };
+
+    const { alive, hits } = updateProjectiles([proj], [shielder], 0.016);
+    // Shield absorbs projectile — no damage, projectile consumed
+    expect(hits).toHaveLength(0);
+    expect(alive).toHaveLength(0); // projectile destroyed by shield
+    expect(shielder.hp).toBe(40); // no damage taken
+  });
+
+  it('takes damage from flanking projectiles', () => {
+    // Shielder facing right (gunAngle = 0)
+    const shielder = createUnit('sh1', 'shielder', 'red', { x: 200, y: 100 });
+    shielder.gunAngle = 0; // facing right
+
+    // Projectile coming from the left, traveling right (hitting shielder from behind)
+    // projAngle = atan2(0, 300) = 0 — same as gunAngle — isFlanked returns true — shield does NOT block
+    const proj = {
+      pos: { x: 190, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 200, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 500,
+      distanceTraveled: 0,
+    };
+
+    const { hits } = updateProjectiles([proj], [shielder], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].flanked).toBe(true);
+    expect(shielder.hp).toBeLessThan(40); // took damage
+  });
+
+  it('takes damage from blade AoE (bypasses shield)', () => {
+    const shielder = createUnit('sh1', 'shielder', 'red', { x: 120, y: 100 });
+    shielder.gunAngle = 0; // facing right
+
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    blade.fireTimer = 0;
+
+    const hits = bladeAoeAttack(blade, [blade, shielder], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(shielder.hp).toBeLessThan(40); // blade AoE bypasses shield
+  });
+});
+
+describe('bomberExplode', () => {
+  it('damages all units within explosion radius', () => {
+    const bomber = createUnit('b1', 'bomber', 'red', { x: 100, y: 100 });
+    bomber.alive = false;
+    bomber.hp = 0;
+    const nearby = createUnit('n1', 'soldier', 'blue', { x: 150, y: 100 });
+    const far = createUnit('f1', 'soldier', 'blue', { x: 500, y: 500 });
+    const hits = bomberExplode(bomber, [bomber, nearby, far]);
+    expect(hits.length).toBe(1);
+    expect(nearby.hp).toBeLessThan(60);
+    expect(far.hp).toBe(60);
+  });
+
+  it('damages both teams', () => {
+    const bomber = createUnit('b1', 'bomber', 'red', { x: 100, y: 100 });
+    bomber.alive = false;
+    bomber.hp = 0;
+    const ally = createUnit('a1', 'zombie', 'red', { x: 120, y: 100 });
+    const enemy = createUnit('e1', 'soldier', 'blue', { x: 130, y: 100 });
+    const hits = bomberExplode(bomber, [bomber, ally, enemy]);
+    expect(hits.length).toBe(2);
+    expect(ally.hp).toBeLessThan(20);
+    expect(enemy.hp).toBeLessThan(60);
+  });
+
+  it('chain reaction when killing another bomber', () => {
+    const bomber1 = createUnit('b1', 'bomber', 'red', { x: 100, y: 100 });
+    bomber1.alive = false;
+    bomber1.hp = 0;
+    const bomber2 = createUnit('b2', 'bomber', 'red', { x: 150, y: 100 });
+    // bomber2 has 25 HP, explosion does 40 damage — should kill it
+    const target = createUnit('t1', 'soldier', 'blue', { x: 170, y: 100 });
+    const hits = bomberExplode(bomber1, [bomber1, bomber2, target]);
+    // bomber1 explosion hits bomber2 (dist 50) and target (dist 70, within 80+10=90)
+    // bomber2 dies, chain explodes, hits target again (dist 20)
+    expect(bomber2.alive).toBe(false);
+    expect(hits.length).toBeGreaterThanOrEqual(3); // bomber2 + target from first, target from chain
+  });
+
+  it('does not damage units outside explosion radius', () => {
+    const bomber = createUnit('b1', 'bomber', 'red', { x: 100, y: 100 });
+    bomber.alive = false;
+    bomber.hp = 0;
+    const far = createUnit('f1', 'soldier', 'blue', { x: 300, y: 300 });
+    const hits = bomberExplode(bomber, [bomber, far]);
+    expect(hits.length).toBe(0);
+    expect(far.hp).toBe(60);
   });
 });
