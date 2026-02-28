@@ -668,16 +668,16 @@ export function applyDamage(unit: Unit, amount: number): void {
   }
 }
 
-export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevationZones: ElevationZone[] = []): Projectile | null {
+export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevationZones: ElevationZone[] = []): Projectile[] {
   unit.fireTimer -= dt;
-  if (unit.fireTimer > 0) return null;
+  if (unit.fireTimer > 0) return [];
 
   // Gun must be aligned with target before firing (makes flanking viable)
   const aimAngle = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
   let aimDiff = aimAngle - unit.gunAngle;
   aimDiff = ((aimDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
   if (aimDiff < -Math.PI) aimDiff += 2 * Math.PI;
-  if (Math.abs(aimDiff) > 0.15) return null; // ~8.5° tolerance
+  if (Math.abs(aimDiff) > 0.15) return []; // ~8.5° tolerance
 
   unit.fireTimer = unit.fireCooldown;
 
@@ -697,19 +697,45 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
   const pdy = predictedY - unit.pos.y;
   const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
 
-  if (pdist < 1) return null;
+  if (pdist < 1) return [];
 
-  return {
+  const maxRange = unit.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(unit.pos, elevationZones)) + unit.radius + 40;
+  const baseAngle = Math.atan2(pdy, pdx);
+
+  // Tanks fire a shotgun spread of 5 pellets across ±15° (30° total)
+  if (unit.type === 'tank') {
+    const PELLET_COUNT = 5;
+    const SPREAD_HALF = Math.PI / 12; // 15°
+    const pellets: Projectile[] = [];
+    for (let i = 0; i < PELLET_COUNT; i++) {
+      const offset = -SPREAD_HALF + (SPREAD_HALF * 2) * (i / (PELLET_COUNT - 1));
+      const angle = baseAngle + offset;
+      pellets.push({
+        pos: { x: unit.pos.x, y: unit.pos.y },
+        vel: { x: Math.cos(angle) * unit.projectileSpeed, y: Math.sin(angle) * unit.projectileSpeed },
+        target: { x: predictedX, y: predictedY },
+        damage: unit.damage,
+        radius: unit.projectileRadius,
+        team: unit.team,
+        maxRange,
+        distanceTraveled: 0,
+        piercing: false,
+      });
+    }
+    return pellets;
+  }
+
+  return [{
     pos: { x: unit.pos.x, y: unit.pos.y },
     vel: { x: (pdx / pdist) * unit.projectileSpeed, y: (pdy / pdist) * unit.projectileSpeed },
     target: { x: predictedX, y: predictedY },
     damage: unit.damage,
     radius: unit.projectileRadius,
     team: unit.team,
-    maxRange: unit.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(unit.pos, elevationZones)) + unit.radius + 40,
+    maxRange,
     distanceTraveled: 0,
     piercing: unit.type === 'sniper',
-  };
+  }];
 }
 
 export function updateProjectiles(

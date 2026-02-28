@@ -305,16 +305,16 @@ export class GameEngine {
       if (canShoot) {
         const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
         updateGunAngle(unit, desired, dt);
-        const projectile = tryFireProjectile(unit, target, dt, this.elevationZones);
-        if (projectile) {
-          this.projectiles.push(projectile);
+        const projectiles = tryFireProjectile(unit, target, dt, this.elevationZones);
+        if (projectiles.length > 0) {
+          this.projectiles.push(...projectiles);
           this.renderer.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
           this.replayEvents.push({
             frame: this.replayFrames.length,
             type: 'fire',
             pos: { x: unit.pos.x, y: unit.pos.y },
             angle: unit.gunAngle,
-            damage: projectile.damage,
+            damage: projectiles[0].damage,
             flanked: false,
             team: unit.team,
           });

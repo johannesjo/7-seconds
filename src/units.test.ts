@@ -21,7 +21,7 @@ describe('createUnit', () => {
     const unit = createUnit('tank_1', 'tank', 'red', { x: 500, y: 300 });
     expect(unit.hp).toBe(120);
     expect(unit.speed).toBe(50);
-    expect(unit.damage).toBe(20);
+    expect(unit.damage).toBe(8);
   });
 });
 
@@ -202,20 +202,20 @@ describe('tryFireProjectile', () => {
     const target = createUnit('e1', 'scout', 'red', { x: 200, y: 100 });
     attacker.fireTimer = 0;
     attacker.gunAngle = 0; // aim right toward target
-    const proj = tryFireProjectile(attacker, target, 0.016);
-    expect(proj).not.toBeNull();
-    expect(proj!.damage).toBe(10);
-    expect(proj!.team).toBe('blue');
-    expect(proj!.pos.x).toBeCloseTo(100);
-    expect(proj!.pos.y).toBeCloseTo(100);
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(1);
+    expect(projectiles[0].damage).toBe(10);
+    expect(projectiles[0].team).toBe('blue');
+    expect(projectiles[0].pos.x).toBeCloseTo(100);
+    expect(projectiles[0].pos.y).toBeCloseTo(100);
   });
 
-  it('returns null when cooldown is not ready', () => {
+  it('returns empty array when cooldown is not ready', () => {
     const attacker = createUnit('s1', 'soldier', 'blue', { x: 100, y: 100 });
     const target = createUnit('e1', 'scout', 'red', { x: 200, y: 100 });
     attacker.fireTimer = 0.5;
-    const proj = tryFireProjectile(attacker, target, 0.016);
-    expect(proj).toBeNull();
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(0);
   });
 
   it('aims at predicted position based on target velocity', () => {
@@ -224,10 +224,30 @@ describe('tryFireProjectile', () => {
     target.vel = { x: 0, y: 180 }; // moving down fast
     attacker.fireTimer = 0;
     attacker.gunAngle = 0; // aim right toward target
-    const proj = tryFireProjectile(attacker, target, 0.016);
-    expect(proj).not.toBeNull();
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(1);
     // Projectile should aim below the target's current position
-    expect(proj!.vel.y).toBeGreaterThan(0);
+    expect(projectiles[0].vel.y).toBeGreaterThan(0);
+  });
+
+  it('tank fires 5 pellets in a spread', () => {
+    const attacker = createUnit('t1', 'tank', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'scout', 'red', { x: 130, y: 100 });
+    attacker.fireTimer = 0;
+    attacker.gunAngle = 0; // aim right toward target
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(5);
+    // Each pellet has tank damage (8)
+    for (const p of projectiles) {
+      expect(p.damage).toBe(8);
+      expect(p.team).toBe('blue');
+      expect(p.piercing).toBe(false);
+    }
+    // Pellets should have different angles (spread)
+    const angles = projectiles.map(p => Math.atan2(p.vel.y, p.vel.x));
+    const spread = Math.max(...angles) - Math.min(...angles);
+    // Spread should be ~30° (π/6 ≈ 0.524 radians)
+    expect(spread).toBeCloseTo(Math.PI / 6, 1);
   });
 });
 

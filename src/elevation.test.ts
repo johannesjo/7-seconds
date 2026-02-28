@@ -98,9 +98,9 @@ describe('tryFireProjectile with elevation', () => {
     attacker.fireTimer = 0;
     const projElevated = tryFireProjectile(attacker, target, 0.016, [zone]);
 
-    expect(projBase).not.toBeNull();
-    expect(projElevated).not.toBeNull();
-    expect(projElevated!.maxRange).toBeGreaterThan(projBase!.maxRange);
+    expect(projBase).toHaveLength(1);
+    expect(projElevated).toHaveLength(1);
+    expect(projElevated[0].maxRange).toBeGreaterThan(projBase[0].maxRange);
   });
 
   it('uses base maxRange when off hill', () => {
@@ -114,7 +114,7 @@ describe('tryFireProjectile with elevation', () => {
     attacker.fireTimer = 0;
     const projFarZone = tryFireProjectile(attacker, target, 0.016, [zone]);
 
-    expect(projBase!.maxRange).toBe(projFarZone!.maxRange);
+    expect(projBase[0].maxRange).toBe(projFarZone[0].maxRange);
   });
 
   it('stacks maxRange with two overlapping zones', () => {
@@ -129,8 +129,8 @@ describe('tryFireProjectile with elevation', () => {
     attacker.fireTimer = 0;
     const projDouble = tryFireProjectile(attacker, target, 0.016, [zone1, zone2]);
 
-    expect(projSingle).not.toBeNull();
-    expect(projDouble).not.toBeNull();
-    expect(projDouble!.maxRange).toBeGreaterThan(projSingle!.maxRange);
+    expect(projSingle).toHaveLength(1);
+    expect(projDouble).toHaveLength(1);
+    expect(projDouble[0].maxRange).toBeGreaterThan(projSingle[0].maxRange);
   });
 });
