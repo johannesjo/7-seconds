@@ -741,6 +741,50 @@ export function bladeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
   return hits;
 }
 
+export interface ExplosionHit {
+  pos: Vec2;
+  targetId: string;
+  killed: boolean;
+  damage: number;
+}
+
+/** Bomber explodes on death, damaging ALL units (both teams) within radius. */
+export function bomberExplode(bomber: Unit, allUnits: Unit[]): ExplosionHit[] {
+  const EXPLOSION_RADIUS = 80;
+  const EXPLOSION_DAMAGE = 40;
+  const hits: ExplosionHit[] = [];
+
+  for (const u of allUnits) {
+    if (!u.alive || u.id === bomber.id) continue;
+    const dx = u.pos.x - bomber.pos.x;
+    const dy = u.pos.y - bomber.pos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= EXPLOSION_RADIUS + u.radius) {
+      const before = u.hp;
+      applyDamage(u, EXPLOSION_DAMAGE);
+      hits.push({
+        pos: { x: u.pos.x, y: u.pos.y },
+        targetId: u.id,
+        killed: before > 0 && !u.alive,
+        damage: EXPLOSION_DAMAGE,
+      });
+    }
+  }
+
+  // Chain reaction: if explosion killed another bomber, it explodes too
+  for (const hit of [...hits]) {
+    if (hit.killed) {
+      const deadUnit = allUnits.find(u => u.id === hit.targetId);
+      if (deadUnit && deadUnit.type === 'bomber') {
+        const chainHits = bomberExplode(deadUnit, allUnits);
+        hits.push(...chainHits);
+      }
+    }
+  }
+
+  return hits;
+}
+
 export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevationZones: ElevationZone[] = []): Projectile[] {
   unit.fireTimer -= dt;
   if (unit.fireTimer > 0) return [];
@@ -776,7 +820,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
   const baseAngle = Math.atan2(pdy, pdx);
 
   // Blade uses AoE attack, not projectiles
-  if (unit.type === 'blade') return [];
+  if (unit.type === 'blade' || unit.type === 'bomber') return [];
 
   return [{
     pos: { x: unit.pos.x, y: unit.pos.y },
@@ -832,6 +876,19 @@ export function updateProjectiles(
       const hitDist = p.radius + unit.radius;
       if (dx * dx + dy * dy <= hitDist * hitDist) {
         const projAngle = Math.atan2(p.vel.y, p.vel.x);
+
+        // Shield blocks frontal hits
+        if (unit.type === 'shielder') {
+          if (!isFlanked(projAngle, unit.gunAngle)) {
+            // Shield absorbs — destroy projectile
+            if (!p.piercing) {
+              consumed = true;
+              break;
+            }
+            continue;
+          }
+        }
+
         const flanked = isFlanked(projAngle, unit.gunAngle);
         let actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
         // Knockback — apply velocity impulse in projectile direction
