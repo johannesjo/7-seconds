@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect } from './units';
+import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack } from './units';
 import { generateObstacles, generateElevationZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
@@ -291,6 +291,29 @@ export class GameEngine {
       if (!unit.alive) continue;
 
       const target = findTarget(unit, this.units, null, this.obstacles);
+
+      // Blade uses AoE melee attack instead of projectiles
+      if (unit.type === 'blade') {
+        if (target) {
+          const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
+          updateGunAngle(unit, desired, dt);
+        }
+        const aoeHits = bladeAoeAttack(unit, this.units, dt);
+        for (const hit of aoeHits) {
+          this.replayEvents.push({
+            frame: this.replayFrames.length,
+            type: hit.killed ? 'kill' : 'hit',
+            pos: hit.pos,
+            angle: unit.gunAngle,
+            damage: hit.damage,
+            flanked: false,
+            team: hit.team,
+            targetId: hit.targetId,
+          });
+        }
+        continue;
+      }
+
       const canShoot = target
         && isInRange(unit, target, this.elevationZones)
         && hasLineOfSight(unit.pos, target.pos, this.obstacles);

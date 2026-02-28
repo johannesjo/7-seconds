@@ -164,6 +164,7 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
     vel: { x: 0, y: 0 },
     gunAngle: team === 'blue' ? -Math.PI / 2 : Math.PI / 2,
     turnSpeed: stats.turnSpeed,
+    damageReduction: type === 'blade' ? 0.3 : undefined,
   };
 }
 
@@ -393,6 +394,24 @@ function pushOutOfObstacles(pos: Vec2, radius: number, obstacles: Obstacle[]): v
 }
 
 export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits: Unit[] = []): void {
+  // Apply knockback velocity (decays via friction)
+  if (unit.knockbackVel) {
+    const kbSpeed = Math.sqrt(unit.knockbackVel.x ** 2 + unit.knockbackVel.y ** 2);
+    if (kbSpeed > 5) {
+      unit.pos.x += unit.knockbackVel.x * dt;
+      unit.pos.y += unit.knockbackVel.y * dt;
+      unit.pos.x = clamp(unit.pos.x, unit.radius, MAP_WIDTH - unit.radius);
+      unit.pos.y = clamp(unit.pos.y, unit.radius, MAP_HEIGHT - unit.radius);
+      pushOutOfObstacles(unit.pos, unit.radius, obstacles);
+      // Decay: lose 90% per second → multiply by 0.1^dt ≈ e^(-2.3*dt)
+      const decay = Math.exp(-8 * dt);
+      unit.knockbackVel.x *= decay;
+      unit.knockbackVel.y *= decay;
+    } else {
+      unit.knockbackVel = undefined;
+    }
+  }
+
   if (!unit.moveTarget || !unit.alive) {
     unit.vel = { x: 0, y: 0 };
     return;
@@ -644,7 +663,9 @@ export function isOnElevation(pos: Vec2, zones: ElevationZone[]): boolean {
 
 export function isInRange(attacker: Unit, target: Unit, elevationZones: ElevationZone[] = []): boolean {
   const level = getElevationLevel(attacker.pos, elevationZones);
-  const range = attacker.range * (1 + ELEVATION_RANGE_BONUS * level);
+  // Blade gets minimal benefit from elevation (melee unit)
+  const bonus = attacker.type === 'blade' ? 0 : ELEVATION_RANGE_BONUS;
+  const range = attacker.range * (1 + bonus * level);
   return distance(attacker.pos, target.pos) <= range + attacker.radius + target.radius;
 }
 
@@ -662,10 +683,62 @@ export function isFlanked(projectileVelAngle: number, targetGunAngle: number): b
 
 
 export function applyDamage(unit: Unit, amount: number): void {
-  unit.hp = Math.max(0, unit.hp - amount);
+  const reduced = unit.damageReduction ? amount * (1 - unit.damageReduction) : amount;
+  unit.hp = Math.max(0, unit.hp - reduced);
   if (unit.hp === 0) {
     unit.alive = false;
   }
+}
+
+export interface AoeHit {
+  pos: Vec2;
+  targetId: string;
+  killed: boolean;
+  team: Team;
+  damage: number;
+}
+
+/** Blade AoE: damage and knock back all enemies within range. */
+export function bladeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] {
+  if (unit.type !== 'blade' || !unit.alive) return [];
+
+  unit.fireTimer -= dt;
+  if (unit.fireTimer > 0) return [];
+  unit.fireTimer = unit.fireCooldown;
+
+  const hits: AoeHit[] = [];
+  const knockback = 65;
+
+  for (const enemy of units) {
+    if (!enemy.alive || enemy.team === unit.team) continue;
+    const dx = enemy.pos.x - unit.pos.x;
+    const dy = enemy.pos.y - unit.pos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const hitRange = unit.range + unit.radius + enemy.radius;
+
+    if (dist <= hitRange) {
+      const wasBefore = enemy.hp;
+      applyDamage(enemy, unit.damage);
+      hits.push({
+        pos: { x: enemy.pos.x, y: enemy.pos.y },
+        targetId: enemy.id,
+        killed: wasBefore > 0 && !enemy.alive,
+        team: unit.team,
+        damage: unit.damage,
+      });
+
+      // Knockback — apply velocity impulse away from blade
+      if (dist > 0) {
+        const kbSpeed = knockback / 0.15; // reach full distance in ~0.15s
+        enemy.knockbackVel = {
+          x: (dx / dist) * kbSpeed,
+          y: (dy / dist) * kbSpeed,
+        };
+      }
+    }
+  }
+
+  return hits;
 }
 
 export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevationZones: ElevationZone[] = []): Projectile[] {
@@ -702,21 +775,8 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
   const maxRange = unit.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(unit.pos, elevationZones)) + unit.radius + 40;
   const baseAngle = Math.atan2(pdy, pdx);
 
-  // Blade fires a single fast melee hit with strong knockback
-  if (unit.type === 'blade') {
-    return [{
-      pos: { x: unit.pos.x, y: unit.pos.y },
-      vel: { x: (pdx / pdist) * unit.projectileSpeed, y: (pdy / pdist) * unit.projectileSpeed },
-      target: { x: predictedX, y: predictedY },
-      damage: unit.damage,
-      radius: unit.projectileRadius,
-      team: unit.team,
-      maxRange,
-      distanceTraveled: 0,
-      piercing: unit.piercing ?? false,
-      knockback: 50,
-    }];
-  }
+  // Blade uses AoE attack, not projectiles
+  if (unit.type === 'blade') return [];
 
   return [{
     pos: { x: unit.pos.x, y: unit.pos.y },
@@ -774,14 +834,15 @@ export function updateProjectiles(
         const projAngle = Math.atan2(p.vel.y, p.vel.x);
         const flanked = isFlanked(projAngle, unit.gunAngle);
         let actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
-        // Knockback — push hit unit in projectile direction, scaled by raw damage
+        // Knockback — apply velocity impulse in projectile direction
         const knockback = p.knockback ?? p.damage * 0.4;
         const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
-        if (projSpeed > 0) {
-          unit.pos.x += (p.vel.x / projSpeed) * knockback;
-          unit.pos.y += (p.vel.y / projSpeed) * knockback;
-          unit.pos.x = clamp(unit.pos.x, unit.radius, MAP_WIDTH - unit.radius);
-          unit.pos.y = clamp(unit.pos.y, unit.radius, MAP_HEIGHT - unit.radius);
+        if (projSpeed > 0 && knockback > 0) {
+          const kbSpeed = knockback / 0.15;
+          unit.knockbackVel = {
+            x: (p.vel.x / projSpeed) * kbSpeed,
+            y: (p.vel.y / projSpeed) * kbSpeed,
+          };
         }
 
         const wasBefore = unit.hp;

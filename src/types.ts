@@ -44,6 +44,8 @@ export interface Unit {
   turnSpeed: number;
   stuckTime?: number;
   piercing?: boolean;
+  damageReduction?: number;
+  knockbackVel?: Vec2;
 }
 
 export interface Projectile {

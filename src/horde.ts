@@ -49,10 +49,10 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
     u.damage += 10;
   }),
   makeStatUpgrade('range_20', '+20 Range', 'All units gain +20 range', u => {
-    u.range += 20;
+    if (u.type !== 'blade') u.range += 20;
   }),
   makeStatUpgrade('range_50', '+50 Range', 'All units gain +50 range', u => {
-    u.range += 50;
+    if (u.type !== 'blade') u.range += 50;
   }),
   makeStatUpgrade('speed_15', '+15 Speed', 'All units gain +15 speed', u => {
     u.speed += 15;

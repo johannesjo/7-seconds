@@ -33,4 +33,5 @@ export const FLANK_DAMAGE_MULTIPLIER = 1.5;
 export const HORDE_MAX_WAVES = 12;
 export const HORDE_STARTING_ARMY: { type: UnitType; count: number }[] = [
   { type: 'soldier', count: 2 },
+  { type: 'blade', count: 1 },
 ];

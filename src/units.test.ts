@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked } from './units';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, bladeAoeAttack } from './units';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 
@@ -137,6 +137,14 @@ describe('applyDamage', () => {
     applyDamage(unit, 999);
     expect(unit.hp).toBe(0);
   });
+
+  it('applies damage reduction for blade units', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 0, y: 0 });
+    expect(blade.damageReduction).toBe(0.3);
+    applyDamage(blade, 100);
+    // 100 * (1 - 0.3) = 70 damage → 80 - 70 = 10 HP
+    expect(blade.hp).toBe(10);
+  });
 });
 
 describe('segmentHitsRect', () => {
@@ -230,16 +238,58 @@ describe('tryFireProjectile', () => {
     expect(projectiles[0].vel.y).toBeGreaterThan(0);
   });
 
-  it('blade fires a single melee projectile with knockback', () => {
+  it('blade returns no projectiles (uses AoE instead)', () => {
     const attacker = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
     const target = createUnit('e1', 'soldier', 'red', { x: 120, y: 100 });
     attacker.fireTimer = 0;
     attacker.gunAngle = 0;
     const projectiles = tryFireProjectile(attacker, target, 0.016);
-    expect(projectiles).toHaveLength(1);
-    expect(projectiles[0].damage).toBe(12);
-    expect(projectiles[0].knockback).toBe(50);
-    expect(projectiles[0].team).toBe('blue');
+    expect(projectiles).toHaveLength(0);
+  });
+});
+
+describe('bladeAoeAttack', () => {
+  it('damages all enemies within range', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    const enemy1 = createUnit('e1', 'zombie', 'red', { x: 120, y: 100 });
+    const enemy2 = createUnit('e2', 'zombie', 'red', { x: 100, y: 120 });
+    const farEnemy = createUnit('e3', 'zombie', 'red', { x: 500, y: 500 });
+    blade.fireTimer = 0;
+    const units = [blade, enemy1, enemy2, farEnemy];
+    const hits = bladeAoeAttack(blade, units, 0.016);
+    expect(hits).toHaveLength(2);
+    expect(enemy1.hp).toBeLessThan(20);
+    expect(enemy2.hp).toBeLessThan(20);
+    expect(farEnemy.hp).toBe(20);
+  });
+
+  it('applies knockback velocity away from blade', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'zombie', 'red', { x: 120, y: 100 });
+    blade.fireTimer = 0;
+    bladeAoeAttack(blade, [blade, enemy], 0.016);
+    // Enemy should have knockback velocity pointing right (away from blade)
+    expect(enemy.knockbackVel).toBeDefined();
+    expect(enemy.knockbackVel!.x).toBeGreaterThan(0);
+    expect(Math.abs(enemy.knockbackVel!.y)).toBeLessThan(1);
+  });
+
+  it('does not attack when cooldown is not ready', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'zombie', 'red', { x: 120, y: 100 });
+    blade.fireTimer = 0.5;
+    const hits = bladeAoeAttack(blade, [blade, enemy], 0.016);
+    expect(hits).toHaveLength(0);
+    expect(enemy.hp).toBe(20);
+  });
+
+  it('does not hit allies', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    const ally = createUnit('a1', 'soldier', 'blue', { x: 120, y: 100 });
+    blade.fireTimer = 0;
+    const hits = bladeAoeAttack(blade, [blade, ally], 0.016);
+    expect(hits).toHaveLength(0);
+    expect(ally.hp).toBe(60);
   });
 });
 
