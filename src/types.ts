@@ -55,6 +55,8 @@ export interface Projectile {
   maxRange: number;
   distanceTraveled: number;
   trail?: Vec2[];
+  piercing?: boolean;
+  hitIds?: Set<string>;
 }
 
 export interface Obstacle {

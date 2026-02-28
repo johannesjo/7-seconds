@@ -708,6 +708,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     team: unit.team,
     maxRange: unit.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(unit.pos, elevationZones)) + unit.radius + 40,
     distanceTraveled: 0,
+    piercing: unit.type === 'sniper',
   };
 }
 
@@ -742,9 +743,11 @@ export function updateProjectiles(
     if (obstacles.some(o => segmentHitsRect(oldPos, p.pos, o, p.radius))) continue;
 
     // Check hit against enemy units
-    let hit = false;
+    let consumed = false;
     for (const unit of units) {
       if (!unit.alive || unit.team === p.team) continue;
+      // Piercing projectiles skip already-hit units
+      if (p.piercing && p.hitIds?.has(unit.id)) continue;
       const dx = p.pos.x - unit.pos.x;
       const dy = p.pos.y - unit.pos.y;
       const hitDist = p.radius + unit.radius;
@@ -773,12 +776,19 @@ export function updateProjectiles(
           flanked,
           damage: actualDamage,
         });
-        hit = true;
-        break;
+
+        if (p.piercing) {
+          if (!p.hitIds) p.hitIds = new Set();
+          p.hitIds.add(unit.id);
+          p.damage *= 0.5;
+        } else {
+          consumed = true;
+          break;
+        }
       }
     }
 
-    if (!hit) alive.push(p);
+    if (!consumed) alive.push(p);
   }
 
   return { alive, hits };
