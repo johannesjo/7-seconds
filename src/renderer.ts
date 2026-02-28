@@ -375,7 +375,7 @@ export class Renderer {
       // Shield arc on front (120° cone)
       const arcRadius = unit.radius * 1.6;
       const shieldColor = unit.team === 'blue' ? 0x88ccff : 0xffcc88;
-      shape.arc(0, 0, arcRadius, -Math.PI / 3, Math.PI / 3);
+      shape.arc(0, 0, arcRadius, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3);
       shape.stroke({ width: 3, color: shieldColor, alpha: 0.8 });
     } else if (unit.type === 'bomber') {
       // Pulsing circle — pulse speed increases as HP drops
