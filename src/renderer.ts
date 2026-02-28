@@ -258,7 +258,10 @@ export class Renderer {
   private createUnitGraphic(unit: Unit): Container {
     const container = new Container();
     const shape = new Graphics();
-    const color = unit.team === 'blue' ? 0x4a9eff : 0xff4a4a;
+    const isZombie = unit.type === 'zombie';
+    const color = unit.team === 'blue'
+      ? (isZombie ? 0x3a7ecc : 0x4a9eff)
+      : (isZombie ? 0xcc3333 : 0xff4a4a);
 
     if (unit.type === 'sniper') {
       // Diamond: 4-point rotated square
@@ -276,7 +279,10 @@ export class Renderer {
       shape.poly(points);
       shape.fill(color);
     } else if (unit.type === 'zombie') {
-      // Zombie: simple circle blob
+      // Zombie: circle with dark decay ring
+      const darkColor = unit.team === 'blue' ? 0x2a5a8a : 0x8a2a2a;
+      shape.circle(0, 0, unit.radius * 1.3);
+      shape.fill({ color: darkColor, alpha: 0.5 });
       shape.circle(0, 0, unit.radius);
       shape.fill(color);
     } else {

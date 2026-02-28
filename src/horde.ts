@@ -4,9 +4,9 @@ import { createUnit, nudgeOutOfBlocks } from './units';
 
 export const HORDE_WAVES: HordeWave[] = [
   { wave: 1, enemies: [{ type: 'zombie', count: 5 }] },
-  { wave: 2, enemies: [{ type: 'zombie', count: 7 }, { type: 'soldier', count: 1 }] },
-  { wave: 3, enemies: [{ type: 'soldier', count: 3 }, { type: 'zombie', count: 4 }] },
-  { wave: 4, enemies: [{ type: 'zombie', count: 10 }, { type: 'soldier', count: 2 }] },
+  { wave: 2, enemies: [{ type: 'zombie', count: 8 }] },
+  { wave: 3, enemies: [{ type: 'zombie', count: 10 }] },
+  { wave: 4, enemies: [{ type: 'zombie', count: 12 }] },
   { wave: 5, enemies: [{ type: 'tank', count: 2 }, { type: 'zombie', count: 8 }] },
   { wave: 6, enemies: [{ type: 'soldier', count: 4 }, { type: 'zombie', count: 8 }, { type: 'sniper', count: 1 }] },
   { wave: 7, enemies: [{ type: 'soldier', count: 3 }, { type: 'zombie', count: 10 }, { type: 'sniper', count: 2 }] },

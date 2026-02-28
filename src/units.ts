@@ -454,6 +454,15 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     if (len > 0.01) { dirX /= len; dirY /= len; }
   }
 
+  // Zombie shamble: random perpendicular wobble
+  if (unit.type === 'zombie') {
+    const wobble = (Math.random() - 0.5) * 1.4;
+    dirX += -dirY * wobble;
+    dirY += dirX * wobble;
+    const len = Math.sqrt(dirX * dirX + dirY * dirY);
+    if (len > 0.01) { dirX /= len; dirY /= len; }
+  }
+
   const moveX = dirX * Math.min(step, dist);
   const moveY = dirY * Math.min(step, dist);
 

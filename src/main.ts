@@ -121,7 +121,7 @@ function onGameEvent(
 
     // Update wave HUD with live enemy count during horde
     if (hordeActive) {
-      waveCounterEl.textContent = `Wave ${hordeWave}/${HORDE_MAX_WAVES} — ${counts.red} enemies`;
+      waveCounterEl.textContent = `Wave ${hordeWave}/${HORDE_MAX_WAVES}`;
     }
 
     if (data && 'timeLeft' in data && data.timeLeft !== undefined) {
