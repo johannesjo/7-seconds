@@ -1,4 +1,4 @@
-export type UnitType = 'soldier' | 'tank' | 'sniper' | 'zombie';
+export type UnitType = 'soldier' | 'blade' | 'sniper' | 'zombie';
 export type Team = 'blue' | 'red';
 export type GamePhase = 'prompt' | 'battle' | 'result';
 export type TurnPhase = 'blue-planning' | 'cover' | 'red-planning' | 'playing';
@@ -58,6 +58,7 @@ export interface Projectile {
   trail?: Vec2[];
   piercing?: boolean;
   hitIds?: Set<string>;
+  knockback?: number;
 }
 
 export interface Obstacle {

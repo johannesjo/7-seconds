@@ -300,6 +300,9 @@ export class Renderer {
       if (unit.type === 'soldier' || unit.type === 'sniper' || unit.type === 'zombie') {
         (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
       }
+      if (unit.type === 'blade') {
+        (container.getChildAt(0) as Graphics).rotation = Date.now() / 150;
+      }
 
       // Idle breathing pulse when stationary
       const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
@@ -353,12 +356,15 @@ export class Renderer {
       const r = unit.radius;
       shape.poly([-r, 0, 0, -r, r, 0, 0, r]);
       shape.fill(color);
-    } else if (unit.type === 'tank') {
+    } else if (unit.type === 'blade') {
       const r = unit.radius;
+      const inner = r * 0.5;
       const points: number[] = [];
       for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i - Math.PI / 6;
-        points.push(r * Math.cos(angle), r * Math.sin(angle));
+        const outerAngle = (Math.PI / 3) * i - Math.PI / 2;
+        points.push(r * Math.cos(outerAngle), r * Math.sin(outerAngle));
+        const innerAngle = outerAngle + Math.PI / 6;
+        points.push(inner * Math.cos(innerAngle), inner * Math.sin(innerAngle));
       }
       shape.poly(points);
       shape.fill(color);
@@ -374,7 +380,7 @@ export class Renderer {
     }
 
     const nose = new Graphics();
-    if (unit.type !== 'zombie') {
+    if (unit.type !== 'zombie' && unit.type !== 'blade') {
       if (unit.type === 'sniper') {
         const nr = unit.radius * 1.4;
         nose.rect(unit.radius - 1, -1.5, nr + 1, 3);

@@ -702,27 +702,20 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
   const maxRange = unit.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(unit.pos, elevationZones)) + unit.radius + 40;
   const baseAngle = Math.atan2(pdy, pdx);
 
-  // Tanks fire a shotgun spread of 5 pellets across ±15° (30° total)
-  if (unit.type === 'tank') {
-    const PELLET_COUNT = 5;
-    const SPREAD_HALF = Math.PI / 12; // 15°
-    const pellets: Projectile[] = [];
-    for (let i = 0; i < PELLET_COUNT; i++) {
-      const offset = -SPREAD_HALF + (SPREAD_HALF * 2) * (i / (PELLET_COUNT - 1));
-      const angle = baseAngle + offset;
-      pellets.push({
-        pos: { x: unit.pos.x, y: unit.pos.y },
-        vel: { x: Math.cos(angle) * unit.projectileSpeed, y: Math.sin(angle) * unit.projectileSpeed },
-        target: { x: predictedX, y: predictedY },
-        damage: unit.damage,
-        radius: unit.projectileRadius,
-        team: unit.team,
-        maxRange,
-        distanceTraveled: 0,
-        piercing: unit.piercing ?? false,
-      });
-    }
-    return pellets;
+  // Blade fires a single fast melee hit with strong knockback
+  if (unit.type === 'blade') {
+    return [{
+      pos: { x: unit.pos.x, y: unit.pos.y },
+      vel: { x: (pdx / pdist) * unit.projectileSpeed, y: (pdy / pdist) * unit.projectileSpeed },
+      target: { x: predictedX, y: predictedY },
+      damage: unit.damage,
+      radius: unit.projectileRadius,
+      team: unit.team,
+      maxRange,
+      distanceTraveled: 0,
+      piercing: unit.piercing ?? false,
+      knockback: 30,
+    }];
   }
 
   return [{
@@ -782,7 +775,7 @@ export function updateProjectiles(
         const flanked = isFlanked(projAngle, unit.gunAngle);
         let actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
         // Knockback — push hit unit in projectile direction, scaled by raw damage
-        const knockback = p.damage * 0.4;
+        const knockback = p.knockback ?? p.damage * 0.4;
         const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
         if (projSpeed > 0) {
           unit.pos.x += (p.vel.x / projSpeed) * knockback;

@@ -32,12 +32,12 @@ describe('scorePosition', () => {
     expect(farScore).toBeGreaterThan(closeScore);
   });
 
-  it('tanks prefer close positions', () => {
-    const tank = createUnit('t1', 'tank', 'red', { x: 600, y: 300 });
+  it('blades prefer close positions', () => {
+    const blade = createUnit('b1', 'blade', 'red', { x: 600, y: 300 });
 
     const closeScore = scorePosition({
       candidate: { x: 600, y: 560 },
-      unit: tank,
+      unit: blade,
       enemies,
       obstacles,
       elevationZones,
@@ -45,7 +45,7 @@ describe('scorePosition', () => {
 
     const farScore = scorePosition({
       candidate: { x: 600, y: 350 },
-      unit: tank,
+      unit: blade,
       enemies,
       obstacles,
       elevationZones,

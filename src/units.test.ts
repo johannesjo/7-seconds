@@ -17,11 +17,11 @@ describe('createUnit', () => {
     expect(unit.team).toBe('blue');
   });
 
-  it('creates a tank with correct stats', () => {
-    const unit = createUnit('tank_1', 'tank', 'red', { x: 500, y: 300 });
-    expect(unit.hp).toBe(120);
-    expect(unit.speed).toBe(50);
-    expect(unit.damage).toBe(8);
+  it('creates a blade with correct stats', () => {
+    const unit = createUnit('blade_1', 'blade', 'red', { x: 500, y: 300 });
+    expect(unit.hp).toBe(80);
+    expect(unit.speed).toBe(80);
+    expect(unit.damage).toBe(12);
   });
 });
 
@@ -230,24 +230,16 @@ describe('tryFireProjectile', () => {
     expect(projectiles[0].vel.y).toBeGreaterThan(0);
   });
 
-  it('tank fires 5 pellets in a spread', () => {
-    const attacker = createUnit('t1', 'tank', 'blue', { x: 100, y: 100 });
-    const target = createUnit('e1', 'soldier', 'red', { x: 130, y: 100 });
+  it('blade fires a single melee projectile with knockback', () => {
+    const attacker = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'soldier', 'red', { x: 120, y: 100 });
     attacker.fireTimer = 0;
-    attacker.gunAngle = 0; // aim right toward target
+    attacker.gunAngle = 0;
     const projectiles = tryFireProjectile(attacker, target, 0.016);
-    expect(projectiles).toHaveLength(5);
-    // Each pellet has tank damage (8)
-    for (const p of projectiles) {
-      expect(p.damage).toBe(8);
-      expect(p.team).toBe('blue');
-      expect(p.piercing).toBe(false);
-    }
-    // Pellets should have different angles (spread)
-    const angles = projectiles.map(p => Math.atan2(p.vel.y, p.vel.x));
-    const spread = Math.max(...angles) - Math.min(...angles);
-    // Spread should be ~30° (π/6 ≈ 0.524 radians)
-    expect(spread).toBeCloseTo(Math.PI / 6, 1);
+    expect(projectiles).toHaveLength(1);
+    expect(projectiles[0].damage).toBe(12);
+    expect(projectiles[0].knockback).toBe(30);
+    expect(projectiles[0].team).toBe('blue');
   });
 });
 

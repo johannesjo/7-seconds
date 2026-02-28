@@ -45,7 +45,7 @@ describe('parseAiResponse', () => {
     const json = JSON.stringify({
       orders: [
         { id: 'soldier_1', move_to: [500, 100], attack: 'e_soldier_1' },
-        { id: 'tank_1', move_to: [400, 400], attack: null },
+        { id: 'blade_1', move_to: [400, 400], attack: null },
       ],
     });
 
@@ -65,7 +65,7 @@ describe('parseAiResponse', () => {
     const json = JSON.stringify({
       orders: [
         { id: 'soldier_1', move_to: [500, 100], attack: null },
-        { id: 'tank_1', move_to: 'bad' },
+        { id: 'blade_1', move_to: 'bad' },
         { move_to: [100, 100] },
       ],
     });
@@ -80,7 +80,7 @@ describe('fallbackOrders', () => {
   it('orders all units toward the center of the map', () => {
     const units = [
       createUnit('blue_soldier_0', 'soldier', 'blue', { x: 100, y: 600 }),
-      createUnit('blue_tank_0', 'tank', 'blue', { x: 100, y: 700 }),
+      createUnit('blue_blade_0', 'blade', 'blue', { x: 100, y: 700 }),
     ];
 
     const orders = fallbackOrders(units, 'blue');
