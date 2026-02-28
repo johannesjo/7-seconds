@@ -2,6 +2,7 @@ import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'p
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, setMapSize } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
+import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
 
 export class Renderer {
@@ -168,54 +169,81 @@ export class Renderer {
     this.app.stage.addChildAt(this.obstacleGraphics, 3);
   }
 
+  /** Draw a rectilinear polygon with rounded corners using arcTo. */
+  private drawRoundedPolygon(g: Graphics, points: Vec2[], radius: number): void {
+    const n = points.length;
+    if (n < 3) return;
+
+    const last = points[n - 1];
+    const first = points[0];
+    const mx = (last.x + first.x) / 2;
+    const my = (last.y + first.y) / 2;
+    g.moveTo(mx, my);
+
+    for (let i = 0; i < n; i++) {
+      const curr = points[i];
+      const next = points[(i + 1) % n];
+      g.arcTo(curr.x, curr.y, next.x, next.y, radius);
+    }
+    g.closePath();
+  }
+
   private renderCleanObstacles(wrapper: Container, obstacles: Obstacle[]): void {
+    const polygons = mergeObstacles(obstacles);
+
     const borders = new Graphics();
-    for (const obs of obstacles) {
-      borders.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
+    for (const poly of polygons) {
+      this.drawRoundedPolygon(borders, poly, 4);
       borders.setStrokeStyle({ width: 2, color: this.theme.obstacleBorder });
       borders.stroke();
     }
     wrapper.addChild(borders);
 
     const fills = new Graphics();
-    for (const obs of obstacles) {
-      fills.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
+    for (const poly of polygons) {
+      this.drawRoundedPolygon(fills, poly, 4);
       fills.fill({ color: this.theme.obstacleFill });
-    }
-    for (const obs of obstacles) {
-      fills.roundRect(obs.x + 2, obs.y + 2, obs.w - 4, obs.h - 4, 2);
-      fills.setStrokeStyle({ width: 1, color: this.theme.obstacleHighlight, alpha: 0.3 });
-      fills.stroke();
     }
     wrapper.addChild(fills);
   }
 
   private renderSketchyObstacles(wrapper: Container, obstacles: Obstacle[]): void {
-    // Seeded random based on obstacle position for stable wobble
+    const polygons = mergeObstacles(obstacles);
+
+    // Seeded random based on first vertex for stable wobble
     const seededRandom = (x: number, y: number, i: number) => {
       const seed = (x * 7919 + y * 104729 + i * 31) | 0;
       return ((Math.sin(seed) * 43758.5453) % 1 + 1) % 1;
     };
 
+    // Fill using rounded polygon path
     const fills = new Graphics();
-    for (const obs of obstacles) {
-      fills.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
+    for (const poly of polygons) {
+      this.drawRoundedPolygon(fills, poly, 4);
       fills.fill({ color: this.theme.obstacleFill });
     }
     wrapper.addChild(fills);
 
-    // Two overlapping slightly wobbly outlines per obstacle
+    // Two wobbly outline passes per polygon
     const outlines = new Graphics();
-    for (const obs of obstacles) {
+    for (const poly of polygons) {
+      const seed0 = poly[0];
       for (let pass = 0; pass < 2; pass++) {
-        const j = (corner: number) => (seededRandom(obs.x, obs.y, pass * 4 + corner) - 0.5) * 1;
-
         outlines.setStrokeStyle({ width: 1.5, color: this.theme.obstacleBorder, alpha: 0.8 });
-        outlines.moveTo(obs.x + j(0), obs.y + j(0));
-        outlines.lineTo(obs.x + obs.w + j(1), obs.y + j(1));
-        outlines.lineTo(obs.x + obs.w + j(2), obs.y + obs.h + j(2));
-        outlines.lineTo(obs.x + j(3), obs.y + obs.h + j(3));
-        outlines.lineTo(obs.x + j(0), obs.y + j(0));
+
+        for (let i = 0; i < poly.length; i++) {
+          const pt = poly[i];
+          const jitter = (seededRandom(seed0.x, seed0.y, pass * poly.length + i) - 0.5) * 1;
+          const wx = pt.x + jitter;
+          const wy = pt.y + jitter;
+
+          if (i === 0) outlines.moveTo(wx, wy);
+          else outlines.lineTo(wx, wy);
+        }
+
+        // Close back to first vertex with jitter
+        const j0 = (seededRandom(seed0.x, seed0.y, pass * poly.length) - 0.5) * 1;
+        outlines.lineTo(poly[0].x + j0, poly[0].y + j0);
         outlines.stroke();
       }
     }
