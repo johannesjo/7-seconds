@@ -46,7 +46,7 @@ export class Renderer {
     }
     this.bgGraphics = new Graphics();
     // Scale grid spacing to screen size so density looks like real graph paper
-    const gridSpacing = Math.round(Math.min(MAP_WIDTH, MAP_HEIGHT) / 16);
+    const gridSpacing = Math.round(Math.min(MAP_WIDTH, MAP_HEIGHT) / 24);
     this.bgGraphics.setStrokeStyle({ width: 1, color: this.theme.grid, alpha: this.theme.gridAlpha });
     for (let x = 0; x <= MAP_WIDTH; x += gridSpacing) {
       this.bgGraphics.moveTo(x, 0);
