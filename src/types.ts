@@ -43,6 +43,7 @@ export interface Unit {
   gunAngle: number;
   turnSpeed: number;
   stuckTime?: number;
+  piercing?: boolean;
 }
 
 export interface Projectile {

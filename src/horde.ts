@@ -57,6 +57,15 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   makeStatUpgrade('speed_15', '+15 Speed', 'All units gain +15 speed', u => {
     u.speed += 15;
   }),
+  makeStatUpgrade('rapid_fire', 'Rapid Fire', 'All units fire 20% faster', u => {
+    u.fireCooldown *= 0.8;
+  }),
+  makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', u => {
+    u.piercing = true;
+  }),
+  makeStatUpgrade('quick_aim', 'Quick Aim', 'All units aim 50% faster', u => {
+    u.turnSpeed *= 1.5;
+  }),
 ];
 
 function makeRecruitUpgrade(type: UnitType): HordeUpgrade {

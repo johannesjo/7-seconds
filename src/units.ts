@@ -719,7 +719,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
         team: unit.team,
         maxRange,
         distanceTraveled: 0,
-        piercing: false,
+        piercing: unit.piercing ?? false,
       });
     }
     return pellets;
@@ -734,7 +734,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     team: unit.team,
     maxRange,
     distanceTraveled: 0,
-    piercing: unit.type === 'sniper',
+    piercing: unit.piercing ?? unit.type === 'sniper',
   }];
 }
 
