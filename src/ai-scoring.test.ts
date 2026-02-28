@@ -54,15 +54,15 @@ describe('scorePosition', () => {
     expect(closeScore).toBeGreaterThan(farScore);
   });
 
-  it('scouts value flanking positions', () => {
-    const scout = createUnit('sc1', 'scout', 'red', { x: 400, y: 400 });
+  it('soldiers value flanking positions', () => {
+    const unit = createUnit('sc1', 'soldier', 'red', { x: 400, y: 400 });
     // Enemy facing right (gunAngle = 0), so approaching from behind (left) is a flank
     const enemy = createUnit('e1', 'soldier', 'blue', { x: 500, y: 500 });
     enemy.gunAngle = 0;
 
     const flankScore = scorePosition({
       candidate: { x: 460, y: 500 }, // behind enemy (left of it)
-      unit: scout,
+      unit: unit,
       enemies: [enemy],
       obstacles,
       elevationZones,
@@ -70,7 +70,7 @@ describe('scorePosition', () => {
 
     const frontalScore = scorePosition({
       candidate: { x: 540, y: 500 }, // in front of enemy (right of it)
-      unit: scout,
+      unit: unit,
       enemies: [enemy],
       obstacles,
       elevationZones,
@@ -80,11 +80,11 @@ describe('scorePosition', () => {
   });
 
   it('unreachable positions score -Infinity', () => {
-    const scout = createUnit('sc1', 'scout', 'red', { x: 100, y: 100 });
+    const unit = createUnit('sc1', 'soldier', 'red', { x: 100, y: 100 });
     // Scout speed 180, ROUND_DURATION_S 7 = max 1260px. Position 2000px away
     const score = scorePosition({
       candidate: { x: 2500, y: 2500 },
-      unit: scout,
+      unit: unit,
       enemies,
       obstacles,
       elevationZones,

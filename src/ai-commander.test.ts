@@ -11,7 +11,7 @@ import { Obstacle } from './types';
 describe('serializeState', () => {
   it('serializes units and obstacles for a team', () => {
     const units = [
-      createUnit('blue_scout_0', 'scout', 'blue', { x: 100, y: 200 }),
+      createUnit('blue_soldier_0', 'soldier', 'blue', { x: 100, y: 200 }),
       createUnit('red_soldier_0', 'soldier', 'red', { x: 800, y: 300 }),
     ];
     const obstacles: Obstacle[] = [{ x: 400, y: 200, w: 80, h: 120 }];
@@ -20,7 +20,7 @@ describe('serializeState', () => {
     const parsed = JSON.parse(result);
 
     expect(parsed.my_units).toHaveLength(1);
-    expect(parsed.my_units[0].id).toBe('blue_scout_0');
+    expect(parsed.my_units[0].id).toBe('blue_soldier_0');
     expect(parsed.enemy_units).toHaveLength(1);
     expect(parsed.enemy_units[0].id).toBe('red_soldier_0');
     // obstacles disabled: expect(parsed.obstacles).toHaveLength(1);
@@ -28,7 +28,7 @@ describe('serializeState', () => {
 
   it('excludes dead units', () => {
     const units = [
-      createUnit('blue_scout_0', 'scout', 'blue', { x: 100, y: 200 }),
+      createUnit('blue_soldier_0', 'soldier', 'blue', { x: 100, y: 200 }),
       createUnit('red_soldier_0', 'soldier', 'red', { x: 800, y: 300 }),
     ];
     units[1].alive = false;
@@ -44,7 +44,7 @@ describe('parseAiResponse', () => {
   it('parses valid JSON response', () => {
     const json = JSON.stringify({
       orders: [
-        { id: 'scout_1', move_to: [500, 100], attack: 'e_soldier_1' },
+        { id: 'soldier_1', move_to: [500, 100], attack: 'e_soldier_1' },
         { id: 'tank_1', move_to: [400, 400], attack: null },
       ],
     });
@@ -64,7 +64,7 @@ describe('parseAiResponse', () => {
   it('filters out orders with invalid structure', () => {
     const json = JSON.stringify({
       orders: [
-        { id: 'scout_1', move_to: [500, 100], attack: null },
+        { id: 'soldier_1', move_to: [500, 100], attack: null },
         { id: 'tank_1', move_to: 'bad' },
         { move_to: [100, 100] },
       ],
@@ -79,7 +79,7 @@ describe('parseAiResponse', () => {
 describe('fallbackOrders', () => {
   it('orders all units toward the center of the map', () => {
     const units = [
-      createUnit('blue_scout_0', 'scout', 'blue', { x: 100, y: 600 }),
+      createUnit('blue_soldier_0', 'soldier', 'blue', { x: 100, y: 600 }),
       createUnit('blue_tank_0', 'tank', 'blue', { x: 100, y: 700 }),
     ];
 
