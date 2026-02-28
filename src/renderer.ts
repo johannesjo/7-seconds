@@ -1,4 +1,4 @@
-import { Application, Graphics, Container, Text } from 'pixi.js';
+import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, setMapSize } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
@@ -15,6 +15,7 @@ export class Renderer {
   private _effects: EffectsManager | null = null;
   private zoneLabels: { rect: Obstacle; label: Text; hovered: boolean; dragActive: boolean }[] = [];
   private theme: Theme = NIGHT_THEME;
+  private noiseSprite: TilingSprite | null = null;
   private lastElevationZones: ElevationZone[] = [];
   private lastObstacles: Obstacle[] = [];
   bloodEnabled = true;
@@ -59,6 +60,34 @@ export class Renderer {
       this.bgGraphics.stroke();
     }
     this.app.stage.addChildAt(this.bgGraphics, 0);
+
+    // Paper noise overlay
+    if (this.noiseSprite) {
+      this.app.stage.removeChild(this.noiseSprite);
+      this.noiseSprite.destroy();
+      this.noiseSprite = null;
+    }
+    if (this.theme.paperNoise) {
+      const size = 128;
+      const noiseCanvas = document.createElement('canvas');
+      noiseCanvas.width = size;
+      noiseCanvas.height = size;
+      const ctx = noiseCanvas.getContext('2d')!;
+      const imageData = ctx.createImageData(size, size);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        if (Math.random() < 0.4) {
+          data[i] = 160;     // R
+          data[i + 1] = 140; // G
+          data[i + 2] = 100; // B
+          data[i + 3] = Math.floor(5 + Math.random() * 10); // alpha 0.02–0.06
+        }
+      }
+      ctx.putImageData(imageData, 0, 0);
+      const texture = Texture.from(noiseCanvas);
+      this.noiseSprite = new TilingSprite({ texture, width: MAP_WIDTH, height: MAP_HEIGHT });
+      this.app.stage.addChildAt(this.noiseSprite, 1);
+    }
   }
 
   renderElevationZones(zones: ElevationZone[]): void {
@@ -129,6 +158,16 @@ export class Renderer {
     const wrapper = new Container();
     this.obstacleGraphics = wrapper;
 
+    if (this.theme.sketchyObstacles) {
+      this.renderSketchyObstacles(wrapper, obstacles);
+    } else {
+      this.renderCleanObstacles(wrapper, obstacles);
+    }
+
+    this.app.stage.addChildAt(this.obstacleGraphics, 3);
+  }
+
+  private renderCleanObstacles(wrapper: Container, obstacles: Obstacle[]): void {
     const borders = new Graphics();
     for (const obs of obstacles) {
       borders.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
@@ -148,8 +187,39 @@ export class Renderer {
       fills.stroke();
     }
     wrapper.addChild(fills);
+  }
 
-    this.app.stage.addChildAt(this.obstacleGraphics, 3);
+  private renderSketchyObstacles(wrapper: Container, obstacles: Obstacle[]): void {
+    // Seeded random based on obstacle position for stable wobble
+    const seededRandom = (x: number, y: number, i: number) => {
+      const seed = (x * 7919 + y * 104729 + i * 31) | 0;
+      return ((Math.sin(seed) * 43758.5453) % 1 + 1) % 1;
+    };
+
+    const fills = new Graphics();
+    for (const obs of obstacles) {
+      fills.roundRect(obs.x, obs.y, obs.w, obs.h, 4);
+      fills.fill({ color: this.theme.obstacleFill, alpha: 0.4 });
+    }
+    wrapper.addChild(fills);
+
+    // Two overlapping hand-drawn outlines for each obstacle
+    const outlines = new Graphics();
+    for (const obs of obstacles) {
+      for (let pass = 0; pass < 2; pass++) {
+        const jitter = 1.5;
+        const j = (corner: number) => (seededRandom(obs.x, obs.y, pass * 4 + corner) - 0.5) * jitter * 2;
+
+        outlines.setStrokeStyle({ width: 1.5, color: this.theme.obstacleBorder, alpha: 0.7 });
+        outlines.moveTo(obs.x + j(0), obs.y + j(0));
+        outlines.lineTo(obs.x + obs.w + j(1), obs.y + j(1));
+        outlines.lineTo(obs.x + obs.w + j(2), obs.y + obs.h + j(2));
+        outlines.lineTo(obs.x + j(3), obs.y + obs.h + j(3));
+        outlines.lineTo(obs.x + j(0), obs.y + j(0));
+        outlines.stroke();
+      }
+    }
+    wrapper.addChild(outlines);
   }
 
   /** Show zone labels for zones containing pos; hide the rest (unless hovered). */

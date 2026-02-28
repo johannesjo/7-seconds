@@ -190,6 +190,7 @@ class BloodParticle implements Effect {
   private readonly size: number;
   private readonly color: number;
   private readonly stainColor: number;
+  private readonly alphaMul: number;
   private static readonly FRICTION = 5;
 
   constructor(
@@ -203,6 +204,7 @@ class BloodParticle implements Effect {
     stainColor: number,
     size: number,
     duration: number,
+    alphaMul: number,
   ) {
     this.gfx = new Graphics();
     this.stains = stains;
@@ -217,6 +219,7 @@ class BloodParticle implements Effect {
 
     this.color = bloodColors[Math.floor(Math.random() * bloodColors.length)];
     this.stainColor = stainColor;
+    this.alphaMul = alphaMul;
 
     container.addChild(this.gfx);
   }
@@ -226,7 +229,7 @@ class BloodParticle implements Effect {
     if (this.age >= this.duration) {
       const stainSize = this.size * (0.5 + Math.random() * 0.5);
       this.stains.circle(this.x, this.y, stainSize);
-      this.stains.fill({ color: this.stainColor, alpha: 0.3 + Math.random() * 0.3 });
+      this.stains.fill({ color: this.stainColor, alpha: (0.3 + Math.random() * 0.3) * this.alphaMul });
       this.gfx.destroy();
       return false;
     }
@@ -239,7 +242,7 @@ class BloodParticle implements Effect {
     this.y += this.vy * dt;
 
     const currentSize = this.size * (1 - t * 0.5);
-    const alpha = 1 - t * 0.6;
+    const alpha = (1 - t * 0.6) * this.alphaMul;
 
     this.gfx.clear();
     this.gfx.circle(this.x, this.y, currentSize);
@@ -297,6 +300,7 @@ export class EffectsManager {
   addBloodSpray(pos: Vec2, angle: number, team: Team, damage: number): void {
     const bloodColors = team === 'blue' ? this.theme.blueBlood : this.theme.redBlood;
     const stainColor = team === 'blue' ? this.theme.blueStain : this.theme.redStain;
+    const aMul = this.theme.bloodAlpha;
     const count = Math.min(Math.floor(damage * 0.5) + 2, 15) + Math.floor(Math.random() * 3);
     const dmgScale = Math.min(damage / 10, 3);
     for (let i = 0; i < count; i++) {
@@ -305,7 +309,7 @@ export class EffectsManager {
       const duration = 0.25 + Math.random() * 0.2;
       this.effects.push(new BloodParticle(
         this.container, this.groundStains, pos, angle,
-        Math.PI * 0.35, speed, bloodColors, stainColor, size, duration,
+        Math.PI * 0.35, speed, bloodColors, stainColor, size, duration, aMul,
       ));
     }
   }
@@ -313,6 +317,7 @@ export class EffectsManager {
   addBloodBurst(pos: Vec2, angle: number, team: Team, damage: number): void {
     const bloodColors = team === 'blue' ? this.theme.blueBlood : this.theme.redBlood;
     const stainColor = team === 'blue' ? this.theme.blueStain : this.theme.redStain;
+    const aMul = this.theme.bloodAlpha;
     const count = Math.min(Math.floor(damage * 1.2) + 8, 35) + Math.floor(Math.random() * 6);
     const dmgScale = Math.min(damage / 10, 3);
     for (let i = 0; i < count; i++) {
@@ -322,13 +327,13 @@ export class EffectsManager {
       const duration = 0.3 + Math.random() * 0.3;
       this.effects.push(new BloodParticle(
         this.container, this.groundStains, pos, a,
-        0, speed, bloodColors, stainColor, size, duration,
+        0, speed, bloodColors, stainColor, size, duration, aMul,
       ));
     }
 
     const poolSize = (5 + Math.random() * 4) * Math.min(dmgScale, 2);
     this.groundStains.circle(pos.x, pos.y, poolSize);
-    this.groundStains.fill({ color: stainColor, alpha: 0.5 + Math.random() * 0.2 });
+    this.groundStains.fill({ color: stainColor, alpha: (0.5 + Math.random() * 0.2) * aMul });
 
     const satellites = Math.min(3 + Math.floor(damage * 0.2), 8);
     for (let i = 0; i < satellites; i++) {
@@ -337,7 +342,7 @@ export class EffectsManager {
       const oy = (Math.random() - 0.5) * spread;
       const s = (2 + Math.random() * 2) * Math.min(dmgScale, 1.5);
       this.groundStains.circle(pos.x + ox, pos.y + oy, s);
-      this.groundStains.fill({ color: stainColor, alpha: 0.3 + Math.random() * 0.2 });
+      this.groundStains.fill({ color: stainColor, alpha: (0.3 + Math.random() * 0.2) * aMul });
     }
   }
 

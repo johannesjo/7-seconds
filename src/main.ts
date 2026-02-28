@@ -84,7 +84,10 @@ function onPhaseChange(phase: TurnPhase): void {
   // Planning overlay
   if (planning) {
     const team = phase === 'blue-planning' ? 'Blue' : 'Red';
-    const color = phase === 'blue-planning' ? '#4a9eff' : '#ff4a4a';
+    const isDayMode = dayModeCb.checked;
+    const color = phase === 'blue-planning'
+      ? (isDayMode ? '#2266aa' : '#4a9eff')
+      : (isDayMode ? '#aa3333' : '#ff4a4a');
     planningLabel.textContent = `${team} Planning`;
     planningLabel.style.color = color;
     planningOverlay.classList.add('active');
@@ -130,7 +133,7 @@ function onGameEvent(
       roundTimerEl.textContent = `${Math.ceil(timeLeft)}s`;
 
       if (timeLeft <= 3) {
-        roundTimerEl.style.color = '#ff4444';
+        roundTimerEl.style.color = dayModeCb.checked ? '#aa3333' : '#ff4444';
         const pulse = 1 + 0.1 * Math.sin(Date.now() / 150);
         roundTimerEl.style.transform = `scale(${pulse})`;
       } else {
@@ -204,6 +207,7 @@ function showPreview(): void {
 function startGame(): void {
   lastReplayData = null;
   engine?.stop();
+  document.body.classList.toggle('day-mode', dayModeCb.checked);
   renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode,
@@ -282,6 +286,7 @@ function startNextHordeWave(): void {
   if (!waveDef) return;
 
   engine?.stop();
+  document.body.classList.toggle('day-mode', dayModeCb.checked);
   renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: true,
@@ -370,6 +375,7 @@ function showHordeResult(victory: boolean): void {
 }
 
 dayModeCb.addEventListener('change', () => {
+  document.body.classList.toggle('day-mode', dayModeCb.checked);
   if (renderer) renderer.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
 });
 

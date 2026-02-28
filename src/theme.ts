@@ -59,6 +59,11 @@ export interface Theme {
   labelWarn: number;
   elevationBonus: number;
   hoverLabelFill: number;
+
+  // Paper aesthetic
+  paperNoise: boolean;
+  sketchyObstacles: boolean;
+  bloodAlpha: number;
 }
 
 export const NIGHT_THEME: Theme = {
@@ -113,6 +118,9 @@ export const NIGHT_THEME: Theme = {
   labelWarn: 0xff4444,
   elevationBonus: 0x66ff88,
   hoverLabelFill: 0xffffff,
+  paperNoise: false,
+  sketchyObstacles: false,
+  bloodAlpha: 1,
 };
 
 export const DAY_THEME: Theme = {
@@ -167,4 +175,7 @@ export const DAY_THEME: Theme = {
   labelWarn: 0xaa3333,
   elevationBonus: 0x558844,
   hoverLabelFill: 0x443322,
+  paperNoise: true,
+  sketchyObstacles: true,
+  bloodAlpha: 0.4,
 };
