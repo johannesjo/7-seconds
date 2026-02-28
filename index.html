@@ -110,9 +110,9 @@
       top: calc(8px + env(safe-area-inset-top, 0px));
       left: 50%;
       transform: translateX(-50%);
-      flex-direction: column;
+      flex-direction: row;
       align-items: center;
-      gap: 6px;
+      gap: 12px;
       z-index: 12;
       pointer-events: none;
     }
@@ -125,15 +125,13 @@
       text-shadow: 0 2px 8px rgba(0,0,0,0.8);
     }
     #planning-instructions {
+      display: none;
       font-size: 13px;
       opacity: 0.7;
       text-shadow: 0 1px 4px rgba(0,0,0,0.8);
     }
     #confirm-btn {
       display: none;
-      position: fixed;
-      bottom: calc(4px + env(safe-area-inset-bottom, 0px));
-      right: 8px;
       padding: 5px 24px;
       font-size: 12px;
       font-weight: bold;
@@ -144,7 +142,7 @@
       border: 2px solid #555;
       border-radius: 4px;
       cursor: pointer;
-      z-index: 12;
+      pointer-events: auto;
     }
     #confirm-btn.active { display: block; }
     #confirm-btn:hover { background: #3a3a5a; border-color: #777; }
@@ -261,7 +259,6 @@
       #battle-hud > div { gap: 6px; }
       #round-timer { font-size: 14px; }
       #round-counter { font-size: 11px; }
-      #planning-overlay { flex-direction: row; gap: 12px; }
       #planning-label { font-size: 16px; letter-spacing: 1px; }
       #planning-instructions { display: none; }
       #confirm-btn { min-height: 44px; padding: 8px 24px; font-size: 14px; letter-spacing: 1px; }
@@ -322,8 +319,8 @@
     <div id="planning-overlay">
       <span id="planning-label">Blue Planning</span>
       <span id="planning-instructions">Click a unit, drag to draw a path. Repeat for each unit.</span>
+      <button id="confirm-btn">Done</button>
     </div>
-    <button id="confirm-btn">Done</button>
 
     <div id="replay-overlay">
       <button id="replay-restart-btn" title="Restart">&#x23EE;</button>
