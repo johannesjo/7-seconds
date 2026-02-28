@@ -49,7 +49,7 @@ const replayRestartBtn = document.getElementById('replay-restart-btn')!;
 const replayPauseBtn = document.getElementById('replay-pause-btn')!;
 const replayExitBtn = document.getElementById('replay-exit-btn')!;
 const replayProgress = document.getElementById('replay-progress')!;
-const replaySpeedButtons = document.querySelectorAll<HTMLButtonElement>('[data-replay-speed]');
+const replaySpeedToggle = document.getElementById('replay-speed-toggle') as HTMLButtonElement;
 
 // State
 let renderer: Renderer | null = null;
@@ -231,7 +231,8 @@ function startReplay(data: ReplayData): void {
   showScreen('battle');
   replayOverlay.classList.add('active');
   replayPauseBtn.textContent = '\u23F8';
-  replaySpeedButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.replaySpeed === '1'));
+  replaySpeedToggle.textContent = '3x';
+  replaySpeedToggle.classList.remove('active');
 
   replayPlayer = new ReplayPlayer(renderer!, data, (event, eventData) => {
     if (event === 'frame' && eventData) {
@@ -454,12 +455,11 @@ replayExitBtn.addEventListener('click', () => {
   stopReplay();
 });
 
-replaySpeedButtons.forEach(btn => {
-  btn.addEventListener('click', () => {
-    const speed = Number(btn.dataset.replaySpeed);
-    replayPlayer?.setSpeed(speed);
-    replaySpeedButtons.forEach(b => b.classList.toggle('active', b === btn));
-  });
+replaySpeedToggle.addEventListener('click', () => {
+  const isActive = replaySpeedToggle.classList.toggle('active');
+  const speed = isActive ? 3 : 1;
+  replayPlayer?.setSpeed(speed);
+  replaySpeedToggle.textContent = isActive ? '1x' : '3x';
 });
 
 // Initialize renderer and show battlefield preview behind start screen
