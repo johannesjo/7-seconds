@@ -45,13 +45,15 @@ export class Renderer {
       this.bgGraphics.destroy();
     }
     this.bgGraphics = new Graphics();
+    // Scale grid spacing to screen size so density looks like real graph paper
+    const gridSpacing = Math.round(Math.min(MAP_WIDTH, MAP_HEIGHT) / 16);
     this.bgGraphics.setStrokeStyle({ width: 1, color: this.theme.grid, alpha: this.theme.gridAlpha });
-    for (let x = 0; x <= MAP_WIDTH; x += 100) {
+    for (let x = 0; x <= MAP_WIDTH; x += gridSpacing) {
       this.bgGraphics.moveTo(x, 0);
       this.bgGraphics.lineTo(x, MAP_HEIGHT);
       this.bgGraphics.stroke();
     }
-    for (let y = 0; y <= MAP_HEIGHT; y += 100) {
+    for (let y = 0; y <= MAP_HEIGHT; y += gridSpacing) {
       this.bgGraphics.moveTo(0, y);
       this.bgGraphics.lineTo(MAP_WIDTH, y);
       this.bgGraphics.stroke();
