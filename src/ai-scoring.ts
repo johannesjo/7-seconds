@@ -23,6 +23,8 @@ const WEIGHTS: Record<UnitType, {
   blade:   { distIdeal: [0, 40],    distPenaltyScale: 0.25, los: 15, elevation: 5,  cover: 5,  flank: 15 },
   soldier: { distIdeal: [50, 120],  distPenaltyScale: 0.15, los: 20, elevation: 15, cover: 15, flank: 25 },
   zombie:  { distIdeal: [0, 30],    distPenaltyScale: 0.1,  los: 5,  elevation: 0,  cover: 0,  flank: 5 },
+  shielder: { distIdeal: [0, 30], distPenaltyScale: 0.3, los: 5, elevation: 0, cover: 5, flank: 5 },
+  bomber:   { distIdeal: [0, 20], distPenaltyScale: 0.3, los: 5, elevation: 0, cover: 0, flank: 0 },
 };
 
 /** Score a candidate position for a given unit. Higher is better. */
