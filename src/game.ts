@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack } from './units';
+import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateObstacles, generateElevationZones } from './battlefield';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
@@ -187,8 +187,8 @@ export class GameEngine {
     );
 
     for (const unit of redUnits) {
-      // Zombies don't use AI planning — they chase in real-time
-      if (unit.type === 'zombie') continue;
+      // Zombies, shielders, and bombers don't use AI planning — they chase in real-time
+      if (unit.type === 'zombie' || unit.type === 'shielder' || unit.type === 'bomber') continue;
       const margin = 8;
       const padding = unit.radius + margin;
 
@@ -267,9 +267,9 @@ export class GameEngine {
     const redDelayed = this.hordeStartDelay > 0;
     if (redDelayed) this.hordeStartDelay -= dt;
 
-    // Zombies always chase closest enemy
+    // Zombies, shielders, and bombers always chase closest enemy
     for (const unit of this.units) {
-      if (!unit.alive || unit.type !== 'zombie') continue;
+      if (!unit.alive || (unit.type !== 'zombie' && unit.type !== 'shielder' && unit.type !== 'bomber')) continue;
       const target = findTarget(unit, this.units, null, this.obstacles);
       if (target) {
         unit.waypoints = [];
@@ -381,6 +381,28 @@ export class GameEngine {
       } else {
         fx?.addImpactBurst(hit.pos, hit.team);
         if (hit.killed) fx?.addKillText(hit.pos, hit.team);
+      }
+    }
+
+    // Bomber chain explosions
+    for (const hit of hits) {
+      if (hit.killed) {
+        const deadUnit = this.units.find(u => u.id === hit.targetId);
+        if (deadUnit && deadUnit.type === 'bomber') {
+          const explosionHits = bomberExplode(deadUnit, this.units);
+          for (const eh of explosionHits) {
+            this.replayEvents.push({
+              frame: this.replayFrames.length,
+              type: eh.killed ? 'kill' : 'hit',
+              pos: eh.pos,
+              angle: 0,
+              damage: eh.damage,
+              flanked: false,
+              team: deadUnit.team,
+              targetId: eh.targetId,
+            });
+          }
+        }
       }
     }
 
