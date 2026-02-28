@@ -181,7 +181,7 @@ function onGameEvent(
     ].join('<br>');
 
     rematchBtn.textContent = 'Rematch';
-    newBattleBtn.textContent = 'New Battle';
+    newBattleBtn.textContent = 'Back';
     replayBtn.style.display = lastReplayData ? '' : 'none';
     returnToScreen = 'result';
 
@@ -328,22 +328,16 @@ function showUpgradeSelection(): void {
     upgradeCardsEl.appendChild(card);
   }
 
-  // Add Watch Replay button to upgrade screen if replay data exists
+  // Add Watch Replay button below upgrade cards if replay data exists
   if (lastReplayData) {
-    const replayCard = document.createElement('div');
-    replayCard.className = 'upgrade-card';
-    replayCard.style.borderColor = '#666';
-    replayCard.style.opacity = '0.8';
-    replayCard.innerHTML = `
-      <div class="card-label">Watch Replay</div>
-      <div class="card-desc">Rewatch the last wave</div>
-      <div class="card-category">replay</div>
-    `;
-    replayCard.addEventListener('click', () => {
+    const replayBtn = document.createElement('button');
+    replayBtn.textContent = 'Watch Replay';
+    replayBtn.style.cssText = 'padding:8px 24px;font-size:13px;background:transparent;color:inherit;border:1px solid #555;border-radius:4px;cursor:pointer;opacity:0.6;margin-top:8px';
+    replayBtn.addEventListener('click', () => {
       returnToScreen = 'horde-upgrade';
       startReplay(lastReplayData!);
     });
-    upgradeCardsEl.appendChild(replayCard);
+    upgradeCardsEl.appendChild(replayBtn);
   }
 
   showScreen('horde-upgrade');
@@ -367,7 +361,7 @@ function showHordeResult(victory: boolean): void {
   ].join('<br>');
 
   rematchBtn.textContent = 'Try Again';
-  newBattleBtn.textContent = 'Main Menu';
+  newBattleBtn.textContent = 'Back';
   replayBtn.style.display = lastReplayData ? '' : 'none';
   returnToScreen = 'result';
 
