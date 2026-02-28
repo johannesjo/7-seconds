@@ -369,6 +369,10 @@ function showHordeResult(victory: boolean): void {
   showScreen('result');
 }
 
+dayModeCb.addEventListener('change', () => {
+  if (renderer) renderer.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+});
+
 // --- Event listeners ---
 battleBtn.addEventListener('click', async () => {
   aiMode = false;
