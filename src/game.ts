@@ -617,5 +617,6 @@ export class GameEngine {
     this.pathDrawer?.destroy();
     this.pathDrawer = null;
     this.renderer.effects?.clear();
+    this.renderer.clearCtfGraphics();
   }
 }

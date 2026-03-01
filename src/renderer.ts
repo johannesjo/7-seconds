@@ -263,6 +263,19 @@ export class Renderer {
     }
   }
 
+  clearCtfGraphics(): void {
+    if (this.flagGraphics) {
+      this.app.stage.removeChild(this.flagGraphics);
+      this.flagGraphics.destroy({ children: true });
+      this.flagGraphics = null;
+    }
+    if (this.baseZoneGraphics) {
+      this.app.stage.removeChild(this.baseZoneGraphics);
+      this.baseZoneGraphics.destroy();
+      this.baseZoneGraphics = null;
+    }
+  }
+
   renderBaseZones(): void {
     if (this.baseZoneGraphics) {
       this.app.stage.removeChild(this.baseZoneGraphics);
