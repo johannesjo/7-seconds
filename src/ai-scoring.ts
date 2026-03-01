@@ -1,5 +1,5 @@
-import { Unit, Vec2, Obstacle, ElevationZone, UnitType } from './types';
-import { ROUND_DURATION_S, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { Unit, Vec2, Obstacle, ElevationZone, UnitType, CtfState } from './types';
+import { ROUND_DURATION_S, MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH } from './constants';
 import { hasLineOfSight, getElevationLevel, flankScore } from './units';
 
 export interface ScoringContext {
@@ -8,6 +8,7 @@ export interface ScoringContext {
   enemies: Unit[];
   obstacles: Obstacle[];
   elevationZones: ElevationZone[];
+  ctfState?: CtfState;
 }
 
 /** Role-based scoring weights per unit type. */
@@ -75,6 +76,50 @@ export function scorePosition(ctx: ScoringContext): number {
   // Elevation bonus
   const elevLevel = getElevationLevel(candidate, elevationZones);
   score += elevLevel * w.elevation;
+
+  // CTF scoring factors
+  if (ctx.ctfState) {
+    const ctf = ctx.ctfState;
+    const enemyFlag = unit.team === 'blue' ? ctf.redFlag : ctf.blueFlag;
+    const ownFlag = unit.team === 'blue' ? ctf.blueFlag : ctf.redFlag;
+
+    const isCarrier = enemyFlag.carrierId === unit.id;
+    const teamHasCarrier = enemyFlag.carrierId !== null;
+    const enemyHasOurFlag = ownFlag.carrierId !== null;
+
+    if (isCarrier) {
+      // Carrier: move toward home base
+      const homeX = unit.team === 'blue' ? CTF_BASE_ZONE_WIDTH / 2 : MAP_WIDTH - CTF_BASE_ZONE_WIDTH / 2;
+      const distToHome = Math.abs(candidate.x - homeX);
+      score += (MAP_WIDTH - distToHome) / MAP_WIDTH * 40;
+    } else if (enemyHasOurFlag) {
+      // Intercept enemy carrier (high priority)
+      const carrierDist = Math.sqrt(
+        (candidate.x - ownFlag.pos.x) ** 2 + (candidate.y - ownFlag.pos.y) ** 2
+      );
+      score += (MAP_WIDTH - Math.min(carrierDist, MAP_WIDTH)) / MAP_WIDTH * 35;
+    } else if (teamHasCarrier) {
+      // Escort: stay near our flag carrier
+      const flagDist = Math.sqrt(
+        (candidate.x - enemyFlag.pos.x) ** 2 + (candidate.y - enemyFlag.pos.y) ** 2
+      );
+      score += Math.max(0, 15 - flagDist / 20);
+    } else {
+      // No carrier: move toward enemy flag
+      const flagDist = Math.sqrt(
+        (candidate.x - enemyFlag.pos.x) ** 2 + (candidate.y - enemyFlag.pos.y) ** 2
+      );
+      score += (MAP_WIDTH - Math.min(flagDist, MAP_WIDTH)) / MAP_WIDTH * 20;
+    }
+
+    // Defense bonus: units near own flag get bonus
+    const ownFlagDist = Math.sqrt(
+      (candidate.x - ownFlag.homePos.x) ** 2 + (candidate.y - ownFlag.homePos.y) ** 2
+    );
+    if (ownFlagDist < 200) {
+      score += 8;
+    }
+  }
 
   return score;
 }

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { scorePosition, generateCandidates } from './ai-scoring';
 import { createUnit } from './units';
-import { Obstacle, ElevationZone } from './types';
+import { Obstacle, ElevationZone, CtfState } from './types';
+import { createCtfState } from './ctf';
 
 describe('scorePosition', () => {
   const enemies = [
@@ -145,5 +146,49 @@ describe('generateCandidates', () => {
       Math.abs(c.x - 600) < 1 && Math.abs(c.y - 400) < 1,
     );
     expect(hasCenter).toBe(true);
+  });
+});
+
+describe('CTF scoring', () => {
+  const obstacles: Obstacle[] = [];
+  const elevationZones: ElevationZone[] = [];
+
+  it('scores positions closer to enemy flag higher when no carrier', () => {
+    const ctfState = createCtfState();
+    const unit = createUnit('r1', 'soldier', 'red', { x: 600, y: 400 });
+    const enemies = [createUnit('e1', 'soldier', 'blue', { x: 200, y: 400 })];
+
+    const nearFlag = scorePosition({
+      candidate: { x: 200, y: 400 },
+      unit, enemies, obstacles, elevationZones, ctfState,
+    });
+
+    const farFromFlag = scorePosition({
+      candidate: { x: 800, y: 400 },
+      unit, enemies, obstacles, elevationZones, ctfState,
+    });
+
+    expect(nearFlag).toBeGreaterThan(farFromFlag);
+  });
+
+  it('scores intercept positions higher when enemy carries flag', () => {
+    const ctfState = createCtfState();
+    ctfState.redFlag.carrierId = 'e1';
+    ctfState.redFlag.pos = { x: 400, y: 400 };
+
+    const unit = createUnit('r1', 'soldier', 'red', { x: 600, y: 400 });
+    const carrier = createUnit('e1', 'soldier', 'blue', { x: 400, y: 400 });
+
+    const nearCarrier = scorePosition({
+      candidate: { x: 450, y: 400 },
+      unit, enemies: [carrier], obstacles, elevationZones, ctfState,
+    });
+
+    const farFromCarrier = scorePosition({
+      candidate: { x: 800, y: 400 },
+      unit, enemies: [carrier], obstacles, elevationZones, ctfState,
+    });
+
+    expect(nearCarrier).toBeGreaterThan(farFromCarrier);
   });
 });

@@ -219,6 +219,7 @@ export class GameEngine {
           enemies,
           obstacles: this.obstacles,
           elevationZones: this.elevationZones,
+          ctfState: this.ctfState ?? undefined,
         });
         scored.push({ pos: candidate, score: s });
       }
