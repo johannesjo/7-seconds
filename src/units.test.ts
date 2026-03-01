@@ -535,7 +535,7 @@ describe('shielder', () => {
 describe('createCtfArmy', () => {
   it('spawns blue units in bottom base zone', () => {
     const units = createCtfArmy('blue', []);
-    expect(units.length).toBe(4); // CTF_ARMY_COMPOSITION: 4 soldiers
+    expect(units.length).toBe(4); // CTF_ARMY_COMPOSITION: 1 soldier + 3 blades
     for (const u of units) {
       expect(u.team).toBe('blue');
       expect(u.pos.y).toBeGreaterThan(MAP_HEIGHT - CTF_BASE_ZONE_WIDTH);
