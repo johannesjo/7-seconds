@@ -55,11 +55,16 @@ export function updateCtfFlags(state: CtfState, units: Unit[]): void {
   updateFlag(state.redFlag, units);
 }
 
+function isFlagAtHome(flag: CtfFlag): boolean {
+  return !flag.carrierId && !flag.dropped;
+}
+
 export function checkCtfCapture(state: CtfState): Team | null {
-  if (state.blueFlag.carrierId && state.blueFlag.pos.x > MAP_WIDTH - CTF_BASE_ZONE_WIDTH) {
+  // Can only capture if your own flag is safe at home
+  if (state.blueFlag.carrierId && state.blueFlag.pos.x > MAP_WIDTH - CTF_BASE_ZONE_WIDTH && isFlagAtHome(state.redFlag)) {
     return 'red';
   }
-  if (state.redFlag.carrierId && state.redFlag.pos.x < CTF_BASE_ZONE_WIDTH) {
+  if (state.redFlag.carrierId && state.redFlag.pos.x < CTF_BASE_ZONE_WIDTH && isFlagAtHome(state.blueFlag)) {
     return 'blue';
   }
   return null;

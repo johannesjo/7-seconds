@@ -87,4 +87,25 @@ describe('checkCtfCapture', () => {
     const result = checkCtfCapture(state);
     expect(result).toBeNull();
   });
+
+  it('blocks capture when own flag is not at home', () => {
+    const state = createCtfState();
+    // Red carries blue flag to red's base — but red's own flag is taken
+    state.blueFlag.carrierId = 'r1';
+    state.blueFlag.pos = { ...state.redFlag.homePos };
+    state.redFlag.carrierId = 'b1';
+    state.redFlag.pos = { x: 400, y: 400 };
+    const result = checkCtfCapture(state);
+    expect(result).toBeNull();
+  });
+
+  it('blocks capture when own flag is dropped', () => {
+    const state = createCtfState();
+    state.blueFlag.carrierId = 'r1';
+    state.blueFlag.pos = { ...state.redFlag.homePos };
+    state.redFlag.dropped = true;
+    state.redFlag.pos = { x: 500, y: 300 };
+    const result = checkCtfCapture(state);
+    expect(result).toBeNull();
+  });
 });
