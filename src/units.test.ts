@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, bladeAoeAttack, bomberExplode } from './units';
-import { MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { createUnit, createArmy, createCtfArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, bladeAoeAttack, bomberExplode } from './units';
+import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH } from './constants';
 
 
 describe('createUnit', () => {
@@ -529,6 +529,39 @@ describe('shielder', () => {
     const hits = bladeAoeAttack(blade, [blade, shielder], 0.016);
     expect(hits).toHaveLength(1);
     expect(shielder.hp).toBeLessThan(40); // blade AoE bypasses shield
+  });
+});
+
+describe('createCtfArmy', () => {
+  it('spawns blue units in left base zone', () => {
+    const units = createCtfArmy('blue', []);
+    expect(units.length).toBe(4); // same as ARMY_COMPOSITION total (3 soldiers + 1 sniper)
+    for (const u of units) {
+      expect(u.team).toBe('blue');
+      expect(u.pos.x).toBeLessThan(CTF_BASE_ZONE_WIDTH);
+    }
+  });
+
+  it('spawns red units in right base zone', () => {
+    const units = createCtfArmy('red', []);
+    for (const u of units) {
+      expect(u.team).toBe('red');
+      expect(u.pos.x).toBeGreaterThan(MAP_WIDTH - CTF_BASE_ZONE_WIDTH);
+    }
+  });
+
+  it('faces blue units to the right', () => {
+    const units = createCtfArmy('blue', []);
+    for (const u of units) {
+      expect(u.gunAngle).toBeCloseTo(0); // facing right
+    }
+  });
+
+  it('faces red units to the left', () => {
+    const units = createCtfArmy('red', []);
+    for (const u of units) {
+      expect(u.gunAngle).toBeCloseTo(Math.PI); // facing left
+    }
   });
 });
 
