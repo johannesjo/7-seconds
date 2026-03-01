@@ -161,3 +161,19 @@ export interface HordeUpgrade {
   category: 'stat' | 'recruit';
   apply: (units: Unit[], blocks?: Obstacle[]) => Unit[];
 }
+
+export type GameMode = 'pvp' | 'ai' | 'horde' | 'ctf';
+
+export interface CtfFlag {
+  team: Team;
+  pos: Vec2;
+  homePos: Vec2;
+  carrierId: string | null;
+  dropped: boolean;
+}
+
+export interface CtfState {
+  blueFlag: CtfFlag;
+  redFlag: CtfFlag;
+  winner: Team | null;
+}
