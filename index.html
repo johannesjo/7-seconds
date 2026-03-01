@@ -302,6 +302,7 @@
     body.day-mode #replay-overlay button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #battle-btn, body.day-mode #ai-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #horde-btn { background: #e8dcc8; color: #886633; border-color: #aa8844; }
+    body.day-mode #ctf-ai-btn, body.day-mode #ctf-pvp-btn { background: #d8e8d0; color: #336633; border-color: #88aa88; }
   </style>
 </head>
 <body>
@@ -314,6 +315,10 @@
     </div>
     <div class="btn-row" style="display:flex;gap:16px">
       <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#4a2a2a;color:#ff8844;border:2px solid #884422;border-radius:4px;cursor:pointer">Horde</button>
+    </div>
+    <div class="btn-row" style="display:flex;gap:12px">
+      <button id="ctf-ai-btn" style="padding:12px 24px;font-size:14px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">CTF vs AI</button>
+      <button id="ctf-pvp-btn" style="padding:12px 24px;font-size:14px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">CTF vs Player</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
@@ -335,6 +340,7 @@
     <div id="battle-hud">
       <span id="blue-count" style="color:#4a9eff">Blue: 4</span>
       <span id="wave-counter" style="color:#ff8844;display:none"></span>
+      <span id="flag-status" style="color:#88ff88;display:none;font-size:12px"></span>
       <div style="display:flex;align-items:center;gap:12px">
         <span id="round-counter" style="opacity:0.7">Round 1</span>
         <span id="round-timer"></span>

@@ -44,6 +44,10 @@ const bloodCb = document.getElementById('blood-cb') as HTMLInputElement;
 const dayModeCb = document.getElementById('day-mode-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
 
+const ctfAiBtn = document.getElementById('ctf-ai-btn')!;
+const ctfPvpBtn = document.getElementById('ctf-pvp-btn')!;
+const flagStatusEl = document.getElementById('flag-status')!;
+
 // Replay controls
 const replayOverlay = document.getElementById('replay-overlay')!;
 const replayRestartBtn = document.getElementById('replay-restart-btn')!;
@@ -59,6 +63,8 @@ let aiMode = false;
 
 // Horde state
 let hordeActive = false;
+let ctfActive = false;
+let ctfHotseat = false;
 let hordeWave = 0;
 let hordeUnits: Unit[] = [];
 let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
@@ -128,6 +134,15 @@ function onGameEvent(
       waveCounterEl.textContent = `Wave ${hordeWave}/${HORDE_MAX_WAVES}`;
     }
 
+    if (ctfActive && engine) {
+      const ctf = engine.getCtfState();
+      if (ctf) {
+        const blueFlagText = ctf.blueFlag.carrierId ? 'TAKEN' : ctf.blueFlag.dropped ? 'DROPPED' : 'HOME';
+        const redFlagText = ctf.redFlag.carrierId ? 'TAKEN' : ctf.redFlag.dropped ? 'DROPPED' : 'HOME';
+        flagStatusEl.textContent = `Blue flag: ${blueFlagText} | Red flag: ${redFlagText}`;
+      }
+    }
+
     if (data && 'timeLeft' in data && data.timeLeft !== undefined) {
       const timeLeft = data.timeLeft;
       roundTimerEl.textContent = `${Math.ceil(timeLeft)}s`;
@@ -164,6 +179,28 @@ function onGameEvent(
     // Horde defeat
     if (hordeActive) {
       showHordeResult(false);
+      return;
+    }
+
+    if (ctfActive) {
+      const ctf = engine?.getCtfState();
+      const isCaptureWin = ctf?.winner !== null;
+      const winType = isCaptureWin ? 'Flag Captured!' : 'Elimination!';
+      const color = result.winner === 'blue' ? '#4a9eff' : '#ff4a4a';
+      winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">${winType}</span>`;
+      winnerTextEl.style.color = color;
+
+      resultStatsEl.innerHTML = [
+        `Duration: ${result.duration.toFixed(1)}s`,
+        `Win: ${winType}`,
+      ].join('<br>');
+
+      rematchBtn.textContent = 'Rematch';
+      newBattleBtn.textContent = 'Back';
+      replayBtn.style.display = lastReplayData ? '' : 'none';
+      returnToScreen = 'result';
+
+      showScreen('result');
       return;
     }
 
@@ -219,6 +256,27 @@ function startGame(): void {
   speedToggle.dataset.speed = '1';
   speedToggle.textContent = '3x';
   roundCounterEl.textContent = 'Round 1';
+  engine.startBattle();
+}
+
+function startCtfGame(): void {
+  lastReplayData = null;
+  engine?.stop();
+  document.body.classList.toggle('day-mode', dayModeCb.checked);
+  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+  engine = new GameEngine(renderer!, onGameEvent, {
+    aiMode: !ctfHotseat,
+    ctfMode: true,
+    ctfHotseat,
+    oneShot: oneShotCb.checked,
+    blood: bloodCb.checked,
+  });
+  showScreen('battle');
+  speedToggle.classList.remove('active');
+  speedToggle.dataset.speed = '1';
+  speedToggle.textContent = '3x';
+  roundCounterEl.textContent = 'Round 1';
+  flagStatusEl.style.display = '';
   engine.startBattle();
 }
 
@@ -392,6 +450,20 @@ hordeBtn.addEventListener('click', async () => {
   startHorde();
 });
 
+ctfAiBtn.addEventListener('click', async () => {
+  ctfHotseat = false;
+  ctfActive = true;
+  await initRenderer();
+  startCtfGame();
+});
+
+ctfPvpBtn.addEventListener('click', async () => {
+  ctfHotseat = true;
+  ctfActive = true;
+  await initRenderer();
+  startCtfGame();
+});
+
 confirmBtn.addEventListener('click', () => {
   engine?.confirmPlan();
 });
@@ -411,7 +483,9 @@ speedToggle.addEventListener('click', () => {
 
 rematchBtn.addEventListener('click', async () => {
   await initRenderer();
-  if (hordeActive) {
+  if (ctfActive) {
+    startCtfGame();
+  } else if (hordeActive) {
     startHorde(); // restart from wave 1
   } else {
     startGame();
@@ -433,6 +507,10 @@ newBattleBtn.addEventListener('click', () => {
   hordeUnits = [];
   hordeMap = null;
   waveCounterEl.style.display = 'none';
+
+  ctfActive = false;
+  ctfHotseat = false;
+  flagStatusEl.style.display = 'none';
 
   showPreview();
   showScreen('prompt');
