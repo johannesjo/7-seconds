@@ -1,7 +1,8 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData } from './types';
-import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { createArmy, createMissionArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
-import { generateObstacles, generateElevationZones } from './battlefield';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState } from './types';
+import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, UNIT_STATS, CTF_CARRIER_SPEED_MULTIPLIER } from './constants';
+import { createArmy, createMissionArmy, createCtfArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
+import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
+import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
 import { scorePosition, generateCandidates } from './ai-scoring';
@@ -37,6 +38,9 @@ export class GameEngine {
   private hordeBlueUnits: Unit[] | null = null;
   private hordeRedArmy: { type: UnitType; count: number }[] | null = null;
   private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
+  private ctfMode = false;
+  private ctfState: CtfState | null = null;
+  private ctfHotseat = false;
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
 
@@ -48,6 +52,8 @@ export class GameEngine {
     hordeBlueUnits?: Unit[];
     hordeRedArmy?: { type: UnitType; count: number }[];
     hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[] };
+    ctfMode?: boolean;
+    ctfHotseat?: boolean;
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -58,6 +64,8 @@ export class GameEngine {
     this.hordeBlueUnits = opts?.hordeBlueUnits ?? null;
     this.hordeRedArmy = opts?.hordeRedArmy ?? null;
     this.hordeMap = opts?.hordeMap ?? null;
+    this.ctfMode = opts?.ctfMode ?? false;
+    this.ctfHotseat = opts?.ctfHotseat ?? false;
   }
 
   get phase(): TurnPhase {
@@ -68,7 +76,12 @@ export class GameEngine {
     this.renderer.bloodEnabled = this.bloodEnabled;
 
     // Load map before spawning units so we can avoid placing them inside blocks
-    if (this.hordeMap) {
+    if (this.ctfMode) {
+      this.obstacles = generateCtfObstacles();
+      this.elevationZones = generateCtfElevationZones();
+      this.units = [...createCtfArmy('blue', this.obstacles), ...createCtfArmy('red', this.obstacles)];
+      this.ctfState = createCtfState();
+    } else if (this.hordeMap) {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
     } else {
@@ -78,17 +91,19 @@ export class GameEngine {
 
     const allBlocks = this.obstacles;
 
-    if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
-      // Horde mode: use pre-created blue units + spawn wave enemies
-      const redUnits = createMissionArmy('red', this.hordeRedArmy, allBlocks);
-      // Prefix red IDs with wave index to avoid renderer collisions
-      const waveTag = `w${Date.now() % 10000}`;
-      for (const u of redUnits) {
-        u.id = u.id.replace('red_', `red_${waveTag}_`);
+    if (!this.ctfMode) {
+      if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
+        // Horde mode: use pre-created blue units + spawn wave enemies
+        const redUnits = createMissionArmy('red', this.hordeRedArmy, allBlocks);
+        // Prefix red IDs with wave index to avoid renderer collisions
+        const waveTag = `w${Date.now() % 10000}`;
+        for (const u of redUnits) {
+          u.id = u.id.replace('red_', `red_${waveTag}_`);
+        }
+        this.units = [...this.hordeBlueUnits, ...redUnits];
+      } else {
+        this.units = [...createArmy('blue'), ...createArmy('red')];
       }
-      this.units = [...this.hordeBlueUnits, ...redUnits];
-    } else {
-      this.units = [...createArmy('blue'), ...createArmy('red')];
     }
     // One-shot mode: set all damage to 9999
     if (this.oneShotEnabled) {
@@ -277,6 +292,17 @@ export class GameEngine {
       }
     }
 
+    // CTF: apply carrier speed penalty
+    if (this.ctfMode && this.ctfState) {
+      for (const unit of this.units) {
+        if (!unit.alive) continue;
+        const baseSpeed = UNIT_STATS[unit.type].speed;
+        unit.speed = (this.ctfState.blueFlag.carrierId === unit.id || this.ctfState.redFlag.carrierId === unit.id)
+          ? baseSpeed * CTF_CARRIER_SPEED_MULTIPLIER
+          : baseSpeed;
+      }
+    }
+
     // Advance waypoints and move
     for (const unit of this.units) {
       if (!unit.alive) continue;
@@ -417,6 +443,21 @@ export class GameEngine {
     // HUD update with time left
     this.onEvent('update', { phase: 'playing', timeLeft: Math.max(0, this.roundTimer) });
 
+    // CTF: update flag positions, pickups, drops, and check capture
+    if (this.ctfMode && this.ctfState) {
+      updateCtfFlags(this.ctfState, this.units);
+      const capturer = checkCtfCapture(this.ctfState);
+      if (capturer) {
+        this.ctfState.winner = capturer;
+        this.endingBattle = true;
+        this.endDelayTimer = 0.6;
+        this.pendingWinner = capturer;
+        this.projectiles = [];
+        this.renderer.renderProjectiles([]);
+        return;
+      }
+    }
+
     // Win condition — elimination
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
@@ -537,6 +578,10 @@ export class GameEngine {
       blue: this.units.filter(u => u.alive && u.team === 'blue').length,
       red: this.units.filter(u => u.alive && u.team === 'red').length,
     };
+  }
+
+  getCtfState(): CtfState | null {
+    return this.ctfState;
   }
 
   getUnits(): Unit[] {
