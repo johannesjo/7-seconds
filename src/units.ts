@@ -641,8 +641,8 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
 }
 
 /** Check if line of sight from a to b is clear of obstacles. */
-export function hasLineOfSight(a: Vec2, b: Vec2, obstacles: Obstacle[]): boolean {
-  return !obstacles.some(o => segmentHitsRect(a, b, o, 0));
+export function hasLineOfSight(a: Vec2, b: Vec2, obstacles: Obstacle[], padding = 0): boolean {
+  return !obstacles.some(o => segmentHitsRect(a, b, o, padding));
 }
 
 export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null, obstacles: Obstacle[] = []): Unit | null {

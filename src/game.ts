@@ -339,7 +339,7 @@ export class GameEngine {
 
       const canShoot = target
         && isInRange(unit, target, this.elevationZones)
-        && hasLineOfSight(unit.pos, target.pos, this.obstacles);
+        && hasLineOfSight(unit.pos, target.pos, this.obstacles, unit.projectileRadius);
       if (canShoot) {
         const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
         updateGunAngle(unit, desired, dt);
