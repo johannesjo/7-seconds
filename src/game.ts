@@ -1,5 +1,5 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState } from './types';
-import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, UNIT_STATS, CTF_CARRIER_SPEED_MULTIPLIER } from './constants';
+import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createArmy, createMissionArmy, createCtfArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
@@ -297,17 +297,6 @@ export class GameEngine {
       if (target) {
         unit.waypoints = [];
         unit.moveTarget = { x: target.pos.x, y: target.pos.y };
-      }
-    }
-
-    // CTF: apply carrier speed penalty
-    if (this.ctfMode && this.ctfState) {
-      for (const unit of this.units) {
-        if (!unit.alive) continue;
-        const baseSpeed = UNIT_STATS[unit.type].speed;
-        unit.speed = (this.ctfState.blueFlag.carrierId === unit.id || this.ctfState.redFlag.carrierId === unit.id)
-          ? baseSpeed * CTF_CARRIER_SPEED_MULTIPLIER
-          : baseSpeed;
       }
     }
 

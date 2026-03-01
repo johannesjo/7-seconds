@@ -40,3 +40,6 @@ export const HORDE_STARTING_ARMY: { type: UnitType; count: number }[] = [
 export const CTF_CARRIER_SPEED_MULTIPLIER = 0.65;
 export const CTF_FLAG_PICKUP_RADIUS = 25;
 export const CTF_BASE_ZONE_WIDTH = 100;
+export const CTF_ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
+  { type: 'soldier', count: 4 },
+];

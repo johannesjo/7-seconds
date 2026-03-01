@@ -9,7 +9,7 @@ export interface ProjectileHit {
   damage: number;
   flanked: boolean;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION } from './constants';
 
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
@@ -236,13 +236,14 @@ export function createArmy(team: Team): Unit[] {
 export function createCtfArmy(team: Team, blocks: Obstacle[]): Unit[] {
   const units: Unit[] = [];
   const isBlue = team === 'blue';
-  const totalUnits = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
+  const composition = CTF_ARMY_COMPOSITION;
+  const totalUnits = composition.reduce((sum, c) => sum + c.count, 0);
   const spacing = Math.min(60, (MAP_HEIGHT * 0.6) / (totalUnits - 1));
   const startY = (MAP_HEIGHT - spacing * (totalUnits - 1)) / 2;
   const baseX = isBlue ? CTF_BASE_ZONE_WIDTH / 2 : MAP_WIDTH - CTF_BASE_ZONE_WIDTH / 2;
 
   let index = 0;
-  for (const { type, count } of ARMY_COMPOSITION) {
+  for (const { type, count } of composition) {
     for (let i = 0; i < count; i++) {
       const y = startY + spacing * index;
       let pos = { x: baseX, y };
