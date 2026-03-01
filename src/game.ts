@@ -122,6 +122,9 @@ export class GameEngine {
     // Render initial state — hills under obstacles
     this.renderer.renderElevationZones(this.elevationZones);
     this.renderer.renderObstacles(this.obstacles);
+    if (this.ctfMode) {
+      this.renderer.renderBaseZones();
+    }
     this.renderer.renderUnits(this.units);
 
     // Start ticker for rendering during planning
@@ -258,7 +261,11 @@ export class GameEngine {
     const dt = this._phase === 'playing' ? rawDt * this.speedMultiplier : rawDt;
 
     // Always render units (even during planning, need dt for death fade)
-    this.renderer.renderUnits(this.units, dt);
+    this.renderer.renderUnits(this.units, dt, this.ctfState ?? undefined);
+
+    if (this.ctfState) {
+      this.renderer.renderFlags(this.ctfState);
+    }
 
     // Animate pulsing indicators during planning
     this.pathDrawer?.updateHover();

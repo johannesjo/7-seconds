@@ -1,6 +1,6 @@
 import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
-import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, setMapSize } from './constants';
+import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState } from './types';
+import { MAP_WIDTH, MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
@@ -19,6 +19,8 @@ export class Renderer {
   private noiseSprite: TilingSprite | null = null;
   private lastElevationZones: ElevationZone[] = [];
   private lastObstacles: Obstacle[] = [];
+  private flagGraphics: Container | null = null;
+  private baseZoneGraphics: Graphics | null = null;
   bloodEnabled = true;
 
   constructor() {
@@ -261,7 +263,67 @@ export class Renderer {
     }
   }
 
-  renderUnits(units: Unit[], dt = 0): void {
+  renderBaseZones(): void {
+    if (this.baseZoneGraphics) {
+      this.app.stage.removeChild(this.baseZoneGraphics);
+      this.baseZoneGraphics.destroy();
+    }
+    this.baseZoneGraphics = new Graphics();
+    const zoneW = CTF_BASE_ZONE_WIDTH;
+
+    // Blue base (left)
+    this.baseZoneGraphics.rect(0, 0, zoneW, MAP_HEIGHT);
+    this.baseZoneGraphics.fill({ color: 0x4a9eff, alpha: 0.08 });
+    this.baseZoneGraphics.rect(0, 0, zoneW, MAP_HEIGHT);
+    this.baseZoneGraphics.stroke({ width: 2, color: 0x4a9eff, alpha: 0.2 });
+
+    // Red base (right)
+    this.baseZoneGraphics.rect(MAP_WIDTH - zoneW, 0, zoneW, MAP_HEIGHT);
+    this.baseZoneGraphics.fill({ color: 0xff4a4a, alpha: 0.08 });
+    this.baseZoneGraphics.rect(MAP_WIDTH - zoneW, 0, zoneW, MAP_HEIGHT);
+    this.baseZoneGraphics.stroke({ width: 2, color: 0xff4a4a, alpha: 0.2 });
+
+    this.app.stage.addChildAt(this.baseZoneGraphics, 2);
+  }
+
+  renderFlags(ctfState: CtfState): void {
+    if (this.flagGraphics) {
+      this.app.stage.removeChild(this.flagGraphics);
+      this.flagGraphics.destroy({ children: true });
+    }
+    this.flagGraphics = new Container();
+
+    for (const flag of [ctfState.blueFlag, ctfState.redFlag]) {
+      const color = flag.team === 'blue' ? 0x4a9eff : 0xff4a4a;
+      const g = new Graphics();
+
+      if (flag.carrierId) {
+        // Carried — draw small flag above carrier position
+        g.rect(-2, -20, 2, 20);
+        g.fill({ color: 0xcccccc });
+        g.poly([-2, -20, 12, -15, -2, -10]);
+        g.fill({ color, alpha: 0.9 });
+      } else {
+        // At base or dropped
+        const pulse = flag.dropped ? 0.6 + 0.4 * Math.sin(Date.now() / 200) : 1;
+        g.rect(-2, -24, 2, 24);
+        g.fill({ color: 0xcccccc, alpha: pulse });
+        g.poly([-2, -24, 16, -18, -2, -12]);
+        g.fill({ color, alpha: pulse * 0.9 });
+        // Small circle pedestal
+        g.circle(0, 0, 4);
+        g.fill({ color, alpha: 0.3 });
+      }
+
+      g.x = flag.pos.x;
+      g.y = flag.pos.y;
+      this.flagGraphics.addChild(g);
+    }
+
+    this.app.stage.addChild(this.flagGraphics);
+  }
+
+  renderUnits(units: Unit[], dt = 0, ctfState?: CtfState): void {
     const activeIds = new Set<string>();
 
     for (const unit of units) {
@@ -293,6 +355,12 @@ export class Renderer {
 
       container.x = unit.pos.x;
       container.y = unit.pos.y;
+
+      // CTF carrier glow
+      if (ctfState) {
+        const carrying = ctfState.blueFlag.carrierId === unit.id || ctfState.redFlag.carrierId === unit.id;
+        container.alpha = carrying ? 0.8 + 0.2 * Math.sin(Date.now() / 200) : 1;
+      }
 
       // Rotate gun barrel
       (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
