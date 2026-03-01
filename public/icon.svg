@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1a1a2e"/>
+  <!-- "7" — top bar + diagonal stroke as single outline -->
+  <path d="M120 75 L392 75 L392 140 L255 430 L185 430 L310 140 L120 140 Z" fill="#e94560"/>
+</svg>
