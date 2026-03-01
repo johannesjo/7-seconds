@@ -1,5 +1,5 @@
 import { Obstacle, ElevationZone } from './types';
-import { MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH } from './constants';
 
 function randomInRange(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min)) + min;
@@ -90,6 +90,46 @@ export function generateHordeElevationZones(): ElevationZone[] {
     const x = randomInRange(50, MAP_WIDTH - 50 - w);
     const y = randomInRange(MAP_HEIGHT * 0.30, MAP_HEIGHT * 0.70 - h);
     zones.push({ x, y, w, h });
+  }
+
+  return zones;
+}
+
+// --- CTF-specific generators (left-right symmetry) ---
+
+/** Generate symmetrical obstacles for CTF mode (mirrored left-right). */
+export function generateCtfObstacles(): Obstacle[] {
+  const obstacles: Obstacle[] = [];
+  const pairCount = randomInRange(2, 4); // 2-3 pairs
+  const safeZone = CTF_BASE_ZONE_WIDTH + 20;
+
+  for (let i = 0; i < pairCount; i++) {
+    const w = randomInRange(30, 60);
+    const h = randomInRange(30, 60);
+    const x = randomInRange(safeZone, MAP_WIDTH / 2 - w / 2);
+    const y = randomInRange(MAP_HEIGHT * 0.15, MAP_HEIGHT * 0.85 - h);
+
+    obstacles.push({ x, y, w, h });
+    obstacles.push({ x: MAP_WIDTH - x - w, y, w, h });
+  }
+
+  return obstacles;
+}
+
+/** Generate symmetrical elevation zones for CTF mode. */
+export function generateCtfElevationZones(): ElevationZone[] {
+  const zones: ElevationZone[] = [];
+  const pairCount = randomInRange(1, 3); // 1-2 pairs
+  const safeZone = CTF_BASE_ZONE_WIDTH + 10;
+
+  for (let i = 0; i < pairCount; i++) {
+    const w = randomInRange(80, 160);
+    const h = randomInRange(60, 120);
+    const x = randomInRange(safeZone, MAP_WIDTH / 2 - w / 2);
+    const y = randomInRange(MAP_HEIGHT * 0.2, MAP_HEIGHT * 0.8 - h);
+
+    zones.push({ x, y, w, h });
+    zones.push({ x: MAP_WIDTH - x - w, y, w, h });
   }
 
   return zones;
