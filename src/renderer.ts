@@ -269,18 +269,18 @@ export class Renderer {
       this.baseZoneGraphics.destroy();
     }
     this.baseZoneGraphics = new Graphics();
-    const zoneW = CTF_BASE_ZONE_WIDTH;
+    const zoneH = CTF_BASE_ZONE_WIDTH;
 
-    // Blue base (left)
-    this.baseZoneGraphics.rect(0, 0, zoneW, MAP_HEIGHT);
+    // Blue base (bottom)
+    this.baseZoneGraphics.rect(0, MAP_HEIGHT - zoneH, MAP_WIDTH, zoneH);
     this.baseZoneGraphics.fill({ color: 0x4a9eff, alpha: 0.08 });
-    this.baseZoneGraphics.rect(0, 0, zoneW, MAP_HEIGHT);
+    this.baseZoneGraphics.rect(0, MAP_HEIGHT - zoneH, MAP_WIDTH, zoneH);
     this.baseZoneGraphics.stroke({ width: 2, color: 0x4a9eff, alpha: 0.2 });
 
-    // Red base (right)
-    this.baseZoneGraphics.rect(MAP_WIDTH - zoneW, 0, zoneW, MAP_HEIGHT);
+    // Red base (top)
+    this.baseZoneGraphics.rect(0, 0, MAP_WIDTH, zoneH);
     this.baseZoneGraphics.fill({ color: 0xff4a4a, alpha: 0.08 });
-    this.baseZoneGraphics.rect(MAP_WIDTH - zoneW, 0, zoneW, MAP_HEIGHT);
+    this.baseZoneGraphics.rect(0, 0, MAP_WIDTH, zoneH);
     this.baseZoneGraphics.stroke({ width: 2, color: 0xff4a4a, alpha: 0.2 });
 
     this.app.stage.addChildAt(this.baseZoneGraphics, 2);

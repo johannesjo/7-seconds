@@ -95,9 +95,9 @@ export function generateHordeElevationZones(): ElevationZone[] {
   return zones;
 }
 
-// --- CTF-specific generators (left-right symmetry) ---
+// --- CTF-specific generators (top-bottom symmetry) ---
 
-/** Generate symmetrical obstacles for CTF mode (mirrored left-right). */
+/** Generate symmetrical obstacles for CTF mode (mirrored top-bottom). */
 export function generateCtfObstacles(): Obstacle[] {
   const obstacles: Obstacle[] = [];
   const pairCount = randomInRange(2, 4); // 2-3 pairs
@@ -106,17 +106,17 @@ export function generateCtfObstacles(): Obstacle[] {
   for (let i = 0; i < pairCount; i++) {
     const w = randomInRange(30, 60);
     const h = randomInRange(30, 60);
-    const x = randomInRange(safeZone, MAP_WIDTH / 2 - w / 2);
-    const y = randomInRange(MAP_HEIGHT * 0.15, MAP_HEIGHT * 0.85 - h);
+    const x = randomInRange(MAP_WIDTH * 0.15, MAP_WIDTH * 0.85 - w);
+    const y = randomInRange(safeZone, MAP_HEIGHT / 2 - h / 2);
 
     obstacles.push({ x, y, w, h });
-    obstacles.push({ x: MAP_WIDTH - x - w, y, w, h });
+    obstacles.push({ x, y: MAP_HEIGHT - y - h, w, h });
   }
 
   return obstacles;
 }
 
-/** Generate symmetrical elevation zones for CTF mode. */
+/** Generate symmetrical elevation zones for CTF mode (mirrored top-bottom). */
 export function generateCtfElevationZones(): ElevationZone[] {
   const zones: ElevationZone[] = [];
   const pairCount = randomInRange(1, 3); // 1-2 pairs
@@ -125,11 +125,11 @@ export function generateCtfElevationZones(): ElevationZone[] {
   for (let i = 0; i < pairCount; i++) {
     const w = randomInRange(80, 160);
     const h = randomInRange(60, 120);
-    const x = randomInRange(safeZone, MAP_WIDTH / 2 - w / 2);
-    const y = randomInRange(MAP_HEIGHT * 0.2, MAP_HEIGHT * 0.8 - h);
+    const x = randomInRange(MAP_WIDTH * 0.15, MAP_WIDTH * 0.85 - w);
+    const y = randomInRange(safeZone, MAP_HEIGHT / 2 - h / 2);
 
     zones.push({ x, y, w, h });
-    zones.push({ x: MAP_WIDTH - x - w, y, w, h });
+    zones.push({ x, y: MAP_HEIGHT - y - h, w, h });
   }
 
   return zones;

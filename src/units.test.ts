@@ -533,34 +533,34 @@ describe('shielder', () => {
 });
 
 describe('createCtfArmy', () => {
-  it('spawns blue units in left base zone', () => {
+  it('spawns blue units in bottom base zone', () => {
     const units = createCtfArmy('blue', []);
     expect(units.length).toBe(4); // CTF_ARMY_COMPOSITION: 4 soldiers
     for (const u of units) {
       expect(u.team).toBe('blue');
-      expect(u.pos.x).toBeLessThan(CTF_BASE_ZONE_WIDTH);
+      expect(u.pos.y).toBeGreaterThan(MAP_HEIGHT - CTF_BASE_ZONE_WIDTH);
     }
   });
 
-  it('spawns red units in right base zone', () => {
+  it('spawns red units in top base zone', () => {
     const units = createCtfArmy('red', []);
     for (const u of units) {
       expect(u.team).toBe('red');
-      expect(u.pos.x).toBeGreaterThan(MAP_WIDTH - CTF_BASE_ZONE_WIDTH);
+      expect(u.pos.y).toBeLessThan(CTF_BASE_ZONE_WIDTH);
     }
   });
 
-  it('faces blue units to the right', () => {
+  it('faces blue units upward', () => {
     const units = createCtfArmy('blue', []);
     for (const u of units) {
-      expect(u.gunAngle).toBeCloseTo(0); // facing right
+      expect(u.gunAngle).toBeCloseTo(-Math.PI / 2); // facing up
     }
   });
 
-  it('faces red units to the left', () => {
+  it('faces red units downward', () => {
     const units = createCtfArmy('red', []);
     for (const u of units) {
-      expect(u.gunAngle).toBeCloseTo(Math.PI); // facing left
+      expect(u.gunAngle).toBeCloseTo(Math.PI / 2); // facing down
     }
   });
 });

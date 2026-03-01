@@ -88,10 +88,10 @@ export function scorePosition(ctx: ScoringContext): number {
     const enemyHasOurFlag = ownFlag.carrierId !== null;
 
     if (isCarrier) {
-      // Carrier: move toward home base
-      const homeX = unit.team === 'blue' ? CTF_BASE_ZONE_WIDTH / 2 : MAP_WIDTH - CTF_BASE_ZONE_WIDTH / 2;
-      const distToHome = Math.abs(candidate.x - homeX);
-      score += (MAP_WIDTH - distToHome) / MAP_WIDTH * 40;
+      // Carrier: move toward home base (blue=bottom, red=top)
+      const homeY = unit.team === 'blue' ? MAP_HEIGHT - CTF_BASE_ZONE_WIDTH / 2 : CTF_BASE_ZONE_WIDTH / 2;
+      const distToHome = Math.abs(candidate.y - homeY);
+      score += (MAP_HEIGHT - distToHome) / MAP_HEIGHT * 40;
     } else if (enemyHasOurFlag) {
       // Intercept enemy carrier (high priority)
       const carrierDist = Math.sqrt(

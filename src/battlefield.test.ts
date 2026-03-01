@@ -161,16 +161,16 @@ describe('generateHordeElevationZones', () => {
 // --- CTF-specific generators ---
 
 describe('generateCtfObstacles', () => {
-  it('generates symmetrical obstacles', () => {
+  it('generates symmetrical obstacles (mirrored top-bottom)', () => {
     const obstacles = generateCtfObstacles();
     expect(obstacles.length).toBeGreaterThanOrEqual(2);
     for (const obs of obstacles) {
-      const mirrorX = MAP_WIDTH - obs.x - obs.w;
+      const mirrorY = MAP_HEIGHT - obs.y - obs.h;
       const hasMirror = obstacles.some(o =>
-        Math.abs(o.x - mirrorX) < 1 && Math.abs(o.y - obs.y) < 1 &&
+        Math.abs(o.x - obs.x) < 1 && Math.abs(o.y - mirrorY) < 1 &&
         Math.abs(o.w - obs.w) < 1 && Math.abs(o.h - obs.h) < 1
       );
-      const isCentered = Math.abs(obs.x + obs.w / 2 - MAP_WIDTH / 2) < 1;
+      const isCentered = Math.abs(obs.y + obs.h / 2 - MAP_HEIGHT / 2) < 1;
       expect(hasMirror || isCentered).toBe(true);
     }
   });
@@ -179,24 +179,24 @@ describe('generateCtfObstacles', () => {
     for (let i = 0; i < 10; i++) {
       const obstacles = generateCtfObstacles();
       for (const obs of obstacles) {
-        expect(obs.x + obs.w).toBeGreaterThan(CTF_BASE_ZONE_WIDTH);
-        expect(obs.x).toBeLessThan(MAP_WIDTH - CTF_BASE_ZONE_WIDTH);
+        expect(obs.y + obs.h).toBeGreaterThan(CTF_BASE_ZONE_WIDTH);
+        expect(obs.y).toBeLessThan(MAP_HEIGHT - CTF_BASE_ZONE_WIDTH);
       }
     }
   });
 });
 
 describe('generateCtfElevationZones', () => {
-  it('generates symmetrical elevation zones', () => {
+  it('generates symmetrical elevation zones (mirrored top-bottom)', () => {
     const zones = generateCtfElevationZones();
     expect(zones.length).toBeGreaterThanOrEqual(2);
     for (const z of zones) {
-      const mirrorX = MAP_WIDTH - z.x - z.w;
+      const mirrorY = MAP_HEIGHT - z.y - z.h;
       const hasMirror = zones.some(o =>
-        Math.abs(o.x - mirrorX) < 1 && Math.abs(o.y - z.y) < 1 &&
+        Math.abs(o.x - z.x) < 1 && Math.abs(o.y - mirrorY) < 1 &&
         Math.abs(o.w - z.w) < 1 && Math.abs(o.h - z.h) < 1
       );
-      const isCentered = Math.abs(z.x + z.w / 2 - MAP_WIDTH / 2) < 1;
+      const isCentered = Math.abs(z.y + z.h / 2 - MAP_HEIGHT / 2) < 1;
       expect(hasMirror || isCentered).toBe(true);
     }
   });

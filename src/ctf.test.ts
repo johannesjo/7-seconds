@@ -6,8 +6,9 @@ import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH, CTF_FLAG_PICKUP_RADIUS } fr
 describe('createCtfState', () => {
   it('creates flags at base positions', () => {
     const state = createCtfState();
-    expect(state.blueFlag.pos.x).toBeLessThan(CTF_BASE_ZONE_WIDTH);
-    expect(state.redFlag.pos.x).toBeGreaterThan(MAP_WIDTH - CTF_BASE_ZONE_WIDTH);
+    // Blue flag at bottom, red flag at top
+    expect(state.blueFlag.pos.y).toBeGreaterThan(MAP_HEIGHT - CTF_BASE_ZONE_WIDTH);
+    expect(state.redFlag.pos.y).toBeLessThan(CTF_BASE_ZONE_WIDTH);
     expect(state.blueFlag.carrierId).toBeNull();
     expect(state.redFlag.carrierId).toBeNull();
     expect(state.winner).toBeNull();

@@ -238,24 +238,25 @@ export function createCtfArmy(team: Team, blocks: Obstacle[]): Unit[] {
   const isBlue = team === 'blue';
   const composition = CTF_ARMY_COMPOSITION;
   const totalUnits = composition.reduce((sum, c) => sum + c.count, 0);
-  const spacing = Math.min(60, (MAP_HEIGHT * 0.6) / (totalUnits - 1));
-  const startY = (MAP_HEIGHT - spacing * (totalUnits - 1)) / 2;
-  const baseX = isBlue ? CTF_BASE_ZONE_WIDTH / 2 : MAP_WIDTH - CTF_BASE_ZONE_WIDTH / 2;
+  const spacing = 60;
+  const groupWidth = spacing * (totalUnits - 1);
+  const startX = (MAP_WIDTH - groupWidth) / 2;
+  const baseY = isBlue ? MAP_HEIGHT - CTF_BASE_ZONE_WIDTH / 2 : CTF_BASE_ZONE_WIDTH / 2;
 
   let index = 0;
   for (const { type, count } of composition) {
     for (let i = 0; i < count; i++) {
-      const y = startY + spacing * index;
-      let pos = { x: baseX, y };
+      const x = startX + spacing * index;
+      let pos = { x, y: baseY };
       pos = nudgeOutOfBlocks(pos, blocks);
       units.push(createUnit(`${team}_${type}_${i}`, type, team, pos));
       index++;
     }
   }
 
-  // Face units toward center (right for blue, left for red)
+  // Face units toward center (up for blue, down for red)
   for (const u of units) {
-    u.gunAngle = isBlue ? 0 : Math.PI;
+    u.gunAngle = isBlue ? -Math.PI / 2 : Math.PI / 2;
   }
 
   return units;
