@@ -1,5 +1,5 @@
 import { Renderer } from './renderer';
-import { ReplayData, ReplayEvent, Unit, Projectile, Team, Vec2 } from './types';
+import { ReplayData, ReplayEvent, Unit, Projectile, Team, Vec2, CtfState } from './types';
 import { FLANK_DAMAGE_MULTIPLIER } from './constants';
 
 export type ReplayEventCallback = (event: 'frame' | 'end', data?: { time: number; duration: number }) => void;
@@ -27,6 +27,9 @@ export class ReplayPlayer {
     this.renderer.bloodEnabled = true;
     this.renderer.renderElevationZones(this.data.elevationZones);
     this.renderer.renderObstacles(this.data.obstacles);
+    if (this.data.ctfMode) {
+      this.renderer.renderBaseZones();
+    }
     this.frameIndex = 0;
     this.accumulator = 0;
     this.paused = false;
@@ -105,7 +108,32 @@ export class ReplayPlayer {
     }));
 
     const dt = 1 / this.fps;
-    this.renderer.renderUnits(units, dt);
+
+    // Reconstruct CTF state for rendering if flag data exists
+    if (frame.blueFlag && frame.redFlag) {
+      const ctfState: CtfState = {
+        blueFlag: {
+          team: 'blue',
+          pos: { x: frame.blueFlag.x, y: frame.blueFlag.y },
+          homePos: { x: frame.blueFlag.homeX, y: frame.blueFlag.homeY },
+          carrierId: frame.blueFlag.carrierId,
+          dropped: frame.blueFlag.dropped,
+        },
+        redFlag: {
+          team: 'red',
+          pos: { x: frame.redFlag.x, y: frame.redFlag.y },
+          homePos: { x: frame.redFlag.homeX, y: frame.redFlag.homeY },
+          carrierId: frame.redFlag.carrierId,
+          dropped: frame.redFlag.dropped,
+        },
+        winner: null,
+      };
+      this.renderer.renderUnits(units, dt, ctfState);
+      this.renderer.renderFlags(ctfState);
+    } else {
+      this.renderer.renderUnits(units, dt);
+    }
+
     this.renderer.renderProjectiles(projectiles);
   }
 

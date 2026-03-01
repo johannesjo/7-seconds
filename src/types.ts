@@ -142,9 +142,20 @@ export interface ReplayEvent {
   targetId?: string;
 }
 
+export interface ReplayFlagSnapshot {
+  x: number;
+  y: number;
+  homeX: number;
+  homeY: number;
+  carrierId: string | null;
+  dropped: boolean;
+}
+
 export interface ReplayFrame {
   units: ReplayUnitSnapshot[];
   projectiles: ReplayProjectileSnapshot[];
+  blueFlag?: ReplayFlagSnapshot;
+  redFlag?: ReplayFlagSnapshot;
 }
 
 export interface ReplayData {
@@ -152,6 +163,7 @@ export interface ReplayData {
   events: ReplayEvent[];
   obstacles: Obstacle[];
   elevationZones: ElevationZone[];
+  ctfMode?: boolean;
 }
 
 export interface HordeUpgrade {

@@ -502,7 +502,7 @@ export class GameEngine {
   };
 
   private recordFrame(): void {
-    this.replayFrames.push({
+    const frame: ReplayFrame = {
       units: this.units.map(u => ({
         id: u.id,
         type: u.type,
@@ -529,7 +529,28 @@ export class GameEngine {
         distanceTraveled: p.distanceTraveled,
         trail: p.trail ? p.trail.map(t => ({ ...t })) : undefined,
       })),
-    });
+    };
+
+    if (this.ctfState) {
+      frame.blueFlag = {
+        x: this.ctfState.blueFlag.pos.x,
+        y: this.ctfState.blueFlag.pos.y,
+        homeX: this.ctfState.blueFlag.homePos.x,
+        homeY: this.ctfState.blueFlag.homePos.y,
+        carrierId: this.ctfState.blueFlag.carrierId,
+        dropped: this.ctfState.blueFlag.dropped,
+      };
+      frame.redFlag = {
+        x: this.ctfState.redFlag.pos.x,
+        y: this.ctfState.redFlag.pos.y,
+        homeX: this.ctfState.redFlag.homePos.x,
+        homeY: this.ctfState.redFlag.homePos.y,
+        carrierId: this.ctfState.redFlag.carrierId,
+        dropped: this.ctfState.redFlag.dropped,
+      };
+    }
+
+    this.replayFrames.push(frame);
   }
 
   getReplayData(): ReplayData | null {
@@ -539,6 +560,7 @@ export class GameEngine {
       events: this.replayEvents,
       obstacles: this.obstacles,
       elevationZones: this.elevationZones,
+      ctfMode: this.ctfMode || undefined,
     };
   }
 
