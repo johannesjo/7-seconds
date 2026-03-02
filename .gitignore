@@ -3,3 +3,5 @@ dist
 .claude/
 .playwright-mcp/
 *.png
+!android/app/src/main/res/mipmap-*/ic_launcher*.png
+!store-assets/*.png
