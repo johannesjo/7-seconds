@@ -37,6 +37,9 @@ export const HORDE_STARTING_ARMY: { type: UnitType; count: number }[] = [
   { type: 'soldier', count: 2 },
 ];
 
+/** Shrink factor for projectile-vs-unit hit detection (1 = full radius, 0.8 = 80%). */
+export const COLLISION_HITBOX_SCALE = 0.8;
+
 export const CTF_CARRIER_SPEED_MULTIPLIER = 0.65;
 export const CTF_FLAG_PICKUP_RADIUS = 25;
 export const CTF_BASE_ZONE_WIDTH = 100;
