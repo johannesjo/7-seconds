@@ -4,6 +4,8 @@ import android.os.Bundle;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
+import androidx.activity.OnBackPressedCallback;
+
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -15,5 +17,16 @@ public class MainActivity extends BridgeActivity {
         WebView webView = getBridge().getWebView();
         WebSettings settings = webView.getSettings();
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+
+        // Disable back gesture / back button — prevents accidental navigation
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // Intentionally empty — swallow back events
+            }
+        });
+
+        // Disable overscroll glow/bounce to prevent pull-to-refresh style gestures
+        webView.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
     }
 }

@@ -9,7 +9,7 @@ export interface ProjectileHit {
   damage: number;
   flanked: boolean;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE } from './constants';
 
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
@@ -903,7 +903,7 @@ export function updateProjectiles(
       if (p.piercing && p.hitIds?.has(unit.id)) continue;
       const dx = p.pos.x - unit.pos.x;
       const dy = p.pos.y - unit.pos.y;
-      const hitDist = p.radius + unit.radius;
+      const hitDist = p.radius + unit.radius * COLLISION_HITBOX_SCALE;
       if (dx * dx + dy * dy <= hitDist * hitDist) {
         const projAngle = Math.atan2(p.vel.y, p.vel.x);
 
