@@ -2,6 +2,8 @@ node_modules
 dist
 .claude/
 .playwright-mcp/
+.idea/
+.worktrees/
 *.png
 !android/app/src/main/res/mipmap-*/ic_launcher*.png
 !store-assets/*.png
