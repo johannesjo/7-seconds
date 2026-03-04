@@ -12,7 +12,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "cap:sync": "npx cap sync",
-    "cap:open": "npx cap open android"
+    "cap:open": "npx cap open android",
+    "version": "node scripts/sync-android-version.js && git add android/app/build.gradle"
   },
   "keywords": [],
   "author": "",
