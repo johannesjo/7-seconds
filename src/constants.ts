@@ -44,6 +44,5 @@ export const CTF_CARRIER_SPEED_MULTIPLIER = 0.65;
 export const CTF_FLAG_PICKUP_RADIUS = 25;
 export const CTF_BASE_ZONE_WIDTH = 100;
 export const CTF_ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
-  { type: 'soldier', count: 1 },
-  { type: 'blade', count: 3 },
+  { type: 'soldier', count: 3 },
 ];
