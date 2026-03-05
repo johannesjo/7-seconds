@@ -361,7 +361,7 @@ export function advanceWaypoint(unit: Unit, dt: number = 0): void {
     }
   }
 
-  const stuck = unit.moveTarget && (unit.stuckTime ?? 0) > 0.4;
+  const stuck = unit.moveTarget && (unit.stuckTime ?? 0) > 0.25;
 
   if (atTarget || stuck) {
     unit.stuckTime = 0;
@@ -495,6 +495,19 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     }
   }
 
+  // Steer away from map edges
+  const edgeMargin = unit.radius * 4;
+  if (unit.pos.x < unit.radius + edgeMargin) {
+    steerX += (unit.radius + edgeMargin - unit.pos.x) / edgeMargin;
+  } else if (unit.pos.x > MAP_WIDTH - unit.radius - edgeMargin) {
+    steerX -= (unit.pos.x - (MAP_WIDTH - unit.radius - edgeMargin)) / edgeMargin;
+  }
+  if (unit.pos.y < unit.radius + edgeMargin) {
+    steerY += (unit.radius + edgeMargin - unit.pos.y) / edgeMargin;
+  } else if (unit.pos.y > MAP_HEIGHT - unit.radius - edgeMargin) {
+    steerY -= (unit.pos.y - (MAP_HEIGHT - unit.radius - edgeMargin)) / edgeMargin;
+  }
+
   // Blend steering into direction
   if (steerX !== 0 || steerY !== 0) {
     dirX += steerX * 0.8;
@@ -531,13 +544,21 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     } else if (vOnly) {
       newX = oldX;
     } else {
-      // Both axes blocked — try half-step diagonal before giving up
-      const halfX = oldX + moveX * 0.5;
-      const halfY = oldY + moveY * 0.5;
-      if (!obstacles.some(o => rectContainsCircle(o, { x: halfX, y: halfY }, unit.radius))) {
-        newX = halfX;
-        newY = halfY;
-      } else {
+      // Both axes blocked — try angular slides (±30°, ±60°, ±90°) before giving up
+      const stepLen = Math.sqrt(moveX * moveX + moveY * moveY);
+      const baseAngle = Math.atan2(moveY, moveX);
+      let escaped = false;
+      for (const offset of [Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2]) {
+        const tryX = oldX + Math.cos(baseAngle + offset) * stepLen;
+        const tryY = oldY + Math.sin(baseAngle + offset) * stepLen;
+        if (!obstacles.some(o => rectContainsCircle(o, { x: tryX, y: tryY }, unit.radius))) {
+          newX = tryX;
+          newY = tryY;
+          escaped = true;
+          break;
+        }
+      }
+      if (!escaped) {
         pushOutOfObstacles(unit.pos, unit.radius, obstacles);
         unit.vel = { x: 0, y: 0 };
         return;
@@ -600,10 +621,28 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
           const overlap = (minDist - dist) / 2;
           const nx = dx / dist;
           const ny = dy / dist;
-          a.pos.x -= nx * overlap;
-          a.pos.y -= ny * overlap;
-          b.pos.x += nx * overlap;
-          b.pos.y += ny * overlap;
+
+          // Check if pushing would land inside an obstacle — only push the safe one
+          const aNewX = a.pos.x - nx * overlap;
+          const aNewY = a.pos.y - ny * overlap;
+          const bNewX = b.pos.x + nx * overlap;
+          const bNewY = b.pos.y + ny * overlap;
+          const aBlocked = obstacles.some(o => rectContainsCircle(o, { x: aNewX, y: aNewY }, a.radius));
+          const bBlocked = obstacles.some(o => rectContainsCircle(o, { x: bNewX, y: bNewY }, b.radius));
+
+          if (!aBlocked && !bBlocked) {
+            a.pos.x = aNewX;
+            a.pos.y = aNewY;
+            b.pos.x = bNewX;
+            b.pos.y = bNewY;
+          } else if (!bBlocked) {
+            b.pos.x += nx * overlap * 2;
+            b.pos.y += ny * overlap * 2;
+          } else if (!aBlocked) {
+            a.pos.x -= nx * overlap * 2;
+            a.pos.y -= ny * overlap * 2;
+          }
+          // If both blocked, skip separation to avoid pushing into obstacles
 
           // Bounce — reflect converging velocity outward (soft elastic collision)
           // Stronger bounce for same-team to prevent friendly stacking
