@@ -102,9 +102,6 @@ export const ALL_UNIT_UPGRADES: HordeUpgrade[] = [
   // Sniper
   makeUnitUpgrade('sniper_barrel', 'Long Barrel', 'Snipers gain +100 range', 'sniper', u => { u.range += 100; }),
   makeUnitUpgrade('sniper_rapid', 'Rapid Shot', 'Snipers reload 50% faster', 'sniper', u => { u.fireCooldown *= 0.5; }),
-  // Blade
-  makeUnitUpgrade('blade_fury', 'Blade Fury', 'Blades attack 40% faster', 'blade', u => { u.fireCooldown *= 0.6; }),
-  makeUnitUpgrade('blade_berserker', 'Berserker', 'Blades gain +30 speed', 'blade', u => { u.speed += 30; }),
   // Shielder
   makeUnitUpgrade('shielder_iron', 'Iron Wall', 'Shielders gain +40 max HP', 'shielder', u => { u.maxHp += 40; u.hp += 40; }),
   makeUnitUpgrade('shielder_bulwark', 'Bulwark', 'Shielders take 20% less damage', 'shielder', u => {
@@ -131,7 +128,6 @@ function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
 
 export const ALL_RECRUIT_UPGRADES: HordeUpgrade[] = [
   makeRecruitUpgrade('soldier'),
-  makeRecruitUpgrade('blade'),
   makeRecruitUpgrade('sniper'),
   makeRecruitUpgrade('shielder'),
 ];
@@ -201,7 +197,7 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
   return picks;
 }
 
-const HORDE_STARTING_UNIT_POOL: UnitType[] = ['soldier', 'blade', 'sniper', 'shielder'];
+const HORDE_STARTING_UNIT_POOL: UnitType[] = ['soldier', 'sniper', 'shielder'];
 
 /** Pick 2 random units from the playable pool for the starting army. */
 export function randomHordeStartingArmy(): { type: UnitType; count: number }[] {
