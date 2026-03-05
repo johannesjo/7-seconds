@@ -290,9 +290,10 @@ export class GameEngine {
     const redDelayed = this.hordeStartDelay > 0;
     if (redDelayed) this.hordeStartDelay -= dt;
 
-    // Zombies, shielders, and bombers always chase closest enemy
+    // Zombies, shielders, and bombers on the red team always chase closest enemy
+    // Blue units of these types are player-controlled and follow drawn paths instead
     for (const unit of this.units) {
-      if (!unit.alive || (unit.type !== 'zombie' && unit.type !== 'shielder' && unit.type !== 'bomber')) continue;
+      if (!unit.alive || unit.team !== 'red' || (unit.type !== 'zombie' && unit.type !== 'shielder' && unit.type !== 'bomber')) continue;
       const target = findTarget(unit, this.units, null, this.obstacles);
       if (target) {
         unit.waypoints = [];

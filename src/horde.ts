@@ -45,9 +45,6 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
     u.maxHp += 15;
     u.hp += 15;
   }),
-  makeStatUpgrade('dmg_5', '+5 Damage', 'All units deal +5 damage', u => {
-    u.damage += 5;
-  }),
   makeStatUpgrade('dmg_10', '+10 Damage', 'All units deal +10 damage', u => {
     u.damage += 10;
   }),
@@ -66,6 +63,9 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   { ...makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', u => {
     u.piercing = true;
   }), once: true },
+  { ...makeStatUpgrade('double_fire', 'Double Time', 'All units fire twice as fast', u => {
+    u.fireCooldown *= 0.5;
+  }), once: true, minWave: 8 },
   makeStatUpgrade('quick_aim', 'Quick Aim', 'All units aim 50% faster', u => {
     u.turnSpeed *= 1.5;
   }),
@@ -92,6 +92,7 @@ export const ALL_RECRUIT_UPGRADES: HordeUpgrade[] = [
   makeRecruitUpgrade('soldier'),
   makeRecruitUpgrade('blade'),
   makeRecruitUpgrade('sniper'),
+  makeRecruitUpgrade('shielder'),
 ];
 
 /** Pick 3 random upgrades with constraints. */
@@ -126,9 +127,9 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
     }
   }
 
-  // Fill remaining slots from mixed pool (excluding already-applied one-time upgrades)
+  // Fill remaining slots from mixed pool (excluding already-applied one-time upgrades and wave-gated ones)
   const allPool: HordeUpgrade[] = [
-    ...ALL_STAT_UPGRADES.filter(u => !excludedIds.has(u.id)),
+    ...ALL_STAT_UPGRADES.filter(u => !excludedIds.has(u.id) && (!u.minWave || wave >= u.minWave)),
     ...recruitPool,
   ];
 

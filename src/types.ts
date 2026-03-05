@@ -172,6 +172,8 @@ export interface HordeUpgrade {
   description: string;
   category: 'stat' | 'recruit';
   once?: boolean;
+  /** Earliest wave at which this upgrade appears in the pool. */
+  minWave?: number;
   apply: (units: Unit[], blocks?: Obstacle[]) => Unit[];
 }
 

@@ -45,6 +45,22 @@ describe('pickUpgrades', () => {
     }
   });
 
+  it('does not offer double_fire before wave 8', () => {
+    for (let i = 0; i < 30; i++) {
+      const picks = pickUpgrades(makeBlueSquad(), 7);
+      expect(picks.some(p => p.id === 'double_fire')).toBe(false);
+    }
+  });
+
+  it('can offer double_fire from wave 8 onwards', () => {
+    let seen = false;
+    for (let i = 0; i < 100; i++) {
+      const picks = pickUpgrades(makeBlueSquad(), 8);
+      if (picks.some(p => p.id === 'double_fire')) { seen = true; break; }
+    }
+    expect(seen).toBe(true);
+  });
+
   it('guarantees at least 1 recruit in waves 1-3', () => {
     for (let wave = 1; wave <= 3; wave++) {
       for (let i = 0; i < 20; i++) {
@@ -118,8 +134,8 @@ describe('stat upgrade apply', () => {
     expect(units[0].hp).toBe(originalMaxHp + 15);
   });
 
-  it('+5 Damage increases damage for blue units', () => {
-    const dmgUpgrade = ALL_STAT_UPGRADES.find(u => u.id === 'dmg_5')!;
+  it('+10 Damage increases damage for blue units', () => {
+    const dmgUpgrade = ALL_STAT_UPGRADES.find(u => u.id === 'dmg_10')!;
     const units = [
       createUnit('blue_soldier_0', 'soldier', 'blue', { x: 400, y: 600 }),
     ];
@@ -127,7 +143,19 @@ describe('stat upgrade apply', () => {
 
     dmgUpgrade.apply(units);
 
-    expect(units[0].damage).toBe(originalDmg + 5);
+    expect(units[0].damage).toBe(originalDmg + 10);
+  });
+
+  it('double_fire halves fireCooldown for blue units', () => {
+    const doubleFireUpgrade = ALL_STAT_UPGRADES.find(u => u.id === 'double_fire')!;
+    const units = [
+      createUnit('blue_soldier_0', 'soldier', 'blue', { x: 400, y: 600 }),
+    ];
+    const originalCooldown = units[0].fireCooldown;
+
+    doubleFireUpgrade.apply(units);
+
+    expect(units[0].fireCooldown).toBeCloseTo(originalCooldown * 0.5);
   });
 });
 
