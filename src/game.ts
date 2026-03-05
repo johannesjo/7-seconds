@@ -413,6 +413,7 @@ export class GameEngine {
       if (hit.killed) {
         const deadUnit = this.units.find(u => u.id === hit.targetId);
         if (deadUnit && deadUnit.type === 'bomber') {
+          fx?.addExplosion(deadUnit.pos, 80);
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
             this.replayEvents.push({
@@ -425,6 +426,13 @@ export class GameEngine {
               team: deadUnit.team,
               targetId: eh.targetId,
             });
+            // Chain reaction: another bomber was killed by this explosion
+            if (eh.killed) {
+              const chainDead = this.units.find(u => u.id === eh.targetId);
+              if (chainDead?.type === 'bomber') {
+                fx?.addExplosion(chainDead.pos, 80);
+              }
+            }
           }
         }
       }

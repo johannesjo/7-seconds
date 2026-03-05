@@ -178,6 +178,89 @@ class RoundStartFlash implements Effect {
   }
 }
 
+class ExplosionEffect implements Effect {
+  private gfx: Graphics;
+  private age = 0;
+  private readonly duration = 0.55;
+  // Pre-computed random spark directions so each frame is deterministic per-instance
+  private readonly sparks: { angle: number; dist: number; size: number }[];
+
+  constructor(
+    container: Container,
+    private pos: Vec2,
+    private radius: number,
+    private color: number,
+    private coreColor: number,
+  ) {
+    this.gfx = new Graphics();
+    container.addChild(this.gfx);
+
+    const SPARK_COUNT = 12;
+    this.sparks = Array.from({ length: SPARK_COUNT }, () => ({
+      angle: Math.random() * Math.PI * 2,
+      dist: 0.5 + Math.random() * 0.5,   // fraction of max radius
+      size: 2 + Math.random() * 3,
+    }));
+  }
+
+  update(dt: number): boolean {
+    this.age += dt;
+    if (this.age >= this.duration) {
+      this.gfx.destroy();
+      return false;
+    }
+
+    const t = this.age / this.duration;
+    // Ease-out expansion: fast start, slow end
+    const expand = 1 - Math.pow(1 - t, 2);
+    const currentRadius = this.radius * expand;
+
+    this.gfx.clear();
+
+    // Outer ring (fades out early)
+    const outerAlpha = Math.max(0, 1 - t * 2);
+    if (outerAlpha > 0) {
+      this.gfx.circle(this.pos.x, this.pos.y, currentRadius);
+      this.gfx.setStrokeStyle({ width: 3, color: this.color, alpha: outerAlpha });
+      this.gfx.stroke();
+    }
+
+    // Inner shockwave ring (trails slightly behind)
+    const innerT = Math.max(0, t - 0.05);
+    const innerExpand = 1 - Math.pow(1 - innerT, 2);
+    const innerRadius = this.radius * 0.6 * innerExpand;
+    const innerAlpha = Math.max(0, 0.8 - t * 1.6);
+    if (innerAlpha > 0) {
+      this.gfx.circle(this.pos.x, this.pos.y, innerRadius);
+      this.gfx.setStrokeStyle({ width: 5, color: this.coreColor, alpha: innerAlpha });
+      this.gfx.stroke();
+    }
+
+    // Bright core fill (fades quickly in first third)
+    const coreAlpha = Math.max(0, 1 - t * 3);
+    if (coreAlpha > 0) {
+      const coreRadius = this.radius * 0.25 * (1 - t * 0.5);
+      this.gfx.circle(this.pos.x, this.pos.y, coreRadius);
+      this.gfx.fill({ color: this.coreColor, alpha: coreAlpha });
+    }
+
+    // Sparks flying outward
+    const sparkAlpha = Math.max(0, 1 - t * 2.2);
+    if (sparkAlpha > 0) {
+      for (const spark of this.sparks) {
+        const d = currentRadius * spark.dist;
+        const sx = this.pos.x + Math.cos(spark.angle) * d;
+        const sy = this.pos.y + Math.sin(spark.angle) * d;
+        const sparkSize = spark.size * (1 - t * 0.6);
+        this.gfx.circle(sx, sy, sparkSize);
+        this.gfx.fill({ color: this.color, alpha: sparkAlpha });
+      }
+    }
+
+    return true;
+  }
+}
+
 class BloodParticle implements Effect {
   private gfx: Graphics;
   private stains: Graphics;
@@ -299,6 +382,14 @@ export class EffectsManager {
 
   addRoundStartFlash(width: number, height: number): void {
     this.effects.push(new RoundStartFlash(this.container, width, height));
+  }
+
+  addExplosion(pos: Vec2, radius: number): void {
+    this.effects.push(new ExplosionEffect(
+      this.container, pos, radius,
+      this.theme.bomber,
+      this.theme.muzzleCore,
+    ));
   }
 
   addBloodSpray(pos: Vec2, angle: number, team: Team, damage: number): void {
