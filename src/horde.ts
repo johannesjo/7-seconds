@@ -40,6 +40,30 @@ function makeStatUpgrade(
   };
 }
 
+function makeUnitUpgrade(
+  id: string,
+  label: string,
+  description: string,
+  forType: UnitType,
+  modify: (u: Unit) => void,
+  once = false,
+): HordeUpgrade {
+  return {
+    id,
+    label,
+    description,
+    category: 'stat',
+    forType,
+    once: once || undefined,
+    apply(units: Unit[]): Unit[] {
+      for (const u of units) {
+        if (u.team === 'blue' && u.type === forType) modify(u);
+      }
+      return units;
+    },
+  };
+}
+
 export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   makeStatUpgrade('hp_15', '+15 HP', 'All units gain +15 max HP', u => {
     u.maxHp += 15;
@@ -68,6 +92,23 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   }), once: true, minWave: 8 },
   makeStatUpgrade('quick_aim', 'Quick Aim', 'All units aim 50% faster', u => {
     u.turnSpeed *= 1.5;
+  }),
+];
+
+export const ALL_UNIT_UPGRADES: HordeUpgrade[] = [
+  // Soldier
+  makeUnitUpgrade('soldier_hollow', 'Hollow Points', 'Soldiers deal +20 damage', 'soldier', u => { u.damage += 20; }),
+  makeUnitUpgrade('soldier_medic', 'Combat Medic', 'Soldiers gain +30 max HP', 'soldier', u => { u.maxHp += 30; u.hp += 30; }),
+  // Sniper
+  makeUnitUpgrade('sniper_barrel', 'Long Barrel', 'Snipers gain +100 range', 'sniper', u => { u.range += 100; }),
+  makeUnitUpgrade('sniper_rapid', 'Rapid Shot', 'Snipers reload 50% faster', 'sniper', u => { u.fireCooldown *= 0.5; }),
+  // Blade
+  makeUnitUpgrade('blade_fury', 'Blade Fury', 'Blades attack 40% faster', 'blade', u => { u.fireCooldown *= 0.6; }),
+  makeUnitUpgrade('blade_berserker', 'Berserker', 'Blades gain +30 speed', 'blade', u => { u.speed += 30; }),
+  // Shielder
+  makeUnitUpgrade('shielder_iron', 'Iron Wall', 'Shielders gain +40 max HP', 'shielder', u => { u.maxHp += 40; u.hp += 40; }),
+  makeUnitUpgrade('shielder_bulwark', 'Bulwark', 'Shielders take 20% less damage', 'shielder', u => {
+    u.damageReduction = (u.damageReduction ?? 0) + 0.2;
   }),
 ];
 
@@ -127,9 +168,23 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
     }
   }
 
+  // Extend excluded set to cover once-only unit upgrades already applied
+  for (const id of appliedIds) {
+    const unitUpgrade = ALL_UNIT_UPGRADES.find(u => u.id === id);
+    if (unitUpgrade?.once) excludedIds.add(id);
+  }
+
+  // Unit-specific upgrades: only include if player owns that unit type
+  const unitUpgradePool = ALL_UNIT_UPGRADES.filter(u =>
+    !excludedIds.has(u.id) &&
+    u.forType !== undefined &&
+    ownedTypes.has(u.forType),
+  );
+
   // Fill remaining slots from mixed pool (excluding already-applied one-time upgrades and wave-gated ones)
   const allPool: HordeUpgrade[] = [
     ...ALL_STAT_UPGRADES.filter(u => !excludedIds.has(u.id) && (!u.minWave || wave >= u.minWave)),
+    ...unitUpgradePool,
     ...recruitPool,
   ];
 
@@ -144,6 +199,18 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
   }
 
   return picks;
+}
+
+const HORDE_STARTING_UNIT_POOL: UnitType[] = ['soldier', 'blade', 'sniper', 'shielder'];
+
+/** Pick 2 random units from the playable pool for the starting army. */
+export function randomHordeStartingArmy(): { type: UnitType; count: number }[] {
+  const pool = [...HORDE_STARTING_UNIT_POOL].sort(() => Math.random() - 0.5);
+  const a = pool[0];
+  const b = pool[1];
+  // Merge if same type (rare but possible if pool shrinks in future)
+  if (a === b) return [{ type: a, count: 2 }];
+  return [{ type: a, count: 1 }, { type: b, count: 1 }];
 }
 
 /** Restore all blue units to max HP. */

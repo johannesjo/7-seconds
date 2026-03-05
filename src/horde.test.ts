@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits } from './horde';
+import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, ALL_UNIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
 import { createUnit } from './units';
 import { MAP_WIDTH, MAP_HEIGHT, HORDE_MAX_WAVES } from './constants';
 import { Unit } from './types';
@@ -156,6 +156,84 @@ describe('stat upgrade apply', () => {
     doubleFireUpgrade.apply(units);
 
     expect(units[0].fireCooldown).toBeCloseTo(originalCooldown * 0.5);
+  });
+});
+
+describe('unit-specific upgrades', () => {
+  it('soldier_hollow only applies to soldiers', () => {
+    const upgrade = ALL_UNIT_UPGRADES.find(u => u.id === 'soldier_hollow')!;
+    const units = [
+      createUnit('blue_soldier_0', 'soldier', 'blue', { x: 400, y: 600 }),
+      createUnit('blue_sniper_0', 'sniper', 'blue', { x: 500, y: 600 }),
+    ];
+    const soldierDmg = units[0].damage;
+    const sniperDmg = units[1].damage;
+
+    upgrade.apply(units);
+
+    expect(units[0].damage).toBe(soldierDmg + 20);
+    expect(units[1].damage).toBe(sniperDmg); // sniper untouched
+  });
+
+  it('shielder_bulwark stacks damageReduction additively', () => {
+    const upgrade = ALL_UNIT_UPGRADES.find(u => u.id === 'shielder_bulwark')!;
+    const units = [
+      createUnit('blue_shielder_0', 'shielder', 'blue', { x: 400, y: 600 }),
+    ];
+
+    upgrade.apply(units);
+    expect(units[0].damageReduction).toBeCloseTo(0.2);
+
+    upgrade.apply(units);
+    expect(units[0].damageReduction).toBeCloseTo(0.4);
+  });
+
+  it('unit upgrades only appear in pickUpgrades when owning that type', () => {
+    const soldierOnlySquad = [
+      createUnit('blue_soldier_0', 'soldier', 'blue', { x: 400, y: 600 }),
+    ];
+    const sniperUpgradeIds = ALL_UNIT_UPGRADES.filter(u => u.forType === 'sniper').map(u => u.id);
+
+    for (let i = 0; i < 30; i++) {
+      const picks = pickUpgrades(soldierOnlySquad, 5);
+      for (const id of sniperUpgradeIds) {
+        expect(picks.some(p => p.id === id)).toBe(false);
+      }
+    }
+  });
+
+  it('unit upgrades appear when owning that type', () => {
+    const squad = [
+      createUnit('blue_sniper_0', 'sniper', 'blue', { x: 400, y: 600 }),
+    ];
+    const sniperUpgradeIds = new Set(ALL_UNIT_UPGRADES.filter(u => u.forType === 'sniper').map(u => u.id));
+
+    let seen = false;
+    for (let i = 0; i < 100; i++) {
+      const picks = pickUpgrades(squad, 5);
+      if (picks.some(p => sniperUpgradeIds.has(p.id))) { seen = true; break; }
+    }
+    expect(seen).toBe(true);
+  });
+});
+
+describe('randomHordeStartingArmy', () => {
+  it('returns exactly 2 units total', () => {
+    for (let i = 0; i < 20; i++) {
+      const army = randomHordeStartingArmy();
+      const total = army.reduce((sum, e) => sum + e.count, 0);
+      expect(total).toBe(2);
+    }
+  });
+
+  it('only uses playable unit types', () => {
+    const playable = new Set(['soldier', 'blade', 'sniper', 'shielder']);
+    for (let i = 0; i < 20; i++) {
+      const army = randomHordeStartingArmy();
+      for (const entry of army) {
+        expect(playable.has(entry.type)).toBe(true);
+      }
+    }
   });
 });
 

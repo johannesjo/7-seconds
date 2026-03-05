@@ -3,8 +3,8 @@ import { GameEngine } from './game';
 import { createArmy, createMissionArmy } from './units';
 import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
 import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData } from './types';
-import { ARMY_COMPOSITION, HORDE_MAX_WAVES, HORDE_STARTING_ARMY } from './constants';
-import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits } from './horde';
+import { ARMY_COMPOSITION, HORDE_MAX_WAVES } from './constants';
+import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 
@@ -334,7 +334,7 @@ function startHorde(): void {
   hordeMap = { obstacles, elevationZones };
 
   const allBlocks = obstacles;
-  hordeUnits = createMissionArmy('blue', HORDE_STARTING_ARMY, allBlocks);
+  hordeUnits = createMissionArmy('blue', randomHordeStartingArmy(), allBlocks);
 
   waveCounterEl.style.display = '';
   startNextHordeWave();

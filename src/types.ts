@@ -174,6 +174,8 @@ export interface HordeUpgrade {
   once?: boolean;
   /** Earliest wave at which this upgrade appears in the pool. */
   minWave?: number;
+  /** If set, this upgrade only appears when the player owns at least one unit of this type. */
+  forType?: UnitType;
   apply: (units: Unit[], blocks?: Obstacle[]) => Unit[];
 }
 
