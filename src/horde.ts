@@ -63,9 +63,9 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   makeStatUpgrade('rapid_fire', 'Rapid Fire', 'All units fire 20% faster', u => {
     u.fireCooldown *= 0.8;
   }),
-  makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', u => {
+  { ...makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', u => {
     u.piercing = true;
-  }),
+  }), once: true },
   makeStatUpgrade('quick_aim', 'Quick Aim', 'All units aim 50% faster', u => {
     u.turnSpeed *= 1.5;
   }),
@@ -95,9 +95,15 @@ export const ALL_RECRUIT_UPGRADES: HordeUpgrade[] = [
 ];
 
 /** Pick 3 random upgrades with constraints. */
-export function pickUpgrades(blueUnits: Unit[], wave: number): HordeUpgrade[] {
+export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<string> = new Set()): HordeUpgrade[] {
   const picks: HordeUpgrade[] = [];
   const usedIds = new Set<string>();
+
+  // Exclude one-time upgrades that have already been applied
+  const excludedIds = new Set([...appliedIds].filter(id => {
+    const upgrade = ALL_STAT_UPGRADES.find(u => u.id === id);
+    return upgrade?.once;
+  }));
 
   // Determine owned unit types for weighting recruits
   const ownedTypes = new Set(blueUnits.filter(u => u.team === 'blue').map(u => u.type));
@@ -120,9 +126,9 @@ export function pickUpgrades(blueUnits: Unit[], wave: number): HordeUpgrade[] {
     }
   }
 
-  // Fill remaining slots from mixed pool
+  // Fill remaining slots from mixed pool (excluding already-applied one-time upgrades)
   const allPool: HordeUpgrade[] = [
-    ...ALL_STAT_UPGRADES,
+    ...ALL_STAT_UPGRADES.filter(u => !excludedIds.has(u.id)),
     ...recruitPool,
   ];
 

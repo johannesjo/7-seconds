@@ -17,6 +17,8 @@ public class MainActivity extends BridgeActivity {
         WebView webView = getBridge().getWebView();
         WebSettings settings = webView.getSettings();
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        // TODO: remove clearCache once users have updated past the caching issue
+        webView.clearCache(true);
 
         // Disable back gesture / back button — prevents accidental navigation
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
