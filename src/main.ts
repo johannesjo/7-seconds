@@ -38,6 +38,7 @@ const replayBtn = document.getElementById('replay-btn')!;
 const waveCounterEl = document.getElementById('wave-counter')!;
 const upgradeScreen = document.getElementById('upgrade-screen')!;
 const upgradeCardsEl = document.getElementById('upgrade-cards')!;
+const upgradeReplayBtn = document.getElementById('upgrade-replay-btn') as HTMLButtonElement;
 
 const oneShotCb = document.getElementById('one-shot-cb') as HTMLInputElement;
 const bloodCb = document.getElementById('blood-cb') as HTMLInputElement;
@@ -393,18 +394,7 @@ function showUpgradeSelection(): void {
     upgradeCardsEl.appendChild(card);
   }
 
-  // Add Watch Replay button below upgrade cards if replay data exists
-  if (lastReplayData) {
-    const replayBtn = document.createElement('button');
-    replayBtn.textContent = 'Watch Replay';
-    replayBtn.className = 'replay-btn-upgrade';
-    replayBtn.style.cssText = 'padding:8px 24px;font-size:13px;border-radius:4px;cursor:pointer;margin-top:8px';
-    replayBtn.addEventListener('click', () => {
-      returnToScreen = 'horde-upgrade';
-      startReplay(lastReplayData!);
-    });
-    upgradeCardsEl.appendChild(replayBtn);
-  }
+  upgradeReplayBtn.style.display = lastReplayData ? 'block' : 'none';
 
   showScreen('horde-upgrade');
 }
@@ -527,6 +517,14 @@ newBattleBtn.addEventListener('click', () => {
 // Replay button on result screen
 replayBtn.addEventListener('click', () => {
   if (lastReplayData) {
+    startReplay(lastReplayData);
+  }
+});
+
+// Replay button on upgrade screen
+upgradeReplayBtn.addEventListener('click', () => {
+  if (lastReplayData) {
+    returnToScreen = 'horde-upgrade';
     startReplay(lastReplayData);
   }
 });

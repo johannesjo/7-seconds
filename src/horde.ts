@@ -50,6 +50,7 @@ function makeUnitUpgrade(
   rarity: UpgradeRarity,
   modify: (u: Unit) => void,
   once = false,
+  minWave?: number,
 ): HordeUpgrade {
   return {
     id,
@@ -59,6 +60,7 @@ function makeUnitUpgrade(
     rarity,
     forType,
     once: once || undefined,
+    minWave,
     apply(units: Unit[]): Unit[] {
       for (const u of units) {
         if (u.team === 'blue' && u.type === forType) modify(u);
@@ -90,10 +92,10 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   }),
   { ...makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', 'rare', u => {
     u.piercing = true;
-  }), once: true },
+  }), once: true, minWave: 10 },
   { ...makeStatUpgrade('double_fire', 'Double Time', 'All units fire twice as fast', 'epic', u => {
     u.fireCooldown *= 0.5;
-  }), once: true, minWave: 8 },
+  }), once: true, minWave: 10 },
   makeStatUpgrade('quick_aim', 'Quick Aim', 'All units aim 50% faster', 'uncommon', u => {
     u.turnSpeed *= 1.5;
   }),
@@ -105,12 +107,12 @@ export const ALL_UNIT_UPGRADES: HordeUpgrade[] = [
   makeUnitUpgrade('soldier_medic', 'Combat Medic', 'Soldiers gain +30 max HP', 'soldier', 'common', u => { u.maxHp += 30; u.hp += 30; }),
   // Sniper
   makeUnitUpgrade('sniper_barrel', 'Long Barrel', 'Snipers gain +100 range', 'sniper', 'uncommon', u => { u.range += 100; }),
-  makeUnitUpgrade('sniper_rapid', 'Rapid Shot', 'Snipers reload 50% faster', 'sniper', 'rare', u => { u.fireCooldown *= 0.5; }),
+  makeUnitUpgrade('sniper_rapid', 'Rapid Shot', 'Snipers reload 50% faster', 'sniper', 'rare', u => { u.fireCooldown *= 0.5; }, true, 10),
   // Shielder
   makeUnitUpgrade('shielder_iron', 'Iron Wall', 'Shielders gain +40 max HP', 'shielder', 'common', u => { u.maxHp += 40; u.hp += 40; }),
   makeUnitUpgrade('shielder_bulwark', 'Bulwark', 'Shielders take 20% less damage', 'shielder', 'rare', u => {
     u.damageReduction = (u.damageReduction ?? 0) + 0.2;
-  }),
+  }, true, 10),
 ];
 
 function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
@@ -191,11 +193,12 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
     if (unitUpgrade?.once) excludedIds.add(id);
   }
 
-  // Unit-specific upgrades: only include if player owns that unit type
+  // Unit-specific upgrades: only include if player owns that unit type and wave gate is met
   const unitUpgradePool = ALL_UNIT_UPGRADES.filter(u =>
     !excludedIds.has(u.id) &&
     u.forType !== undefined &&
-    ownedTypes.has(u.forType),
+    ownedTypes.has(u.forType) &&
+    (!u.minWave || wave >= u.minWave),
   );
 
   // Fill remaining slots from mixed pool (excluding already-applied one-time upgrades and wave-gated ones)

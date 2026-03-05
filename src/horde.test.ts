@@ -45,17 +45,17 @@ describe('pickUpgrades', () => {
     }
   });
 
-  it('does not offer double_fire before wave 8', () => {
+  it('does not offer double_fire before wave 10', () => {
     for (let i = 0; i < 30; i++) {
-      const picks = pickUpgrades(makeBlueSquad(), 7);
+      const picks = pickUpgrades(makeBlueSquad(), 9);
       expect(picks.some(p => p.id === 'double_fire')).toBe(false);
     }
   });
 
-  it('can offer double_fire from wave 8 onwards', () => {
+  it('can offer double_fire from wave 10 onwards', () => {
     let seen = false;
     for (let i = 0; i < 100; i++) {
-      const picks = pickUpgrades(makeBlueSquad(), 8);
+      const picks = pickUpgrades(makeBlueSquad(), 10);
       if (picks.some(p => p.id === 'double_fire')) { seen = true; break; }
     }
     expect(seen).toBe(true);
