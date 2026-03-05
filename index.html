@@ -210,13 +210,29 @@
     .upgrade-card:hover { background: #3a3a5a; border-color: #ff8844; }
     .upgrade-card .card-label { font-size: 18px; font-weight: bold; margin-bottom: 8px; }
     .upgrade-card .card-desc { font-size: 13px; opacity: 0.7; }
-    .upgrade-card .card-category {
+    .upgrade-card .card-rarity {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+      font-weight: bold;
+    }
+    .upgrade-card .card-unit-type {
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 1px;
-      margin-top: 8px;
-      opacity: 0.5;
+      margin-top: 10px;
+      opacity: 0.6;
     }
+    /* Rarity border and label colors */
+    .upgrade-card.rarity-common  { border-color: #666; }
+    .upgrade-card.rarity-common .card-rarity  { color: #aaa; }
+    .upgrade-card.rarity-uncommon { border-color: #4aad52; }
+    .upgrade-card.rarity-uncommon .card-rarity { color: #4aad52; }
+    .upgrade-card.rarity-rare    { border-color: #4a8fff; }
+    .upgrade-card.rarity-rare .card-rarity    { color: #4a8fff; }
+    .upgrade-card.rarity-epic    { border-color: #c060f0; box-shadow: 0 0 10px rgba(192,96,240,0.35); }
+    .upgrade-card.rarity-epic .card-rarity    { color: #c060f0; }
 
     /* Replay overlay */
     #replay-overlay {

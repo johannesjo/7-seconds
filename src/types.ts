@@ -168,11 +168,14 @@ export interface ReplayData {
   ctfMode?: boolean;
 }
 
+export type UpgradeRarity = 'common' | 'uncommon' | 'rare' | 'epic';
+
 export interface HordeUpgrade {
   id: string;
   label: string;
   description: string;
   category: 'stat' | 'recruit';
+  rarity: UpgradeRarity;
   once?: boolean;
   /** Earliest wave at which this upgrade appears in the pool. */
   minWave?: number;

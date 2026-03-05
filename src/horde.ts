@@ -1,4 +1,4 @@
-import { HordeWave, HordeUpgrade, Unit, UnitType, Obstacle } from './types';
+import { HordeWave, HordeUpgrade, UpgradeRarity, Unit, UnitType, Obstacle } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, UNIT_STATS } from './constants';
 import { createUnit, nudgeOutOfBlocks } from './units';
 
@@ -24,6 +24,7 @@ function makeStatUpgrade(
   id: string,
   label: string,
   description: string,
+  rarity: UpgradeRarity,
   modify: (u: Unit) => void,
 ): HordeUpgrade {
   return {
@@ -31,6 +32,7 @@ function makeStatUpgrade(
     label,
     description,
     category: 'stat',
+    rarity,
     apply(units: Unit[]): Unit[] {
       for (const u of units) {
         if (u.team === 'blue') modify(u);
@@ -45,6 +47,7 @@ function makeUnitUpgrade(
   label: string,
   description: string,
   forType: UnitType,
+  rarity: UpgradeRarity,
   modify: (u: Unit) => void,
   once = false,
 ): HordeUpgrade {
@@ -53,6 +56,7 @@ function makeUnitUpgrade(
     label,
     description,
     category: 'stat',
+    rarity,
     forType,
     once: once || undefined,
     apply(units: Unit[]): Unit[] {
@@ -65,46 +69,46 @@ function makeUnitUpgrade(
 }
 
 export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
-  makeStatUpgrade('hp_15', '+15 HP', 'All units gain +15 max HP', u => {
+  makeStatUpgrade('hp_15', '+15 HP', 'All units gain +15 max HP', 'common', u => {
     u.maxHp += 15;
     u.hp += 15;
   }),
-  makeStatUpgrade('dmg_10', '+10 Damage', 'All units deal +10 damage', u => {
+  makeStatUpgrade('dmg_10', '+10 Damage', 'All units deal +10 damage', 'common', u => {
     u.damage += 10;
   }),
-  makeStatUpgrade('range_20', '+20 Range', 'All units gain +20 range', u => {
+  makeStatUpgrade('range_20', '+20 Range', 'All units gain +20 range', 'common', u => {
     if (u.type !== 'blade') u.range += 20;
   }),
-  makeStatUpgrade('range_50', '+50 Range', 'All units gain +50 range', u => {
+  makeStatUpgrade('range_50', '+50 Range', 'All units gain +50 range', 'uncommon', u => {
     if (u.type !== 'blade') u.range += 50;
   }),
-  makeStatUpgrade('speed_15', '+15 Speed', 'All units gain +15 speed', u => {
+  makeStatUpgrade('speed_15', '+15 Speed', 'All units gain +15 speed', 'common', u => {
     u.speed += 15;
   }),
-  makeStatUpgrade('rapid_fire', 'Rapid Fire', 'All units fire 20% faster', u => {
+  makeStatUpgrade('rapid_fire', 'Rapid Fire', 'All units fire 20% faster', 'uncommon', u => {
     u.fireCooldown *= 0.8;
   }),
-  { ...makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', u => {
+  { ...makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', 'rare', u => {
     u.piercing = true;
   }), once: true },
-  { ...makeStatUpgrade('double_fire', 'Double Time', 'All units fire twice as fast', u => {
+  { ...makeStatUpgrade('double_fire', 'Double Time', 'All units fire twice as fast', 'epic', u => {
     u.fireCooldown *= 0.5;
   }), once: true, minWave: 8 },
-  makeStatUpgrade('quick_aim', 'Quick Aim', 'All units aim 50% faster', u => {
+  makeStatUpgrade('quick_aim', 'Quick Aim', 'All units aim 50% faster', 'uncommon', u => {
     u.turnSpeed *= 1.5;
   }),
 ];
 
 export const ALL_UNIT_UPGRADES: HordeUpgrade[] = [
   // Soldier
-  makeUnitUpgrade('soldier_hollow', 'Hollow Points', 'Soldiers deal +20 damage', 'soldier', u => { u.damage += 20; }),
-  makeUnitUpgrade('soldier_medic', 'Combat Medic', 'Soldiers gain +30 max HP', 'soldier', u => { u.maxHp += 30; u.hp += 30; }),
+  makeUnitUpgrade('soldier_hollow', 'Hollow Points', 'Soldiers deal +20 damage', 'soldier', 'uncommon', u => { u.damage += 20; }),
+  makeUnitUpgrade('soldier_medic', 'Combat Medic', 'Soldiers gain +30 max HP', 'soldier', 'common', u => { u.maxHp += 30; u.hp += 30; }),
   // Sniper
-  makeUnitUpgrade('sniper_barrel', 'Long Barrel', 'Snipers gain +100 range', 'sniper', u => { u.range += 100; }),
-  makeUnitUpgrade('sniper_rapid', 'Rapid Shot', 'Snipers reload 50% faster', 'sniper', u => { u.fireCooldown *= 0.5; }),
+  makeUnitUpgrade('sniper_barrel', 'Long Barrel', 'Snipers gain +100 range', 'sniper', 'uncommon', u => { u.range += 100; }),
+  makeUnitUpgrade('sniper_rapid', 'Rapid Shot', 'Snipers reload 50% faster', 'sniper', 'rare', u => { u.fireCooldown *= 0.5; }),
   // Shielder
-  makeUnitUpgrade('shielder_iron', 'Iron Wall', 'Shielders gain +40 max HP', 'shielder', u => { u.maxHp += 40; u.hp += 40; }),
-  makeUnitUpgrade('shielder_bulwark', 'Bulwark', 'Shielders take 20% less damage', 'shielder', u => {
+  makeUnitUpgrade('shielder_iron', 'Iron Wall', 'Shielders gain +40 max HP', 'shielder', 'common', u => { u.maxHp += 40; u.hp += 40; }),
+  makeUnitUpgrade('shielder_bulwark', 'Bulwark', 'Shielders take 20% less damage', 'shielder', 'rare', u => {
     u.damageReduction = (u.damageReduction ?? 0) + 0.2;
   }),
 ];
@@ -116,6 +120,7 @@ function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
     label: `Recruit ${label}`,
     description: `Add a ${label} to your squad`,
     category: 'recruit',
+    rarity: 'common',
     apply(units: Unit[], blocks?: Obstacle[]): Unit[] {
       const tag = Date.now() % 100000;
       let pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.92 };
@@ -132,6 +137,22 @@ export const ALL_RECRUIT_UPGRADES: HordeUpgrade[] = [
   makeRecruitUpgrade('shielder'),
 ];
 
+/** Rarity weights: higher = more likely to appear in the pool. */
+const RARITY_WEIGHT: Record<UpgradeRarity, number> = {
+  common: 4,
+  uncommon: 3,
+  rare: 2,
+  epic: 1,
+};
+
+/**
+ * Expand an upgrade into the pool multiple times according to its rarity weight.
+ * This makes common upgrades appear more often and epic upgrades appear rarely.
+ */
+function weightedEntries(upgrade: HordeUpgrade): HordeUpgrade[] {
+  return Array(RARITY_WEIGHT[upgrade.rarity]).fill(upgrade);
+}
+
 /** Pick 3 random upgrades with constraints. */
 export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<string> = new Set()): HordeUpgrade[] {
   const picks: HordeUpgrade[] = [];
@@ -146,7 +167,7 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
   // Determine owned unit types for weighting recruits
   const ownedTypes = new Set(blueUnits.filter(u => u.team === 'blue').map(u => u.type));
 
-  // Build weighted recruit pool: owned types appear twice
+  // Build weighted recruit pool: owned types appear twice (on top of rarity weight)
   const recruitPool: HordeUpgrade[] = [];
   for (const r of ALL_RECRUIT_UPGRADES) {
     const type = r.id.replace('recruit_', '') as UnitType;
@@ -178,9 +199,12 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
   );
 
   // Fill remaining slots from mixed pool (excluding already-applied one-time upgrades and wave-gated ones)
+  // Each upgrade is expanded by its rarity weight so rarer upgrades appear less often
   const allPool: HordeUpgrade[] = [
-    ...ALL_STAT_UPGRADES.filter(u => !excludedIds.has(u.id) && (!u.minWave || wave >= u.minWave)),
-    ...unitUpgradePool,
+    ...ALL_STAT_UPGRADES
+      .filter(u => !excludedIds.has(u.id) && (!u.minWave || wave >= u.minWave))
+      .flatMap(weightedEntries),
+    ...unitUpgradePool.flatMap(weightedEntries),
     ...recruitPool,
   ];
 

@@ -372,11 +372,15 @@ function showUpgradeSelection(): void {
 
   for (const upgrade of upgrades) {
     const card = document.createElement('div');
-    card.className = 'upgrade-card';
+    card.className = `upgrade-card rarity-${upgrade.rarity}`;
+    const unitTag = upgrade.forType
+      ? `<div class="card-unit-type">${upgrade.forType}</div>`
+      : (upgrade.category === 'stat' ? '<div class="card-unit-type">all units</div>' : '');
     card.innerHTML = `
+      <div class="card-rarity">${upgrade.rarity}</div>
       <div class="card-label">${upgrade.label}</div>
       <div class="card-desc">${upgrade.description}</div>
-      <div class="card-category">${upgrade.category}</div>
+      ${unitTag}
     `;
     card.addEventListener('click', () => {
       const allBlocks = hordeMap!.obstacles;
