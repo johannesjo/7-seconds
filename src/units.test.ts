@@ -293,6 +293,113 @@ describe('bladeAoeAttack', () => {
   });
 });
 
+describe('blade momentum', () => {
+  it('builds smoothSpeed when moving straight', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 400 });
+    blade.moveTarget = { x: 900, y: 400 }; // straight right
+    blade.vel = { x: 120, y: 0 };
+
+    for (let i = 0; i < 30; i++) {
+      moveUnit(blade, 0.05, [], []);
+    }
+
+    // smoothSpeed (stored in momentum) should be well above 0 after sustained movement
+    expect(blade.momentum).toBeGreaterThan(50);
+  });
+
+  it('smoothSpeed drops when turning sharply', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 400, y: 400 });
+    blade.momentum = 120; // start at full smoothSpeed (px/s)
+    // Force forwardDot near 0: vel going right, target straight up
+    for (let i = 0; i < 10; i++) {
+      blade.vel = { x: 120, y: 0 };           // was moving right
+      blade.moveTarget = { x: 400, y: 100 };  // target is straight up — 90° turn
+      moveUnit(blade, 0.016, [], []);
+    }
+    expect(blade.momentum).toBeLessThan(60); // smoothSpeed below half base speed
+  });
+
+  it('moves faster when smoothSpeed is high than when zero', () => {
+    // dt=0.016 keeps rate*dt = 10*0.016 = 0.16 so smoothing doesn't snap in one frame
+    const bladeSlow = createUnit('b_slow', 'blade', 'blue', { x: 100, y: 400 });
+    bladeSlow.momentum = 0; // smoothSpeed = 0
+    bladeSlow.vel = { x: 120, y: 0 };
+    bladeSlow.moveTarget = { x: 900, y: 400 };
+    const startX1 = bladeSlow.pos.x;
+    moveUnit(bladeSlow, 0.016, [], []);
+    const dist1 = bladeSlow.pos.x - startX1;
+
+    const bladeFast = createUnit('b_fast', 'blade', 'blue', { x: 100, y: 400 });
+    bladeFast.momentum = 120; // smoothSpeed already at base speed
+    bladeFast.vel = { x: 120, y: 0 };
+    bladeFast.moveTarget = { x: 900, y: 400 };
+    const startX2 = bladeFast.pos.x;
+    moveUnit(bladeFast, 0.016, [], []);
+    const dist2 = bladeFast.pos.x - startX2;
+
+    expect(dist2).toBeGreaterThan(dist1);
+  });
+});
+
+describe('blade speed-scaled damage', () => {
+  it('deals reduced damage when stationary (smoothSpeed = 0)', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    blade.momentum = 0; // smoothSpeed = 0
+    blade.fireTimer = 0;
+    const enemy = createUnit('e1', 'soldier', 'red', { x: 120, y: 100 });
+    const originalHp = enemy.hp;
+
+    bladeAoeAttack(blade, [blade, enemy], 0.016);
+
+    // speedRatio=0, damageFactor=0.3 → round(12*0.3)=4
+    expect(originalHp - enemy.hp).toBe(4);
+  });
+
+  it('deals full damage at base speed (smoothSpeed = 120)', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    blade.momentum = 120; // smoothSpeed = base speed
+    blade.fireTimer = 0;
+    const enemy = createUnit('e1', 'soldier', 'red', { x: 120, y: 100 });
+    const originalHp = enemy.hp;
+
+    bladeAoeAttack(blade, [blade, enemy], 0.016);
+
+    // speedRatio=1, damageFactor=0.3+2.2=2.5 → round(12*2.5)=30
+    expect(originalHp - enemy.hp).toBe(30);
+  });
+
+  it('deals proportional damage at half speed (smoothSpeed = 60)', () => {
+    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 100 });
+    blade.momentum = 60; // smoothSpeed = half base speed
+    blade.fireTimer = 0;
+    const enemy = createUnit('e1', 'soldier', 'red', { x: 120, y: 100 });
+    const originalHp = enemy.hp;
+
+    bladeAoeAttack(blade, [blade, enemy], 0.016);
+
+    // speedRatio=0.5, damageFactor=0.3+1.1=1.4 → round(12*1.4)=17
+    expect(originalHp - enemy.hp).toBe(17);
+  });
+
+  it('scales knockback with speed', () => {
+    const bladeSlow = createUnit('b_slow', 'blade', 'blue', { x: 100, y: 100 });
+    bladeSlow.momentum = 0;
+    bladeSlow.fireTimer = 0;
+    const enemySlow = createUnit('e1', 'soldier', 'red', { x: 120, y: 100 });
+    bladeAoeAttack(bladeSlow, [bladeSlow, enemySlow], 0.016);
+    const kbSlow = Math.sqrt((enemySlow.knockbackVel!.x) ** 2 + (enemySlow.knockbackVel!.y) ** 2);
+
+    const bladeFast = createUnit('b_fast', 'blade', 'blue', { x: 100, y: 100 });
+    bladeFast.momentum = 120;
+    bladeFast.fireTimer = 0;
+    const enemyFast = createUnit('e2', 'soldier', 'red', { x: 120, y: 100 });
+    bladeAoeAttack(bladeFast, [bladeFast, enemyFast], 0.016);
+    const kbFast = Math.sqrt((enemyFast.knockbackVel!.x) ** 2 + (enemyFast.knockbackVel!.y) ** 2);
+
+    expect(kbFast).toBeGreaterThan(kbSlow);
+  });
+});
+
 describe('isFlanked', () => {
   it('returns true when projectile hits from behind', () => {
     // Target faces right (0), projectile travels right (0) = hitting from behind

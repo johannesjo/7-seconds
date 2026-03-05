@@ -9,6 +9,7 @@ export class Renderer {
   private app: Application;
   private unitGraphics: Map<string, Container> = new Map();
   private dyingUnits: Map<string, { container: Container; age: number }> = new Map();
+  private bladeSpinAngles: Map<string, number> = new Map();
   private elevationGraphics: Container | null = null;
   private obstacleGraphics: Container | null = null;
   private bgGraphics: Graphics | null = null;
@@ -336,7 +337,7 @@ export class Renderer {
     this.app.stage.addChild(this.flagGraphics);
   }
 
-  renderUnits(units: Unit[], dt = 0, ctfState?: CtfState): void {
+  renderUnits(units: Unit[], dt = 0, ctfState?: CtfState, playing = true): void {
     const activeIds = new Set<string>();
 
     for (const unit of units) {
@@ -352,6 +353,7 @@ export class Renderer {
           }
           // Move to dying pool instead of removing immediately
           this.unitGraphics.delete(unit.id);
+          this.bladeSpinAngles.delete(unit.id);
           this.dyingUnits.set(unit.id, { container: existing, age: 0 });
         }
         continue;
@@ -382,7 +384,21 @@ export class Renderer {
         (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
       }
       if (unit.type === 'blade') {
-        (container.getChildAt(0) as Graphics).rotation = Date.now() / 150;
+        // During play: spin rate driven by smoothed speed (0.3..5 rot/s).
+        // When paused/planning: always use slow idle spin regardless of stored momentum.
+        const BLADE_BASE_SPEED = 120;
+        const IDLE_SPIN_RATE = Math.PI * 2 * 0.3; // ~0.3 rot/s — slow crawl
+        let spinRate: number;
+        if (playing) {
+          const speedRatio = Math.min(1, (unit.momentum ?? 0) / BLADE_BASE_SPEED);
+          spinRate = Math.PI * 2 * (0.3 + speedRatio * 4.7);
+        } else {
+          spinRate = IDLE_SPIN_RATE;
+        }
+        const prev = this.bladeSpinAngles.get(unit.id) ?? 0;
+        const next = prev + spinRate * dt;
+        this.bladeSpinAngles.set(unit.id, next);
+        (container.getChildAt(0) as Graphics).rotation = next;
       }
 
       // Idle breathing pulse when stationary
@@ -565,6 +581,7 @@ export class Renderer {
       this.app.stage.removeChild(container);
     }
     this.unitGraphics.clear();
+    this.bladeSpinAngles.clear();
     // Update effects theme
     this._effects?.setTheme(theme);
   }
@@ -587,6 +604,7 @@ export class Renderer {
 
   destroy(): void {
     this.unitGraphics.clear();
+    this.bladeSpinAngles.clear();
     this.app.destroy(true);
   }
 }

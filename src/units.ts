@@ -444,6 +444,7 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
 
   if (!unit.moveTarget || !unit.alive) {
     unit.vel = { x: 0, y: 0 };
+    if (unit.type === 'blade') unit.momentum = 0;
     return;
   }
 
@@ -455,12 +456,33 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     unit.pos.x = unit.moveTarget.x;
     unit.pos.y = unit.moveTarget.y;
     unit.vel = { x: 0, y: 0 };
+    if (unit.type === 'blade') unit.momentum = 0;
     return;
   }
 
-  const step = unit.speed * dt;
   let dirX = dx / dist;
   let dirY = dy / dist;
+
+  // Blade: smoothed speed tracks actual velocity magnitude.
+  // Rises quickly when moving, drops when turning sharply or stalled.
+  // This single value drives movement speed boost, spin rate, damage and knockback.
+  if (unit.type === 'blade') {
+    const actualSpeed = Math.sqrt(unit.vel.x ** 2 + unit.vel.y ** 2);
+    const forwardDot = actualSpeed > 1
+      ? (unit.vel.x / actualSpeed) * dirX + (unit.vel.y / actualSpeed) * dirY
+      : 0;
+    const effectiveSpeed = actualSpeed * Math.max(0, forwardDot);
+    const prev = unit.momentum ?? 0;
+    const rate = effectiveSpeed > prev ? 10 : 8;
+    unit.momentum = prev + (effectiveSpeed - prev) * Math.min(1, rate * dt);
+  }
+
+  // Blade speed scales 1×–2× based on smoothed speed vs base speed
+  const BLADE_BASE_SPEED = 120;
+  const speedMultiplier = unit.type === 'blade'
+    ? 1 + Math.min(1, (unit.momentum ?? 0) / BLADE_BASE_SPEED)
+    : 1;
+  const step = unit.speed * speedMultiplier * dt;
 
   // Steer around nearby units
   const lookAhead = unit.radius * 5;
@@ -776,7 +798,15 @@ export function bladeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
   unit.fireTimer = unit.fireCooldown;
 
   const hits: AoeHit[] = [];
-  const knockback = 65;
+
+  // Damage and knockback scale with smoothed speed (unit.momentum stores this value).
+  // 0 speed = 0.3x damage, full speed (120+) = 2.5x damage — clear reward for charging.
+  const BLADE_BASE_SPEED = 120;
+  const speedRatio = Math.min(1, (unit.momentum ?? 0) / BLADE_BASE_SPEED); // 0..1
+  const damageFactor = 0.3 + speedRatio * 2.2;
+  const scaledDamage = Math.round(unit.damage * damageFactor);
+  // Knockback also scales with speed: minimal when slow, punishing when charging
+  const knockback = 20 + speedRatio * 80;
 
   for (const enemy of units) {
     if (!enemy.alive || enemy.team === unit.team) continue;
@@ -787,13 +817,13 @@ export function bladeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
 
     if (dist <= hitRange) {
       const wasBefore = enemy.hp;
-      applyDamage(enemy, unit.damage);
+      applyDamage(enemy, scaledDamage);
       hits.push({
         pos: { x: enemy.pos.x, y: enemy.pos.y },
         targetId: enemy.id,
         killed: wasBefore > 0 && !enemy.alive,
         team: unit.team,
-        damage: unit.damage,
+        damage: scaledDamage,
       });
 
       // Knockback — apply velocity impulse away from blade
@@ -803,6 +833,19 @@ export function bladeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
           x: (dx / dist) * kbSpeed,
           y: (dy / dist) * kbSpeed,
         };
+
+        // Self-recoil — blade bounces back from the impact, opposite to its movement dir
+        // Scales with the same speedRatio so a fast blade kicks back harder
+        const selfKbSpeed = (20 + speedRatio * 60) / 0.15;
+        const velSpeed = Math.sqrt(unit.vel.x ** 2 + unit.vel.y ** 2);
+        if (velSpeed > 1) {
+          const recoilX = -(unit.vel.x / velSpeed) * selfKbSpeed;
+          const recoilY = -(unit.vel.y / velSpeed) * selfKbSpeed;
+          unit.knockbackVel = {
+            x: (unit.knockbackVel?.x ?? 0) + recoilX,
+            y: (unit.knockbackVel?.y ?? 0) + recoilY,
+          };
+        }
       }
     }
   }

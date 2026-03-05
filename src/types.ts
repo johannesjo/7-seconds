@@ -46,6 +46,8 @@ export interface Unit {
   piercing?: boolean;
   damageReduction?: number;
   knockbackVel?: Vec2;
+  /** Blade only: 0–1 directional momentum; builds when moving in a consistent direction. */
+  momentum?: number;
 }
 
 export interface Projectile {

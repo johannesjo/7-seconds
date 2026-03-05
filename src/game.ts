@@ -262,7 +262,7 @@ export class GameEngine {
     const dt = this._phase === 'playing' ? rawDt * this.speedMultiplier : rawDt;
 
     // Always render units (even during planning, need dt for death fade)
-    this.renderer.renderUnits(this.units, dt, this.ctfState ?? undefined);
+    this.renderer.renderUnits(this.units, dt, this.ctfState ?? undefined, this._phase === 'playing');
 
     if (this.ctfState) {
       this.renderer.renderFlags(this.ctfState);
