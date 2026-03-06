@@ -181,9 +181,11 @@ export class PathDrawer {
 
     for (const unit of this.units) {
       if (!unit.alive || unit.waypoints.length === 0) continue;
+      // Only show the active team's movement lines during planning
+      if (unit.team !== this.team) continue;
 
       const color = unit.team === 'blue' ? this.theme.bluePath : this.theme.redPath;
-      const alpha = unit.team === this.team ? 0.8 : 0.3;
+      const alpha = 0.8;
 
       this.gfx.setStrokeStyle({ width: 2, color, alpha });
       this.gfx.moveTo(unit.pos.x, unit.pos.y);
