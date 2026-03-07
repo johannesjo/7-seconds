@@ -9,7 +9,7 @@ import type {
   OnlineConnectionState,
   OnlineSignal,
 } from './online-types';
-import type { Unit, Vec2 } from './types';
+import { isValidPlayerId } from './online-score';
 
 export interface OnlineHostCallbacks {
   onConnectionStateChange: (state: OnlineConnectionState) => void;
@@ -26,6 +26,7 @@ export class OnlineHost {
   private connectionState: OnlineConnectionState = 'idle';
   private guestPeerId: string | null = null;
   private _guestWantsRematch = false;
+  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(callbacks: OnlineHostCallbacks) {
     this.callbacks = callbacks;
@@ -50,19 +51,28 @@ export class OnlineHost {
       (peerId) => this.handlePeerLeave(peerId),
     );
 
-    this.connection.paths[1]((data: OnlinePathData) => {
+    this.connection.paths[1]((data: OnlinePathData, peerId: string) => {
+      if (peerId !== this.guestPeerId) return;
       this.pendingPaths = data;
       this.callbacks.onGuestPathsReceived();
     });
 
-    this.connection.signal[1]((data: OnlineSignal) => {
+    this.connection.signal[1]((data: OnlineSignal, peerId: string) => {
+      if (peerId !== this.guestPeerId) return;
       if (data.type === 'rematch') {
         this._guestWantsRematch = true;
         this.callbacks.onGuestRematchRequested();
-      } else if (data.type === 'identity' && data.playerId) {
+      } else if (data.type === 'identity' && data.playerId && isValidPlayerId(data.playerId)) {
         this.callbacks.onGuestIdentity(data.playerId);
       }
     });
+
+    // Timeout if no guest joins within 2 minutes
+    this.timeoutTimer = setTimeout(() => {
+      if (this.connectionState === 'waiting') {
+        this.setConnectionState('error');
+      }
+    }, 120_000);
 
     this.callbacks.onShareUrl(getShareUrl(roomId));
     return roomId;
@@ -105,22 +115,8 @@ export class OnlineHost {
     this.connection?.result[0](result);
   }
 
-  applyGuestPaths(units: Unit[], pathData: OnlinePathData): void {
-    const pathsByUnitId = new Map<string, Vec2[]>();
-    for (const entry of pathData.paths) {
-      pathsByUnitId.set(entry.unitId, entry.waypoints);
-    }
-    for (const unit of units) {
-      if (unit.team !== 'red') continue;
-      const waypoints = pathsByUnitId.get(unit.id);
-      if (waypoints) {
-        unit.waypoints = waypoints;
-        unit.moveTarget = waypoints.length > 0 ? waypoints[0] : null;
-      }
-    }
-  }
-
   destroy(): void {
+    this.clearTimeout();
     this.connection?.leave();
     this.connection = null;
     this.pendingPaths = null;
@@ -130,9 +126,11 @@ export class OnlineHost {
   }
 
   private handlePeerJoin(peerId: string): void {
+    // Reject additional peers if a guest is already connected
+    if (this.guestPeerId) return;
     this.guestPeerId = peerId;
+    this.clearTimeout();
     this.setConnectionState('connected');
-    // Send identity on connect
     this.sendIdentity();
   }
 
@@ -140,6 +138,13 @@ export class OnlineHost {
     if (peerId === this.guestPeerId) {
       this.guestPeerId = null;
       this.setConnectionState('disconnected');
+    }
+  }
+
+  private clearTimeout(): void {
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
     }
   }
 

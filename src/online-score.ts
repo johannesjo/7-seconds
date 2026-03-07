@@ -1,4 +1,10 @@
 const SCORE_KEY = '7s-online-scores';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Returns true if the given string is a valid UUID v4 format. */
+export function isValidPlayerId(id: string): boolean {
+  return UUID_RE.test(id);
+}
 
 export interface PlayerScore {
   wins: number;

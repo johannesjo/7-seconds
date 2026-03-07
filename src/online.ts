@@ -32,9 +32,10 @@ const ROOM_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';
 
 /** Generate a 6-character alphanumeric room ID without ambiguous characters. */
 export function generateRoomId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
   let id = '';
   for (let i = 0; i < 6; i++) {
-    id += ROOM_CHARS[Math.floor(Math.random() * ROOM_CHARS.length)];
+    id += ROOM_CHARS[bytes[i] % ROOM_CHARS.length];
   }
   return id;
 }
@@ -52,7 +53,7 @@ export function getJoinRoomId(): string | null {
   return params.get('join');
 }
 
-type ActionPair<T> = [send: (data: T) => void, receive: (cb: (data: T) => void) => void];
+type ActionPair<T> = [send: (data: T) => void, receive: (cb: (data: T, peerId: string) => void) => void];
 
 export interface OnlineConnection {
   state: ActionPair<OnlineGameState>;

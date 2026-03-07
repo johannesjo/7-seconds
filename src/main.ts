@@ -96,7 +96,6 @@ let guestObstacles: Obstacle[] = [];
 let guestReplayFrames: ReplayFrame[] = [];
 let guestReplayEvents: ReplayEvent[] = [];
 let guestReplayFrameIndex = 0;
-let hostPlanConfirmed = false;
 let opponentPlayerId: string | null = null;
 let localRematchRequested = false;
 
@@ -237,10 +236,10 @@ function onGameEvent(
         duration: result.duration,
         gameOver: true,
       });
-      // Record score — host is blue
+      // Record score — host is blue (skip draws)
       if (opponentPlayerId) {
         if (result.winner === 'blue') recordWin(opponentPlayerId);
-        else recordLoss(opponentPlayerId);
+        else if (result.winner === 'red') recordLoss(opponentPlayerId);
       }
     }
 
@@ -538,8 +537,7 @@ confirmBtn.addEventListener('click', () => {
       paths: redUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] })),
     };
     onlineGuest?.sendPaths(paths);
-    guestPathDrawer.disable();
-    guestPathDrawer.clearGraphics();
+    guestPathDrawer.destroy();
     guestPathDrawer = null;
     confirmBtn.classList.remove('active');
     planningLabel.textContent = 'Waiting for opponent...';
@@ -827,8 +825,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       } else if (phase === 'playing') {
         // Clean up any remaining path drawer if guest was slow
         if (guestPathDrawer) {
-          guestPathDrawer.disable();
-          guestPathDrawer.clearGraphics();
+          guestPathDrawer.destroy();
           guestPathDrawer = null;
         }
         planningOverlay.classList.remove('active');
@@ -928,10 +925,10 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
     },
 
     onResult(result: OnlineRoundResult) {
-      // Record score — guest is red
+      // Record score — guest is red (skip draws)
       if (opponentPlayerId) {
         if (result.winner === 'red') recordWin(opponentPlayerId);
-        else recordLoss(opponentPlayerId);
+        else if (result.winner === 'blue') recordLoss(opponentPlayerId);
       }
 
       const color = result.winner === 'blue' ? '#4a9eff' : result.winner === 'red' ? '#ff4a4a' : '#888';
@@ -1012,6 +1009,8 @@ onlineBtn.addEventListener('click', async () => {
         showScreen('result');
       } else if (state === 'waiting') {
         onlineStatus.textContent = 'Waiting for opponent...';
+      } else if (state === 'error') {
+        onlineStatus.textContent = 'Timed out. No opponent joined. Try creating a new room.';
       }
     },
     onShareUrl(url: string) {
@@ -1076,6 +1075,11 @@ onlineCancelBtn.addEventListener('click', () => {
   showScreen('prompt');
 });
 
+// Handle deferred join after age gate verification
+window.addEventListener('age-verified-join', ((e: CustomEvent<string>) => {
+  startOnlineGuestMode(e.detail);
+}) as EventListener);
+
 // Clean up online connections on tab close to avoid zombie Supabase channels
 window.addEventListener('beforeunload', () => {
   onlineHost?.destroy();
@@ -1096,6 +1100,12 @@ window.addEventListener('beforeunload', () => {
     const cleanUrl = new URL(window.location.href);
     cleanUrl.searchParams.delete('join');
     window.history.replaceState({}, '', cleanUrl.toString());
-    startOnlineGuestMode(joinRoomId);
+    // Wait for age gate before starting guest flow
+    if (localStorage.getItem('7s-age-verified')) {
+      startOnlineGuestMode(joinRoomId);
+    } else {
+      // Store join room ID so the age gate can trigger it after verification
+      sessionStorage.setItem('7s-pending-join', joinRoomId);
+    }
   }
 })();

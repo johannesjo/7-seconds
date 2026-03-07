@@ -8,6 +8,7 @@ import type {
   OnlineRoundResult,
   OnlineSignal,
 } from './online-types';
+import { isValidPlayerId } from './online-score';
 
 export interface OnlineGuestCallbacks {
   onConnectionStateChange: (state: OnlineConnectionState) => void;
@@ -25,6 +26,7 @@ export class OnlineGuest {
   private readonly callbacks: OnlineGuestCallbacks;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private _hostWantsRematch = false;
+  private hostPeerId: string | null = null;
 
   constructor(callbacks: OnlineGuestCallbacks) {
     this.callbacks = callbacks;
@@ -44,13 +46,15 @@ export class OnlineGuest {
     this.connection = createOnlineRoom(
       roomId,
       'guest',
-      () => {
+      (peerId) => {
+        this.hostPeerId = peerId;
         this.clearTimeout();
         this.setConnectionState('connected');
-        // Send identity on connect
         this.sendIdentity();
       },
-      () => this.setConnectionState('disconnected'),
+      (peerId) => {
+        if (peerId === this.hostPeerId) this.setConnectionState('disconnected');
+      },
     );
 
     const [, receiveState] = this.connection.state;
@@ -63,11 +67,12 @@ export class OnlineGuest {
     receiveFrame((frame) => this.callbacks.onFrame(frame));
     receiveResult((result) => this.callbacks.onResult(result));
 
-    this.connection.signal[1]((data: OnlineSignal) => {
+    this.connection.signal[1]((data: OnlineSignal, peerId: string) => {
+      if (peerId !== this.hostPeerId) return;
       if (data.type === 'rematch') {
         this._hostWantsRematch = true;
         this.callbacks.onHostRematchRequested();
-      } else if (data.type === 'identity' && data.playerId) {
+      } else if (data.type === 'identity' && data.playerId && isValidPlayerId(data.playerId)) {
         this.callbacks.onHostIdentity(data.playerId);
       }
     });
@@ -108,6 +113,7 @@ export class OnlineGuest {
       this.connection = null;
     }
     this._hostWantsRematch = false;
+    this.hostPeerId = null;
     this.setConnectionState('idle');
   }
 

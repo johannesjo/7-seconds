@@ -371,6 +371,12 @@
         document.getElementById('age-gate-yes').onclick = function() {
           localStorage.setItem('7s-age-verified', '1');
           gate.style.display = 'none';
+          // If a join link was deferred, trigger guest mode now
+          var pendingJoin = sessionStorage.getItem('7s-pending-join');
+          if (pendingJoin) {
+            sessionStorage.removeItem('7s-pending-join');
+            window.dispatchEvent(new CustomEvent('age-verified-join', { detail: pendingJoin }));
+          }
         };
         document.getElementById('age-gate-no').onclick = function() {
           document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;text-align:center;padding:32px;color:#eee;font-family:system-ui"><p style="font-size:16px;opacity:0.8">Sorry, you must be at least 13 years old to play this game.</p></div>';
