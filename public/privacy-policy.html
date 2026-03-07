@@ -39,12 +39,12 @@
     <tr>
       <td>IP address</td>
       <td>Required by WebRTC to establish a direct connection between players</td>
-      <td>Not stored. Ephemeral, used only during the connection. However, your IP address is visible to the other player as an inherent part of P2P networking.</td>
+      <td>Not stored by us. However, your IP address is visible to the other player as an inherent part of P2P networking. Supabase and Cloudflare may log your IP address as part of standard infrastructure operations (see Third-Party Services below).</td>
     </tr>
     <tr>
       <td>Signaling messages (SDP offers, ICE candidates)</td>
       <td>Connection setup — exchanged via Supabase Realtime to establish the P2P link</td>
-      <td>Ephemeral. Not persisted by Supabase.</td>
+      <td>Message content is ephemeral and not persisted. Connection metadata (including IP address) may be retained in Supabase infrastructure logs for up to 7 days depending on plan tier.</td>
     </tr>
     <tr>
       <td>Game state (unit positions, events, results)</td>
@@ -69,7 +69,7 @@
   <h2>Third-Party Services</h2>
   <p>The following third-party services are used <strong>only during online play</strong>:</p>
   <ul>
-    <li><strong>Supabase</strong> — Provides the signaling relay for WebRTC connection setup. Processes ephemeral signaling messages only. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase Privacy Policy</a>.</li>
+    <li><strong>Supabase</strong> — Provides the signaling relay for WebRTC connection setup. Signaling messages are ephemeral, but Supabase's infrastructure (including Cloudflare edge servers) logs connection metadata such as IP addresses and approximate geolocation. These logs are retained for 1-7 days depending on plan tier. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase Privacy Policy</a>.</li>
     <li><strong>Google and Cloudflare STUN servers</strong> — Used to determine your public IP address for NAT traversal during connection setup. These servers see your IP address but no game data.</li>
   </ul>
   <p>No analytics, advertising, tracking, or telemetry services are used.</p>
