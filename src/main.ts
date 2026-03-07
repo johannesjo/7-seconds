@@ -682,8 +682,6 @@ function startOnlineHostGame(): void {
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: false,
     onlineHost: true,
-    oneShot: false,
-    blood: true,
     onFrame(frame: OnlineFrameData) {
       onlineHost?.sendFrame(frame);
     },
