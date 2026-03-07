@@ -695,9 +695,12 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       // Update units in-place to preserve PathDrawer references.
       // If PathDrawer holds refs to guestUnits objects and we replace the
       // array, drawn waypoints go to stale objects and get lost.
+      // On rematch/new game, unit IDs change — detect and recreate.
       guestElevationZones = state.elevationZones;
-      if (guestUnits.length === 0) {
-        // First state — create unit objects
+      const idsMatch = guestUnits.length === state.units.length
+        && state.units.every(su => guestUnits.some(gu => gu.id === su.id));
+      if (guestUnits.length === 0 || !idsMatch) {
+        // First state or new game — create unit objects
         guestUnits = state.units.map(u => ({
           id: u.id,
           type: u.type,
@@ -813,6 +816,9 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 
       renderer!.renderUnits(units, 1 / 60);
       renderer!.renderProjectiles(projectiles);
+
+      // Tick effects so particles animate (blood, muzzle flash, kill text)
+      renderer!.effects?.update(1 / 60);
 
       // Trigger effects for events (match host logic for blood/impact)
       const fx = renderer!.effects;
