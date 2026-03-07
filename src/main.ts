@@ -631,6 +631,8 @@ function startOnlineHostGame(): void {
         onlinePhase = 'red-planning';
       } else if (phase === 'blue-planning') {
         onlinePhase = 'blue-planning';
+        // Re-send game state so guest has updated unit positions for next round
+        if (engine) onlineHost?.sendGameState(engine.getOnlineGameState());
       } else if (phase === 'playing') {
         onlinePhase = 'playing';
       } else {
@@ -687,9 +689,9 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         maxHp: u.maxHp,
         alive: true,
         radius: u.radius,
-        speed: 0,
+        speed: u.speed,
         damage: 0,
-        range: 0,
+        range: u.range,
         moveTarget: null,
         waypoints: [],
         attackTargetId: null,

@@ -1,15 +1,17 @@
-import { Obstacle, ElevationZone, Vec2, ReplayUnitSnapshot, ReplayProjectileSnapshot, ReplayEvent, Team } from './types';
+import { Obstacle, ElevationZone, Vec2, ReplayUnitSnapshot, ReplayProjectileSnapshot, ReplayEvent, Team, UnitType } from './types';
 
 export interface OnlineGameState {
   units: {
     id: string;
-    type: string;
+    type: UnitType;
     team: Team;
     x: number;
     y: number;
     hp: number;
     maxHp: number;
     radius: number;
+    speed: number;
+    range: number;
   }[];
   obstacles: Obstacle[];
   elevationZones: ElevationZone[];

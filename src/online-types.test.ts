@@ -5,7 +5,7 @@ describe('OnlineGameState', () => {
   it('has all required fields and serializes to JSON', () => {
     const state: OnlineGameState = {
       units: [
-        { id: 'u1', type: 'soldier', team: 'blue', x: 10, y: 20, hp: 100, maxHp: 100, radius: 6 },
+        { id: 'u1', type: 'soldier', team: 'blue', x: 10, y: 20, hp: 100, maxHp: 100, radius: 6, speed: 100, range: 120 },
       ],
       obstacles: [{ x: 50, y: 50, w: 30, h: 30 }],
       elevationZones: [{ x: 100, y: 100, w: 40, h: 40 }],
