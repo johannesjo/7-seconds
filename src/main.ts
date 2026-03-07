@@ -2,11 +2,16 @@ import { Renderer } from './renderer';
 import { GameEngine } from './game';
 import { createArmy, createMissionArmy } from './units';
 import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
-import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData } from './types';
-import { ARMY_COMPOSITION, HORDE_MAX_WAVES } from './constants';
+import { BattleResult, TurnPhase, Unit, Projectile, Obstacle, ElevationZone, ReplayData, Team } from './types';
+import { ARMY_COMPOSITION, HORDE_MAX_WAVES, FLANK_DAMAGE_MULTIPLIER } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
+import { OnlineHost } from './online-host';
+import { OnlineGuest } from './online-guest';
+import { getJoinRoomId } from './online';
+import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
+import { PathDrawer } from './path-drawer';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -55,6 +60,15 @@ const replayExitBtn = document.getElementById('replay-exit-btn')!;
 const replayProgress = document.getElementById('replay-progress')!;
 const replaySpeedToggle = document.getElementById('replay-speed-toggle') as HTMLButtonElement;
 
+// Online lobby elements
+const onlineBtn = document.getElementById('online-btn')!;
+const onlineLobby = document.getElementById('online-lobby')!;
+const onlineStatus = document.getElementById('online-status')!;
+const onlineShareContainer = document.getElementById('online-share-container')!;
+const onlineShareUrl = document.getElementById('online-share-url') as HTMLInputElement;
+const onlineCopyBtn = document.getElementById('online-copy-btn')!;
+const onlineCancelBtn = document.getElementById('online-cancel-btn')!;
+
 // State
 let renderer: Renderer | null = null;
 let engine: GameEngine | null = null;
@@ -69,6 +83,15 @@ let hordeUnits: Unit[] = [];
 let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
 let hordeAppliedUpgrades = new Set<string>();
 
+// Online state
+let onlineHost: OnlineHost | null = null;
+let onlineGuest: OnlineGuest | null = null;
+let onlineActive = false;
+let onlineRole: 'host' | 'guest' | null = null;
+let guestPathDrawer: PathDrawer | null = null;
+let guestUnits: Unit[] = [];
+let guestElevationZones: ElevationZone[] = [];
+
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
 let lastReplayData: ReplayData | null = null;
@@ -82,6 +105,16 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
 }
 
 function onPhaseChange(phase: TurnPhase): void {
+  if (onlineActive && onlineRole === 'host') {
+    if (phase === 'cover' || phase === 'red-planning') {
+      planningLabel.textContent = 'Opponent Planning';
+      planningOverlay.classList.add('active');
+      confirmBtn.classList.remove('active');
+      battleHud.style.display = 'none';
+      return;
+    }
+  }
+
   const planning = phase === 'blue-planning' || phase === 'red-planning';
 
   // Hide HUD during planning so the Done button doesn't overlap
@@ -175,6 +208,16 @@ function onGameEvent(
   if (event === 'end' && data && 'winner' in data) {
     captureReplayData();
     const result = data as BattleResult;
+
+    if (onlineActive && onlineRole === 'host' && onlineHost) {
+      onlineHost.sendResult({
+        winner: result.winner,
+        blueAlive: result.blueAlive,
+        redAlive: result.redAlive,
+        duration: result.duration,
+        gameOver: true,
+      });
+    }
 
     // Horde defeat
     if (hordeActive) {
@@ -455,6 +498,19 @@ ctfPvpBtn.addEventListener('click', async () => {
 });
 
 confirmBtn.addEventListener('click', () => {
+  if (onlineActive && onlineRole === 'guest' && guestPathDrawer) {
+    const redUnits = guestUnits.filter(u => u.team === 'red');
+    const paths: OnlinePathData = {
+      paths: redUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] })),
+    };
+    onlineGuest?.sendPaths(paths);
+    guestPathDrawer.disable();
+    guestPathDrawer.clearGraphics();
+    guestPathDrawer = null;
+    planningOverlay.classList.remove('active');
+    confirmBtn.classList.remove('active');
+    return;
+  }
   engine?.confirmPlan();
 });
 
@@ -490,6 +546,15 @@ newBattleBtn.addEventListener('click', () => {
   coverScreen.classList.remove('active');
   roundTimerEl.textContent = '';
   lastReplayData = null;
+
+  // Reset online state
+  onlineHost?.destroy();
+  onlineHost = null;
+  onlineGuest?.destroy();
+  onlineGuest = null;
+  onlineActive = false;
+  onlineRole = null;
+  onlineLobby.style.display = 'none';
 
   // Reset horde state
   hordeActive = false;
@@ -545,6 +610,279 @@ replaySpeedToggle.addEventListener('click', () => {
   replaySpeedToggle.textContent = isActive ? '1x' : '3x';
 });
 
+// --- Online PvP functions ---
+
+function startOnlineHostGame(): void {
+  lastReplayData = null;
+  engine?.stop();
+  document.body.classList.toggle('day-mode', dayModeCb.checked);
+  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+  engine = new GameEngine(renderer!, onGameEvent, {
+    aiMode: false,
+    onlineHost: true,
+    oneShot: oneShotCb.checked,
+    blood: bloodCb.checked,
+    onFrame(frame: OnlineFrameData) {
+      onlineHost?.sendFrame(frame);
+    },
+    onPhaseChange(phase: TurnPhase) {
+      let onlinePhase: OnlinePhase;
+      if (phase === 'cover' || phase === 'red-planning') {
+        onlinePhase = 'red-planning';
+      } else if (phase === 'blue-planning') {
+        onlinePhase = 'blue-planning';
+      } else if (phase === 'playing') {
+        onlinePhase = 'playing';
+      } else {
+        onlinePhase = 'round-end';
+      }
+      onlineHost?.sendPhase(onlinePhase);
+    },
+  });
+  showScreen('battle');
+  speedToggle.classList.remove('active');
+  speedToggle.dataset.speed = '1';
+  speedToggle.textContent = '3x';
+  roundCounterEl.textContent = 'Round 1';
+  engine.startBattle();
+  onlineHost?.sendGameState(engine.getOnlineGameState());
+}
+
+async function startOnlineGuestMode(roomId: string): Promise<void> {
+  onlineActive = true;
+  onlineRole = 'guest';
+
+  await initRenderer();
+  showScreen('battle');
+
+  onlineLobby.style.display = 'flex';
+  onlineShareContainer.style.display = 'none';
+  onlineStatus.textContent = 'Connecting to host...';
+
+  onlineGuest = new OnlineGuest({
+    onConnectionStateChange(state: OnlineConnectionState) {
+      if (state === 'connected') {
+        onlineStatus.textContent = 'Connected! Waiting for game...';
+      } else if (state === 'connecting') {
+        onlineStatus.textContent = 'Connecting...';
+      } else if (state === 'disconnected') {
+        onlineStatus.textContent = 'Disconnected from host.';
+      }
+    },
+
+    onGameState(state: OnlineGameState) {
+      onlineLobby.style.display = 'none';
+      document.body.classList.toggle('day-mode', dayModeCb.checked);
+      renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+
+      // Store units and elevation zones for path drawing
+      guestUnits = state.units.map(u => ({
+        id: u.id,
+        type: u.type,
+        team: u.team,
+        pos: { x: u.x, y: u.y },
+        vel: { x: 0, y: 0 },
+        gunAngle: 0,
+        hp: u.hp,
+        maxHp: u.maxHp,
+        alive: true,
+        radius: u.radius,
+        speed: 0,
+        damage: 0,
+        range: 0,
+        moveTarget: null,
+        waypoints: [],
+        attackTargetId: null,
+        fireCooldown: 0,
+        fireTimer: 0,
+        projectileSpeed: 0,
+        projectileRadius: 0,
+        turnSpeed: 0,
+      } as Unit));
+      guestElevationZones = state.elevationZones;
+
+      renderer!.renderElevationZones(state.elevationZones);
+      renderer!.renderObstacles(state.obstacles);
+      renderer!.renderUnits(guestUnits);
+
+      showScreen('battle');
+    },
+
+    onPhaseChange(phase: OnlinePhase) {
+      if (phase === 'red-planning') {
+        // Guest draws red paths
+        guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
+        guestPathDrawer.enable('red', guestUnits, guestElevationZones);
+        planningLabel.textContent = 'Your Planning';
+        planningLabel.style.color = dayModeCb.checked ? '#aa3333' : '#ff4a4a';
+        planningOverlay.classList.add('active');
+        confirmBtn.classList.add('active');
+        battleHud.style.display = 'none';
+      } else if (phase === 'blue-planning') {
+        planningLabel.textContent = 'Opponent Planning';
+        planningLabel.style.color = dayModeCb.checked ? '#2266aa' : '#4a9eff';
+        planningOverlay.classList.add('active');
+        confirmBtn.classList.remove('active');
+        battleHud.style.display = 'none';
+      } else if (phase === 'playing') {
+        planningOverlay.classList.remove('active');
+        confirmBtn.classList.remove('active');
+        battleHud.style.display = '';
+      }
+    },
+
+    onFrame(frame: OnlineFrameData) {
+      // Convert frame data to Unit/Projectile objects (same as ReplayPlayer)
+      const units: Unit[] = frame.units.map(s => ({
+        id: s.id,
+        type: s.type,
+        team: s.team,
+        pos: { x: s.x, y: s.y },
+        vel: { x: s.vx, y: s.vy },
+        gunAngle: s.gunAngle,
+        hp: s.hp,
+        maxHp: s.maxHp,
+        alive: s.alive,
+        radius: s.radius,
+        speed: 0,
+        damage: 0,
+        range: 0,
+        moveTarget: null,
+        waypoints: [],
+        attackTargetId: null,
+        fireCooldown: 0,
+        fireTimer: 0,
+        projectileSpeed: 0,
+        projectileRadius: 0,
+        turnSpeed: 0,
+      }));
+
+      const projectiles: Projectile[] = frame.projectiles.map(s => ({
+        pos: { x: s.x, y: s.y },
+        vel: { x: s.vx, y: s.vy },
+        target: { x: 0, y: 0 },
+        damage: s.damage,
+        radius: s.radius,
+        team: s.team,
+        maxRange: s.maxRange,
+        distanceTraveled: s.distanceTraveled,
+        trail: s.trail,
+      }));
+
+      renderer!.renderUnits(units, 1 / 60);
+      renderer!.renderProjectiles(projectiles);
+
+      // Trigger effects for events
+      const fx = renderer!.effects;
+      if (fx) {
+        for (const event of frame.events) {
+          if (event.type === 'fire') {
+            fx.addMuzzleFlash(event.pos, event.angle, 6);
+          } else if (event.type === 'hit') {
+            const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
+            const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
+            fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
+            fx.addImpactBurst(event.pos, event.team);
+          } else if (event.type === 'kill') {
+            const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
+            const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
+            fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
+            fx.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
+            fx.addKillText(event.pos, event.team);
+          }
+        }
+      }
+
+      // Update HUD counts
+      const blueAlive = units.filter(u => u.team === 'blue' && u.alive).length;
+      const redAlive = units.filter(u => u.team === 'red' && u.alive).length;
+      blueCountEl.textContent = `Blue: ${blueAlive}`;
+      redCountEl.textContent = `Red: ${redAlive}`;
+    },
+
+    onResult(result: OnlineRoundResult) {
+      const color = result.winner === 'blue' ? '#4a9eff' : result.winner === 'red' ? '#ff4a4a' : '#888';
+      const winnerLabel = result.winner === 'draw' ? 'Draw!' : `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
+      winnerTextEl.innerHTML = `${winnerLabel}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
+      winnerTextEl.style.color = color;
+
+      resultStatsEl.innerHTML = [
+        `Duration: ${result.duration.toFixed(1)}s`,
+        `Blue survivors: ${result.blueAlive}`,
+        `Red survivors: ${result.redAlive}`,
+      ].join('<br>');
+
+      rematchBtn.style.display = 'none';
+      replayBtn.style.display = 'none';
+      newBattleBtn.textContent = 'Back';
+      returnToScreen = 'result';
+
+      showScreen('result');
+    },
+  });
+
+  onlineGuest.joinRoom(roomId);
+}
+
+// Online PvP button (host flow)
+onlineBtn.addEventListener('click', async () => {
+  onlineActive = true;
+  onlineRole = 'host';
+
+  await initRenderer();
+
+  onlineLobby.style.display = 'flex';
+  onlineShareContainer.style.display = 'none';
+  onlineStatus.textContent = 'Creating room...';
+
+  onlineHost = new OnlineHost({
+    onConnectionStateChange(state: OnlineConnectionState) {
+      if (state === 'connected') {
+        onlineLobby.style.display = 'none';
+        startOnlineHostGame();
+      } else if (state === 'disconnected') {
+        onlineStatus.textContent = 'Guest disconnected.';
+      } else if (state === 'waiting') {
+        onlineStatus.textContent = 'Waiting for opponent...';
+      }
+    },
+    onShareUrl(url: string) {
+      onlineShareContainer.style.display = '';
+      onlineShareUrl.value = url;
+    },
+    onGuestPathsReceived() {
+      if (!engine || !onlineHost) return;
+      const pathData = onlineHost.consumeGuestPaths();
+      if (pathData) {
+        engine.setRedPaths(pathData.paths);
+        engine.confirmPlan();
+        planningOverlay.classList.remove('active');
+      }
+    },
+  });
+
+  onlineHost.createRoom();
+});
+
+// Online lobby copy/cancel buttons
+onlineCopyBtn.addEventListener('click', () => {
+  onlineShareUrl.select();
+  navigator.clipboard.writeText(onlineShareUrl.value);
+  onlineCopyBtn.textContent = 'Copied!';
+  setTimeout(() => { onlineCopyBtn.textContent = 'Copy Link'; }, 2000);
+});
+
+onlineCancelBtn.addEventListener('click', () => {
+  onlineHost?.destroy();
+  onlineHost = null;
+  onlineGuest?.destroy();
+  onlineGuest = null;
+  onlineActive = false;
+  onlineRole = null;
+  onlineLobby.style.display = 'none';
+  showScreen('prompt');
+});
+
 // Initialize renderer and show battlefield preview behind start screen
 (async () => {
   await initRenderer();
@@ -552,4 +890,12 @@ replaySpeedToggle.addEventListener('click', () => {
   if (dayModeCb.checked) renderer!.setTheme(DAY_THEME);
   showPreview();
   showScreen('prompt');
+
+  const joinRoomId = getJoinRoomId();
+  if (joinRoomId) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('join');
+    window.history.replaceState({}, '', cleanUrl.toString());
+    startOnlineGuestMode(joinRoomId);
+  }
 })();
