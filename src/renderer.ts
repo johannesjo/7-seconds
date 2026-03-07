@@ -54,6 +54,9 @@ export class Renderer {
       this.bgGraphics.destroy();
     }
     this.bgGraphics = new Graphics();
+    // Fill background with theme color (needed when stage is scaled for letterboxing)
+    this.bgGraphics.rect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+    this.bgGraphics.fill(this.theme.bg);
     // Scale grid spacing to screen size so density looks like real graph paper
     const gridSpacing = Math.min(30, Math.round(Math.min(MAP_WIDTH, MAP_HEIGHT) / 24));
     this.bgGraphics.setStrokeStyle({ width: 1, color: this.theme.grid, alpha: this.theme.gridAlpha });
@@ -623,7 +626,8 @@ export class Renderer {
     this.app.stage.scale.set(scale);
     this.app.stage.position.set(offsetX, offsetY);
 
-    // Set background to black so letterbox bars are black
+    // Black canvas background for letterbox bars; theme bg is drawn as a
+    // filled rect inside the stage so the playable area keeps its color.
     this.app.renderer.background.color = 0x000000;
 
     // Update MAP_WIDTH/MAP_HEIGHT so PathDrawer and other systems use the remote dimensions
