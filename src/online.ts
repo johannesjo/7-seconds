@@ -2,8 +2,7 @@ import { joinRoom } from 'trystero/supabase';
 import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult } from './online-types';
 
 const TRYSTERO_CONFIG = {
-  appId: '7-seconds-pvp',
-  supabaseUrl: 'https://puoxmqovckvfoqyihasl.supabase.co',
+  appId: 'https://puoxmqovckvfoqyihasl.supabase.co',
   supabaseKey: 'sb_publishable_qyF4kAgyDBgJhSpEEIx_1g_6tOzqkqm',
 };
 
