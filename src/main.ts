@@ -2,7 +2,7 @@ import { Renderer } from './renderer';
 import { GameEngine } from './game';
 import { createArmy, createMissionArmy } from './units';
 import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
-import { BattleResult, TurnPhase, Unit, Projectile, Obstacle, ElevationZone, ReplayData, Team } from './types';
+import { BattleResult, TurnPhase, Unit, Projectile, Obstacle, ElevationZone, ReplayData, ReplayFrame, ReplayEvent, Team } from './types';
 import { ARMY_COMPOSITION, HORDE_MAX_WAVES, FLANK_DAMAGE_MULTIPLIER } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
 import { ReplayPlayer } from './replay';
@@ -92,6 +92,10 @@ let onlineRole: 'host' | 'guest' | null = null;
 let guestPathDrawer: PathDrawer | null = null;
 let guestUnits: Unit[] = [];
 let guestElevationZones: ElevationZone[] = [];
+let guestObstacles: Obstacle[] = [];
+let guestReplayFrames: ReplayFrame[] = [];
+let guestReplayEvents: ReplayEvent[] = [];
+let guestReplayFrameIndex = 0;
 let hostPlanConfirmed = false;
 let opponentPlayerId: string | null = null;
 let localRematchRequested = false;
@@ -752,6 +756,11 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       // array, drawn waypoints go to stale objects and get lost.
       // On rematch/new game, unit IDs change — detect and recreate.
       guestElevationZones = state.elevationZones;
+      guestObstacles = state.obstacles;
+      // Reset replay buffer for new round
+      guestReplayFrames = [];
+      guestReplayEvents = [];
+      guestReplayFrameIndex = 0;
       const idsMatch = guestUnits.length === state.units.length
         && state.units.every(su => guestUnits.some(gu => gu.id === su.id));
       if (guestUnits.length === 0 || !idsMatch) {
@@ -831,6 +840,13 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
     },
 
     onFrame(frame: OnlineFrameData) {
+      // Buffer frame for replay
+      guestReplayFrames.push({ units: frame.units, projectiles: frame.projectiles });
+      for (const event of frame.events) {
+        guestReplayEvents.push({ ...event, frame: guestReplayFrameIndex });
+      }
+      guestReplayFrameIndex++;
+
       // Convert frame data to Unit/Projectile objects (same as ReplayPlayer)
       const units: Unit[] = frame.units.map(s => ({
         id: s.id,
@@ -936,11 +952,19 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       }
       resultStatsEl.innerHTML = statsLines.join('<br>');
 
+      // Build replay data from buffered frames
+      lastReplayData = {
+        frames: guestReplayFrames,
+        events: guestReplayEvents,
+        obstacles: guestObstacles,
+        elevationZones: guestElevationZones,
+      };
+
       localRematchRequested = false;
       rematchBtn.textContent = 'Rematch';
       rematchBtn.style.opacity = '1';
       rematchBtn.style.display = '';
-      replayBtn.style.display = 'none';
+      replayBtn.style.display = lastReplayData ? '' : 'none';
       newBattleBtn.textContent = 'Back';
       returnToScreen = 'result';
 
