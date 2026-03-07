@@ -47,7 +47,7 @@
       text-align: center;
       line-height: 1.5;
     }
-    #battle-btn {
+    #battle-btn, #ai-btn, #ctf-ai-btn, #ctf-pvp-btn {
       padding: 16px 48px;
       font-size: 20px;
       font-weight: bold;
@@ -59,7 +59,7 @@
       border-radius: 4px;
       cursor: pointer;
     }
-    #battle-btn:hover, #ai-btn:hover { background: #3a3a5a; border-color: #777; }
+    #battle-btn:hover, #ai-btn:hover, #ctf-ai-btn:hover, #ctf-pvp-btn:hover { background: #3a3a5a; border-color: #777; }
 
     /* Battle Screen */
     #battle-screen {
@@ -347,15 +347,15 @@
     <h1>7 Seconds</h1>
     <p>Draw paths for your units, then watch them fight. Blue plans first, then Red.</p>
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
-      <button id="ai-btn" style="padding:16px 48px;font-size:20px;font-weight:bold;text-transform:uppercase;letter-spacing:4px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">vs AI</button>
+      <button id="ai-btn">vs AI</button>
       <button id="battle-btn">vs Player</button>
     </div>
     <div class="btn-row" style="display:flex;gap:16px">
       <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#4a2a2a;color:#ff8844;border:2px solid #884422;border-radius:4px;cursor:pointer">Horde</button>
     </div>
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
-      <button id="ctf-ai-btn" style="padding:16px 48px;font-size:20px;font-weight:bold;text-transform:uppercase;letter-spacing:4px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">CTF vs AI</button>
-      <button id="ctf-pvp-btn" style="padding:16px 48px;font-size:20px;font-weight:bold;text-transform:uppercase;letter-spacing:4px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">CTF vs Player</button>
+      <button id="ctf-ai-btn">CTF vs AI</button>
+      <button id="ctf-pvp-btn">CTF vs Player</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
