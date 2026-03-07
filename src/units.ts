@@ -215,7 +215,7 @@ export function generateRandomComposition(): { type: UnitType; count: number }[]
   const pool: { type: UnitType; weight: number }[] = [
     { type: 'soldier', weight: 2.5 },
     { type: 'sniper', weight: 1 },
-    { type: 'shielder', weight: 1 },
+    { type: 'shielder', weight: 0.5 },
   ];
   const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
 
