@@ -851,6 +851,18 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         }
       }
 
+      // Update round timer
+      const timeLeft = frame.timeLeft;
+      roundTimerEl.textContent = `${Math.ceil(timeLeft)}s`;
+      if (timeLeft <= 3) {
+        roundTimerEl.style.color = dayModeCb.checked ? '#aa3333' : '#ff4444';
+        const pulse = 1 + 0.1 * Math.sin(Date.now() / 150);
+        roundTimerEl.style.transform = `scale(${pulse})`;
+      } else {
+        roundTimerEl.style.color = '';
+        roundTimerEl.style.transform = '';
+      }
+
       // Update HUD counts
       const blueAlive = units.filter(u => u.team === 'blue' && u.alive).length;
       const redAlive = units.filter(u => u.team === 'red' && u.alive).length;

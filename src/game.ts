@@ -451,6 +451,7 @@ export class GameEngine {
         units: lastFrame.units,
         projectiles: lastFrame.projectiles,
         events: frameEvents,
+        timeLeft: Math.max(0, this.roundTimer),
       });
     }
 

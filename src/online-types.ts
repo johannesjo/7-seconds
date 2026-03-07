@@ -29,6 +29,7 @@ export interface OnlineFrameData {
   units: ReplayUnitSnapshot[];
   projectiles: ReplayProjectileSnapshot[];
   events: ReplayEvent[];
+  timeLeft: number;
 }
 
 export interface OnlineRoundResult {
