@@ -944,6 +944,12 @@ onlineCancelBtn.addEventListener('click', () => {
   showScreen('prompt');
 });
 
+// Clean up online connections on tab close to avoid zombie Supabase channels
+window.addEventListener('beforeunload', () => {
+  onlineHost?.destroy();
+  onlineGuest?.destroy();
+});
+
 // Initialize renderer and show battlefield preview behind start screen
 (async () => {
   await initRenderer();
