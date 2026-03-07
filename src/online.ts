@@ -1,5 +1,5 @@
 import { joinRoom } from 'trystero/supabase';
-import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult } from './online-types';
+import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal } from './online-types';
 
 const TRYSTERO_CONFIG = {
   appId: 'https://puoxmqovckvfoqyihasl.supabase.co',
@@ -14,6 +14,18 @@ const TRYSTERO_CONFIG = {
     ],
   },
 };
+
+const LOCAL_ID_KEY = '7s-player-id';
+
+/** Get or create a persistent local player ID. */
+export function getLocalPlayerId(): string {
+  let id = localStorage.getItem(LOCAL_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(LOCAL_ID_KEY, id);
+  }
+  return id;
+}
 
 /** Characters excluding ambiguous ones (l, 1, o, 0, I, O). */
 const ROOM_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';
@@ -48,6 +60,7 @@ export interface OnlineConnection {
   paths: ActionPair<OnlinePathData>;
   frame: ActionPair<OnlineFrameData>;
   result: ActionPair<OnlineRoundResult>;
+  signal: ActionPair<OnlineSignal>;
   leave: () => void;
 }
 
@@ -71,6 +84,7 @@ export function createOnlineRoom(
   const paths = room.makeAction('paths') as unknown as ActionPair<OnlinePathData>;
   const frame = room.makeAction('frame') as unknown as ActionPair<OnlineFrameData>;
   const result = room.makeAction('result') as unknown as ActionPair<OnlineRoundResult>;
+  const signal = room.makeAction('signal') as unknown as ActionPair<OnlineSignal>;
 
   return {
     state,
@@ -78,6 +92,7 @@ export function createOnlineRoom(
     paths,
     frame,
     result,
+    signal,
     leave: () => room.leave(),
   };
 }

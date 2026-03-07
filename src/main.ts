@@ -9,9 +9,10 @@ import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 import { OnlineHost } from './online-host';
 import { OnlineGuest } from './online-guest';
-import { getJoinRoomId } from './online';
+import { getJoinRoomId, getLocalPlayerId } from './online';
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
 import { PathDrawer } from './path-drawer';
+import { recordWin, recordLoss, getScore } from './online-score';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -92,6 +93,8 @@ let guestPathDrawer: PathDrawer | null = null;
 let guestUnits: Unit[] = [];
 let guestElevationZones: ElevationZone[] = [];
 let hostPlanConfirmed = false;
+let opponentPlayerId: string | null = null;
+let localRematchRequested = false;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -230,6 +233,11 @@ function onGameEvent(
         duration: result.duration,
         gameOver: true,
       });
+      // Record score — host is blue
+      if (opponentPlayerId) {
+        if (result.winner === 'blue') recordWin(opponentPlayerId);
+        else recordLoss(opponentPlayerId);
+      }
     }
 
     // Horde defeat
@@ -267,13 +275,22 @@ function onGameEvent(
     const blueTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
     const redTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
 
-    resultStatsEl.innerHTML = [
+    const statsLines = [
       `Duration: ${result.duration.toFixed(1)}s`,
       `Blue survivors: ${result.blueAlive}/${blueTotal}`,
       `Red survivors: ${result.redAlive}/${redTotal}`,
-    ].join('<br>');
+    ];
+    // Show score for online games
+    if (onlineActive && opponentPlayerId) {
+      const score = getScore(opponentPlayerId);
+      statsLines.push(`Score: ${score.wins} - ${score.losses}`);
+    }
+    resultStatsEl.innerHTML = statsLines.join('<br>');
 
+    localRematchRequested = false;
     rematchBtn.textContent = 'Rematch';
+    rematchBtn.style.opacity = '1';
+    rematchBtn.style.display = '';
     newBattleBtn.textContent = 'Back';
     replayBtn.style.display = lastReplayData ? '' : 'none';
     returnToScreen = 'result';
@@ -542,9 +559,26 @@ speedToggle.addEventListener('click', () => {
 
 rematchBtn.addEventListener('click', async () => {
   await initRenderer();
-  if (onlineActive && onlineRole === 'host') {
-    startOnlineHostGame();
-  } else if (ctfActive) {
+  if (onlineActive) {
+    // Online rematch: send request and wait for both players
+    localRematchRequested = true;
+    rematchBtn.textContent = 'Waiting...';
+    rematchBtn.style.opacity = '0.5';
+
+    if (onlineRole === 'host') {
+      onlineHost?.sendRematchRequest();
+      if (onlineHost?.guestWantsRematch) {
+        startOnlineRematch();
+      }
+    } else {
+      onlineGuest?.sendRematchRequest();
+      if (onlineGuest?.hostWantsRematch) {
+        // Host will start the game — guest just waits
+      }
+    }
+    return;
+  }
+  if (ctfActive) {
     startCtfGame();
   } else if (hordeActive) {
     startHorde(); // restart from wave 1
@@ -569,6 +603,8 @@ newBattleBtn.addEventListener('click', () => {
   onlineGuest = null;
   onlineActive = false;
   onlineRole = null;
+  opponentPlayerId = null;
+  localRematchRequested = false;
   onlineLobby.style.display = 'none';
 
   // Reset horde state
@@ -627,6 +663,13 @@ replaySpeedToggle.addEventListener('click', () => {
 
 // --- Online PvP functions ---
 
+function startOnlineRematch(): void {
+  localRematchRequested = false;
+  onlineHost?.resetRematch();
+  onlineGuest?.resetRematch();
+  startOnlineHostGame();
+}
+
 function startOnlineHostGame(): void {
   lastReplayData = null;
   engine?.stop();
@@ -683,7 +726,14 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       } else if (state === 'connecting') {
         onlineStatus.textContent = 'Connecting...';
       } else if (state === 'disconnected') {
-        onlineStatus.textContent = 'Disconnected from host.';
+        // Show disconnect on result screen so player can go back
+        winnerTextEl.innerHTML = 'Opponent Disconnected';
+        winnerTextEl.style.color = '#888';
+        resultStatsEl.innerHTML = '';
+        rematchBtn.style.display = 'none';
+        replayBtn.style.display = 'none';
+        newBattleBtn.textContent = 'Back';
+        showScreen('result');
       } else if (state === 'error') {
         onlineStatus.textContent = 'Could not connect. Ask host to create a new room.';
       }
@@ -871,23 +921,48 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
     },
 
     onResult(result: OnlineRoundResult) {
+      // Record score — guest is red
+      if (opponentPlayerId) {
+        if (result.winner === 'red') recordWin(opponentPlayerId);
+        else recordLoss(opponentPlayerId);
+      }
+
       const color = result.winner === 'blue' ? '#4a9eff' : result.winner === 'red' ? '#ff4a4a' : '#888';
       const winnerLabel = result.winner === 'draw' ? 'Draw!' : `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
       winnerTextEl.innerHTML = `${winnerLabel}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
       winnerTextEl.style.color = color;
 
-      resultStatsEl.innerHTML = [
+      const statsLines = [
         `Duration: ${result.duration.toFixed(1)}s`,
         `Blue survivors: ${result.blueAlive}`,
         `Red survivors: ${result.redAlive}`,
-      ].join('<br>');
+      ];
+      if (opponentPlayerId) {
+        const score = getScore(opponentPlayerId);
+        statsLines.push(`Score: ${score.wins} - ${score.losses}`);
+      }
+      resultStatsEl.innerHTML = statsLines.join('<br>');
 
-      rematchBtn.style.display = 'none';
+      localRematchRequested = false;
+      rematchBtn.textContent = 'Rematch';
+      rematchBtn.style.opacity = '1';
+      rematchBtn.style.display = '';
       replayBtn.style.display = 'none';
       newBattleBtn.textContent = 'Back';
       returnToScreen = 'result';
 
       showScreen('result');
+    },
+    onHostRematchRequested() {
+      if (localRematchRequested) {
+        // Both want rematch — host will start the game, guest just waits
+        rematchBtn.textContent = 'Starting...';
+      } else {
+        rematchBtn.textContent = 'Rematch (opponent ready)';
+      }
+    },
+    onHostIdentity(playerId: string) {
+      opponentPlayerId = playerId;
     },
   });
 
@@ -911,7 +986,15 @@ onlineBtn.addEventListener('click', async () => {
         onlineLobby.style.display = 'none';
         startOnlineHostGame();
       } else if (state === 'disconnected') {
-        onlineStatus.textContent = 'Guest disconnected.';
+        // Show disconnect on result screen so host can go back
+        engine?.stop();
+        winnerTextEl.innerHTML = 'Opponent Disconnected';
+        winnerTextEl.style.color = '#888';
+        resultStatsEl.innerHTML = '';
+        rematchBtn.style.display = 'none';
+        replayBtn.style.display = 'none';
+        newBattleBtn.textContent = 'Back';
+        showScreen('result');
       } else if (state === 'waiting') {
         onlineStatus.textContent = 'Waiting for opponent...';
       }
@@ -932,6 +1015,18 @@ onlineBtn.addEventListener('click', async () => {
         }
       }
       // Otherwise paths are stored — will be consumed when host confirms
+    },
+    onGuestRematchRequested() {
+      if (localRematchRequested) {
+        // Both want rematch — start!
+        startOnlineRematch();
+      } else {
+        // Show that opponent wants rematch
+        rematchBtn.textContent = 'Rematch (opponent ready)';
+      }
+    },
+    onGuestIdentity(playerId: string) {
+      opponentPlayerId = playerId;
     },
   });
 

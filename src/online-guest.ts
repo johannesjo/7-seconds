@@ -1,4 +1,4 @@
-import { createOnlineRoom, type OnlineConnection } from './online';
+import { createOnlineRoom, getLocalPlayerId, type OnlineConnection } from './online';
 import type {
   OnlineConnectionState,
   OnlineGameState,
@@ -6,6 +6,7 @@ import type {
   OnlineFrameData,
   OnlinePathData,
   OnlineRoundResult,
+  OnlineSignal,
 } from './online-types';
 
 export interface OnlineGuestCallbacks {
@@ -14,17 +15,16 @@ export interface OnlineGuestCallbacks {
   onPhaseChange: (phase: OnlinePhase) => void;
   onFrame: (frame: OnlineFrameData) => void;
   onResult: (result: OnlineRoundResult) => void;
+  onHostRematchRequested: () => void;
+  onHostIdentity: (playerId: string) => void;
 }
 
-/**
- * Manages the guest side of an online PvP session.
- * Connects to a host's room and relays incoming messages via callbacks.
- */
 export class OnlineGuest {
   private connection: OnlineConnection | null = null;
   private connectionState: OnlineConnectionState = 'idle';
   private readonly callbacks: OnlineGuestCallbacks;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private _hostWantsRematch = false;
 
   constructor(callbacks: OnlineGuestCallbacks) {
     this.callbacks = callbacks;
@@ -34,7 +34,10 @@ export class OnlineGuest {
     return this.connectionState === 'connected';
   }
 
-  /** Join an existing room hosted by another player. */
+  get hostWantsRematch(): boolean {
+    return this._hostWantsRematch;
+  }
+
   joinRoom(roomId: string): void {
     this.setConnectionState('connecting');
 
@@ -44,6 +47,8 @@ export class OnlineGuest {
       () => {
         this.clearTimeout();
         this.setConnectionState('connected');
+        // Send identity on connect
+        this.sendIdentity();
       },
       () => this.setConnectionState('disconnected'),
     );
@@ -58,6 +63,15 @@ export class OnlineGuest {
     receiveFrame((frame) => this.callbacks.onFrame(frame));
     receiveResult((result) => this.callbacks.onResult(result));
 
+    this.connection.signal[1]((data: OnlineSignal) => {
+      if (data.type === 'rematch') {
+        this._hostWantsRematch = true;
+        this.callbacks.onHostRematchRequested();
+      } else if (data.type === 'identity' && data.playerId) {
+        this.callbacks.onHostIdentity(data.playerId);
+      }
+    });
+
     // Show error if no connection after 30s
     this.timeoutTimer = setTimeout(() => {
       if (this.connectionState !== 'connected') {
@@ -66,28 +80,42 @@ export class OnlineGuest {
     }, 30_000);
   }
 
-  private clearTimeout(): void {
-    if (this.timeoutTimer) {
-      clearTimeout(this.timeoutTimer);
-      this.timeoutTimer = null;
-    }
+  /** Reset rematch state for a new game. */
+  resetRematch(): void {
+    this._hostWantsRematch = false;
   }
 
-  /** Send planned unit paths to the host. */
+  /** Send own identity to the host. */
+  private sendIdentity(): void {
+    this.connection?.signal[0]({ type: 'identity', playerId: getLocalPlayerId() });
+  }
+
+  /** Request rematch (guest side). */
+  sendRematchRequest(): void {
+    this.connection?.signal[0]({ type: 'rematch' });
+  }
+
   sendPaths(paths: OnlinePathData): void {
     if (!this.connection) return;
     const [send] = this.connection.paths;
     send(paths);
   }
 
-  /** Tear down the connection and reset state. */
   destroy(): void {
     this.clearTimeout();
     if (this.connection) {
       this.connection.leave();
       this.connection = null;
     }
+    this._hostWantsRematch = false;
     this.setConnectionState('idle');
+  }
+
+  private clearTimeout(): void {
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
+    }
   }
 
   private setConnectionState(state: OnlineConnectionState): void {

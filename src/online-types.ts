@@ -41,3 +41,9 @@ export interface OnlineRoundResult {
 }
 
 export type OnlineConnectionState = 'idle' | 'waiting' | 'connecting' | 'connected' | 'disconnected' | 'error';
+
+/** Signals sent between players (rematch request, identity, etc.) */
+export interface OnlineSignal {
+  type: 'rematch' | 'identity';
+  playerId?: string;
+}
