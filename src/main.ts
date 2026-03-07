@@ -677,6 +677,8 @@ function startOnlineHostGame(): void {
   engine?.stop();
   document.body.classList.toggle('day-mode', dayModeCb.checked);
   renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+  renderer!.effects?.clear();
+  renderer!.clearDyingUnits();
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: false,
     onlineHost: true,
@@ -753,13 +755,14 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       // On rematch/new game, unit IDs change — detect and recreate.
       guestElevationZones = state.elevationZones;
       guestObstacles = state.obstacles;
-      // Reset replay buffer for new round
-      guestReplayFrames = [];
-      guestReplayEvents = [];
-      guestReplayFrameIndex = 0;
       const idsMatch = guestUnits.length === state.units.length
         && state.units.every(su => guestUnits.some(gu => gu.id === su.id));
       if (guestUnits.length === 0 || !idsMatch) {
+        // New game — reset replay buffer and clear effects
+        guestReplayFrames = [];
+        guestReplayEvents = [];
+        guestReplayFrameIndex = 0;
+        renderer!.effects?.clear();
         // First state or new game — create unit objects
         guestUnits = state.units.map(u => ({
           id: u.id,

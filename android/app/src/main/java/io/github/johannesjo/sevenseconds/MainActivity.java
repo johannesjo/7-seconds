@@ -20,11 +20,15 @@ public class MainActivity extends BridgeActivity {
         // TODO: remove clearCache once users have updated past the caching issue
         webView.clearCache(true);
 
-        // Disable back gesture / back button — prevents accidental navigation
+        // Handle back gesture / back button — allow WebView back navigation for
+        // sub-pages (privacy policy, terms) but prevent exiting the app
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                // Intentionally empty — swallow back events
+                if (webView.canGoBack()) {
+                    webView.goBack();
+                }
+                // Otherwise swallow — prevents accidental app exit
             }
         });
 
