@@ -94,10 +94,11 @@ export class PathDrawer {
     this.gfx = new Graphics();
     this.hoverGfx = new Graphics();
     this.labelContainer = new Container();
-    this.hoverLabel = new Text({
-      text: '',
-      style: { fontSize: 11, fontFamily: 'monospace', fill: this.theme.hoverLabelFill },
-    });
+    const hoverStyle: Record<string, unknown> = { fontSize: 11, fontFamily: 'monospace', fill: this.theme.hoverLabelFill, fontWeight: 'bold' };
+    if (this.theme.labelStroke !== null) {
+      hoverStyle.stroke = { color: this.theme.labelStroke, width: this.theme.labelStrokeWidth };
+    }
+    this.hoverLabel = new Text({ text: '', style: hoverStyle });
     this.hoverLabel.anchor.set(0.5, 1);
     this.hoverLabel.visible = false;
     this.stage.addChild(this.gfx);
@@ -129,10 +130,11 @@ export class PathDrawer {
       this.labelIndex++;
       return label;
     }
-    const label = new Text({
-      text: '',
-      style: { fontSize: 11, fontFamily: 'monospace', fill: this.theme.labelFill },
-    });
+    const style: Record<string, unknown> = { fontSize: 11, fontFamily: 'monospace', fill: this.theme.labelFill, fontWeight: 'bold' };
+    if (this.theme.labelStroke !== null) {
+      style.stroke = { color: this.theme.labelStroke, width: this.theme.labelStrokeWidth };
+    }
+    const label = new Text({ text: '', style });
     label.anchor.set(0.5, 1);
     this.labelContainer.addChild(label);
     this.labelPool.push(label);
@@ -405,10 +407,10 @@ export class PathDrawer {
     }
 
     this.hoverGfx.circle(pos.x, pos.y, range + unit.radius);
-    this.hoverGfx.setStrokeStyle({ width: 1, color: ringColor, alpha: 0.2 });
+    this.hoverGfx.setStrokeStyle({ width: 1, color: ringColor, alpha: this.theme.rangeStrokeAlpha });
     this.hoverGfx.stroke();
     this.hoverGfx.circle(pos.x, pos.y, range + unit.radius);
-    this.hoverGfx.fill({ color: ringColor, alpha: 0.03 });
+    this.hoverGfx.fill({ color: ringColor, alpha: this.theme.rangeFillAlpha });
   }
 
   clearGraphics(): void {

@@ -63,6 +63,10 @@ export interface Theme {
   labelWarn: number;
   elevationBonus: number;
   hoverLabelFill: number;
+  rangeStrokeAlpha: number;
+  rangeFillAlpha: number;
+  labelStroke: number | null;
+  labelStrokeWidth: number;
 
   // Paper aesthetic
   paperNoise: boolean;
@@ -127,6 +131,10 @@ export const NIGHT_THEME: Theme = {
   labelWarn: 0xff4444,
   elevationBonus: 0x66ff88,
   hoverLabelFill: 0xffffff,
+  rangeStrokeAlpha: 0.2,
+  rangeFillAlpha: 0.03,
+  labelStroke: null,
+  labelStrokeWidth: 0,
   paperNoise: false,
   sketchyObstacles: false,
   bloodAlpha: 1,
@@ -189,6 +197,10 @@ export const DAY_THEME: Theme = {
   labelWarn: 0xaa3333,
   elevationBonus: 0x558844,
   hoverLabelFill: 0x443322,
+  rangeStrokeAlpha: 0.45,
+  rangeFillAlpha: 0.08,
+  labelStroke: 0xf5f0e0,
+  labelStrokeWidth: 3,
   paperNoise: true,
   sketchyObstacles: true,
   bloodAlpha: 0.85,
