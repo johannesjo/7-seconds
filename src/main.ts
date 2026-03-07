@@ -678,8 +678,8 @@ function startOnlineHostGame(): void {
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: false,
     onlineHost: true,
-    oneShot: oneShotCb.checked,
-    blood: bloodCb.checked,
+    oneShot: false,
+    blood: true,
     onFrame(frame: OnlineFrameData) {
       onlineHost?.sendFrame(frame);
     },
@@ -874,28 +874,21 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       // Tick effects so particles animate (blood, muzzle flash, kill text)
       renderer!.effects?.update(1 / 60);
 
-      // Trigger effects for events (match host logic for blood/impact)
+      // Trigger effects for events (match host logic)
       const fx = renderer!.effects;
-      const bloodOn = bloodCb.checked;
       if (fx) {
         for (const event of frame.events) {
           if (event.type === 'fire') {
             fx.addMuzzleFlash(event.pos, event.angle, 6);
           } else if (event.type === 'hit') {
-            if (bloodOn) {
-              const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
-              const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
-              fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-            } else {
-              fx.addImpactBurst(event.pos, event.team);
-            }
+            const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
+            const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
+            fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
           } else if (event.type === 'kill') {
-            if (bloodOn) {
-              const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
-              const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
-              fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-              fx.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
-            }
+            const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
+            const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
+            fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
+            fx.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
             fx.addKillText(event.pos, event.team);
           }
         }
