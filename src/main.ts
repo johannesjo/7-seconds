@@ -40,8 +40,6 @@ const upgradeScreen = document.getElementById('upgrade-screen')!;
 const upgradeCardsEl = document.getElementById('upgrade-cards')!;
 const upgradeReplayBtn = document.getElementById('upgrade-replay-btn') as HTMLButtonElement;
 
-const oneShotCb = document.getElementById('one-shot-cb') as HTMLInputElement;
-const bloodCb = document.getElementById('blood-cb') as HTMLInputElement;
 const dayModeCb = document.getElementById('day-mode-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
 
@@ -250,8 +248,6 @@ function startGame(): void {
   renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode,
-    oneShot: oneShotCb.checked,
-    blood: bloodCb.checked,
   });
   showScreen('battle');
   speedToggle.classList.remove('active');
@@ -270,8 +266,6 @@ function startCtfGame(): void {
     aiMode: !ctfHotseat,
     ctfMode: true,
     ctfHotseat,
-    oneShot: oneShotCb.checked,
-    blood: bloodCb.checked,
   });
   showScreen('battle');
   speedToggle.classList.remove('active');
@@ -355,7 +349,6 @@ function startNextHordeWave(): void {
     hordeBlueUnits: hordeUnits,
     hordeRedArmy: waveDef.enemies,
     hordeMap: hordeMap!,
-    blood: bloodCb.checked,
   });
 
   showScreen('battle');

@@ -24,7 +24,6 @@ export class ReplayPlayer {
   }
 
   start(): void {
-    this.renderer.bloodEnabled = true;
     this.renderer.renderElevationZones(this.data.elevationZones);
     this.renderer.renderObstacles(this.data.obstacles);
     if (this.data.ctfMode) {

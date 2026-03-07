@@ -28,8 +28,6 @@ export class GameEngine {
   private roundNumber = 1;
   private aiMode = false;
   private idleTime = 0;
-  private oneShotEnabled = false;
-  private bloodEnabled = true;
   private endingBattle = false;
   private endDelayTimer = 0;
   private pendingWinner: Team | null = null;
@@ -46,8 +44,6 @@ export class GameEngine {
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
-    oneShot?: boolean;
-    blood?: boolean;
     horde?: boolean;
     hordeBlueUnits?: Unit[];
     hordeRedArmy?: { type: UnitType; count: number }[];
@@ -58,8 +54,6 @@ export class GameEngine {
     this.renderer = renderer;
     this.onEvent = onEvent;
     this.aiMode = opts?.aiMode ?? false;
-    this.oneShotEnabled = opts?.oneShot ?? false;
-    this.bloodEnabled = opts?.blood ?? true;
     this.hordeMode = opts?.horde ?? false;
     this.hordeBlueUnits = opts?.hordeBlueUnits ?? null;
     this.hordeRedArmy = opts?.hordeRedArmy ?? null;
@@ -73,7 +67,6 @@ export class GameEngine {
   }
 
   startBattle(): void {
-    this.renderer.bloodEnabled = this.bloodEnabled;
 
     // Load map before spawning units so we can avoid placing them inside blocks
     if (this.ctfMode) {
@@ -104,12 +97,6 @@ export class GameEngine {
       } else {
         const composition = generateRandomComposition();
         this.units = [...createArmy('blue', composition), ...createArmy('red', composition)];
-      }
-    }
-    // One-shot mode: set all damage to 9999
-    if (this.oneShotEnabled) {
-      for (const unit of this.units) {
-        unit.damage = 9999;
       }
     }
     this.projectiles = [];
@@ -395,17 +382,12 @@ export class GameEngine {
         targetId: hit.targetId,
       });
 
-      if (this.bloodEnabled) {
-        const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
-        const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
-        fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
-        if (hit.killed) {
-          fx?.addKillText(hit.pos, hit.team);
-          fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
-        }
-      } else {
-        fx?.addImpactBurst(hit.pos, hit.team);
-        if (hit.killed) fx?.addKillText(hit.pos, hit.team);
+      const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
+      const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
+      fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
+      if (hit.killed) {
+        fx?.addKillText(hit.pos, hit.team);
+        fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
       }
     }
 
