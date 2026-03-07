@@ -14,7 +14,8 @@
     "cap:sync": "npx cap sync",
     "cap:open": "npx cap open android",
     "cap:build": "npm run build && npx cap sync && cd android && ./gradlew bundleRelease",
-    "version": "node scripts/sync-android-version.js && git add android/app/build.gradle"
+    "version": "node scripts/sync-android-version.js && git add android/app/build.gradle",
+    "postversion": "npm run build && npx cap sync android && cd android && ./gradlew bundleRelease"
   },
   "keywords": [],
   "author": "",
