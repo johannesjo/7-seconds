@@ -29,9 +29,9 @@ export class Renderer {
   }
 
   async init(container: HTMLElement): Promise<void> {
-    const w = container.clientWidth || window.innerWidth;
-    const h = container.clientHeight || window.innerHeight;
-    setMapSize(w, h);
+    const containerW = container.clientWidth || window.innerWidth;
+    const containerH = container.clientHeight || window.innerHeight;
+    setMapSize(Math.min(containerW, 1000), Math.min(containerH, 1000));
 
     await this.app.init({
       width: MAP_WIDTH,
@@ -40,6 +40,10 @@ export class Renderer {
       antialias: true,
     });
     container.appendChild(this.app.canvas);
+    const scale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
+    const canvas = this.app.canvas;
+    canvas.style.width = `${MAP_WIDTH * scale}px`;
+    canvas.style.height = `${MAP_HEIGHT * scale}px`;
     this.drawBackground();
     this._effects = createEffectsManager(this.app.stage);
   }
