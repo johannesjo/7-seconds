@@ -1,5 +1,6 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState } from './types';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { OnlineFrameData, OnlineGameState } from './online-types';
 import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
@@ -41,6 +42,8 @@ export class GameEngine {
   private ctfHotseat = false;
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
+  private onFrameCallback?: (frame: OnlineFrameData) => void;
+  private onPhaseChangeCallback?: (phase: TurnPhase) => void;
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
@@ -50,6 +53,8 @@ export class GameEngine {
     hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[] };
     ctfMode?: boolean;
     ctfHotseat?: boolean;
+    onFrame?: (frame: OnlineFrameData) => void;
+    onPhaseChange?: (phase: TurnPhase) => void;
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -60,6 +65,8 @@ export class GameEngine {
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.ctfHotseat = opts?.ctfHotseat ?? false;
+    this.onFrameCallback = opts?.onFrame;
+    this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
 
   get phase(): TurnPhase {
@@ -178,6 +185,7 @@ export class GameEngine {
     }
 
     this.onEvent('phase-change', { phase, round: this.roundNumber });
+    this.onPhaseChangeCallback?.(phase);
   }
 
   /** Generate AI paths for red units using position-scoring system. */
@@ -424,6 +432,16 @@ export class GameEngine {
     // Record replay frame after all state updates
     this.recordFrame();
 
+    if (this.onFrameCallback) {
+      const lastFrame = this.replayFrames[this.replayFrames.length - 1];
+      const frameEvents = this.replayEvents.filter(e => e.frame === this.replayFrames.length - 1);
+      this.onFrameCallback({
+        units: lastFrame.units,
+        projectiles: lastFrame.projectiles,
+        events: frameEvents,
+      });
+    }
+
     this.renderer.renderProjectiles(this.projectiles);
 
     // Update effects
@@ -601,6 +619,28 @@ export class GameEngine {
 
   getMapData(): { obstacles: Obstacle[]; elevationZones: ElevationZone[] } {
     return { obstacles: this.obstacles, elevationZones: this.elevationZones };
+  }
+
+  setRedPaths(paths: { unitId: string; waypoints: Vec2[] }[]): void {
+    for (const p of paths) {
+      const unit = this.units.find(u => u.id === p.unitId);
+      if (unit && unit.team === 'red') {
+        unit.waypoints = p.waypoints;
+      }
+    }
+  }
+
+  getOnlineGameState(): OnlineGameState {
+    return {
+      units: this.units.map(u => ({
+        id: u.id, type: u.type, team: u.team,
+        x: u.pos.x, y: u.pos.y,
+        hp: u.hp, maxHp: u.maxHp, radius: u.radius,
+      })),
+      obstacles: this.obstacles,
+      elevationZones: this.elevationZones,
+      mapWidth: MAP_WIDTH, mapHeight: MAP_HEIGHT,
+    };
   }
 
   stop(): void {
