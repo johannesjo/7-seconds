@@ -14,23 +14,103 @@
       color: #222;
     }
     h1 { font-size: 1.5rem; }
-    p { margin: 1em 0; }
+    h2 { font-size: 1.2rem; margin-top: 1.5em; }
+    p, li { margin: 0.75em 0; }
+    ul { padding-left: 1.5em; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 0.9rem; }
+    th { background: #f5f5f5; }
   </style>
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p><strong>7 Seconds</strong> is a local multiplayer game available on the web and on Android via Google Play. It does not collect, store, or transmit any personal data. The game runs entirely on your device with no server communication, no analytics, no ads, and no third-party services.</p>
-  <p>No account or login is required. No data leaves your device. No personal information is shared with third parties.</p>
+
+  <p><strong>7 Seconds</strong> is a multiplayer strategy game available on the web and on Android via Google Play. The game can be played locally (on a single device) or online against another player. This policy explains what data is involved in each mode.</p>
+
+  <h2>Local Play</h2>
+  <p>When playing locally (Battle, vs AI, or Horde modes), the game runs entirely on your device. No data is collected, transmitted, or shared. No server communication occurs.</p>
+
+  <h2>Online Play</h2>
+  <p>When you choose to play online, the game establishes a direct peer-to-peer (P2P) connection with the other player using WebRTC. This involves the following data processing:</p>
+
+  <h3>Data processed during online play</h3>
+  <table>
+    <tr><th>Data</th><th>Purpose</th><th>Storage</th></tr>
+    <tr>
+      <td>IP address</td>
+      <td>Required by WebRTC to establish a direct connection between players</td>
+      <td>Not stored. Ephemeral, used only during the connection. However, your IP address is visible to the other player as an inherent part of P2P networking.</td>
+    </tr>
+    <tr>
+      <td>Signaling messages (SDP offers, ICE candidates)</td>
+      <td>Connection setup — exchanged via Supabase Realtime to establish the P2P link</td>
+      <td>Ephemeral. Not persisted by Supabase.</td>
+    </tr>
+    <tr>
+      <td>Game state (unit positions, events, results)</td>
+      <td>Gameplay synchronization between players</td>
+      <td>Transmitted directly between players via encrypted P2P connection (DTLS). Not sent to any server.</td>
+    </tr>
+    <tr>
+      <td>Player ID (random UUID)</td>
+      <td>Identifies you to your opponent for rematch requests and score tracking</td>
+      <td>Stored locally on your device (localStorage). Not linked to your identity.</td>
+    </tr>
+    <tr>
+      <td>Win/loss record</td>
+      <td>Tracks your results against each opponent</td>
+      <td>Stored locally on your device only (localStorage). Never transmitted to a server.</td>
+    </tr>
+  </table>
+
+  <h3>IP address disclosure</h3>
+  <p><strong>Important:</strong> Online play uses peer-to-peer connections. This means your public IP address is visible to the other player, and their IP address is visible to you. This is an inherent property of WebRTC P2P connections and cannot be avoided without routing through a relay server. If you do not want your IP address exposed, do not use online play.</p>
+
+  <h2>Third-Party Services</h2>
+  <p>The following third-party services are used <strong>only during online play</strong>:</p>
+  <ul>
+    <li><strong>Supabase</strong> — Provides the signaling relay for WebRTC connection setup. Processes ephemeral signaling messages only. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase Privacy Policy</a>.</li>
+    <li><strong>Google and Cloudflare STUN servers</strong> — Used to determine your public IP address for NAT traversal during connection setup. These servers see your IP address but no game data.</li>
+  </ul>
+  <p>No analytics, advertising, tracking, or telemetry services are used.</p>
+
+  <h2>Cookies and Local Storage</h2>
+  <p>The game does not use cookies. It uses browser localStorage to store:</p>
+  <ul>
+    <li>Game settings (sound, display preferences)</li>
+    <li>Player ID (random UUID, online play only)</li>
+    <li>Win/loss records (online play only)</li>
+  </ul>
+  <p>All localStorage data stays on your device and is never transmitted to any server. You can clear it at any time through your browser settings.</p>
+
   <h2>Data Collection</h2>
-  <p>This app does not collect any data. There are no tracking tools, no cookies, and no telemetry of any kind.</p>
+  <p>This app does not intentionally collect personal data. No accounts, logins, or registrations are required. The only personal data processed is your IP address during online play, as described above.</p>
+
+  <h2>Legal Basis (GDPR)</h2>
+  <p>For users in the European Economic Area: the processing of IP addresses during online play is based on <strong>Legitimate Interest</strong> (GDPR Art. 6(1)(f)). The IP address exchange is technically necessary for establishing a peer-to-peer connection and is initiated by the user choosing to play online. No IP addresses are logged or stored.</p>
+
+  <h2>Your Rights (GDPR)</h2>
+  <p>If you are in the EEA, you have the right to:</p>
+  <ul>
+    <li>Access information about your data processing</li>
+    <li>Request erasure of your data</li>
+    <li>Object to processing based on legitimate interest</li>
+    <li>Lodge a complaint with your local data protection authority</li>
+  </ul>
+  <p>Since no personal data is stored on any server, there is nothing to access or delete server-side. You can clear locally stored data (player ID, scores) through your browser or app settings at any time.</p>
+
   <h2>Permissions</h2>
   <p>The Android app does not request any special permissions beyond what is required to run.</p>
+
   <h2>Children's Privacy</h2>
-  <p>This app is not directed at children under 13. It does not knowingly collect any personal information from anyone, including children.</p>
+  <p>This app is not directed at children under 13. Online features require users to be 13 or older. The app does not knowingly collect personal information from children under 13.</p>
+
   <h2>Changes to This Policy</h2>
   <p>If this policy is updated, the changes will be posted on this page with a revised date.</p>
+
   <h2>Contact</h2>
-  <p>If you have questions, you can reach the developer at <a href="https://github.com/johannesjo/7-seconds">github.com/johannesjo/7-seconds</a>.</p>
-  <p><em>Last updated: March 2, 2026</em></p>
+  <p>If you have questions about this privacy policy, you can reach the developer at <a href="https://github.com/johannesjo/7-seconds">github.com/johannesjo/7-seconds</a>.</p>
+
+  <p><em>Last updated: March 7, 2026</em></p>
 </body>
 </html>

@@ -340,6 +340,9 @@
     body.day-mode #replay-overlay button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #battle-btn, body.day-mode #ai-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #horde-btn { background: #e8dcc8; color: #886633; border-color: #aa8844; }
+    body.day-mode #age-gate { background: rgba(245,240,224,0.95); color: #443322; }
+    body.day-mode #age-gate-yes { background: #cce8cc; color: #226633; border-color: #44aa66; }
+    body.day-mode #age-gate-no { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #online-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
     body.day-mode #online-lobby { background: rgba(245,240,224,0.85); color: #443322; }
     body.day-mode #online-share-url { background: #e8e0cc; color: #443322; border-color: #aa9977; }
@@ -348,6 +351,34 @@
   </style>
 </head>
 <body>
+  <div id="age-gate" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px;text-align:center">
+    <h2 style="font-size:24px;letter-spacing:2px;text-transform:uppercase">Age Verification</h2>
+    <p style="font-size:15px;opacity:0.8;max-width:400px;line-height:1.5">This game contains combat and online multiplayer features. You must be at least 13 years old to play.</p>
+    <div style="display:flex;gap:12px;margin-top:8px">
+      <button id="age-gate-yes" style="padding:10px 28px;font-size:15px;font-weight:bold;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">I'm 13 or older</button>
+      <button id="age-gate-no" style="padding:10px 28px;font-size:15px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer;opacity:0.7">I'm under 13</button>
+    </div>
+    <div style="font-size:12px;opacity:0.4;margin-top:16px;display:flex;gap:12px">
+      <a href="privacy-policy.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Privacy Policy</a>
+      <a href="terms.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Terms of Service</a>
+    </div>
+  </div>
+  <script>
+    (function() {
+      if (!localStorage.getItem('7s-age-verified')) {
+        var gate = document.getElementById('age-gate');
+        gate.style.display = 'flex';
+        document.getElementById('age-gate-yes').onclick = function() {
+          localStorage.setItem('7s-age-verified', '1');
+          gate.style.display = 'none';
+        };
+        document.getElementById('age-gate-no').onclick = function() {
+          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;text-align:center;padding:32px;color:#eee;font-family:system-ui"><p style="font-size:16px;opacity:0.8">Sorry, you must be at least 13 years old to play this game.</p></div>';
+        };
+      }
+    })();
+  </script>
+
   <div id="prompt-screen" class="screen active">
     <h1>7 Seconds</h1>
     <p>Draw paths for your units, then watch them fight. Blue plans first, then Red.</p>
@@ -368,8 +399,12 @@
         Paper day mode
       </label>
     </div>
-    <a href="privacy-policy.html" target="_blank" rel="noopener"
-       style="font-size:12px;opacity:0.4;margin-top:12px;color:inherit;text-decoration:underline">Privacy Policy</a>
+    <div style="font-size:12px;opacity:0.4;margin-top:12px;display:flex;gap:12px">
+      <a href="privacy-policy.html" target="_blank" rel="noopener"
+         style="color:inherit;text-decoration:underline">Privacy Policy</a>
+      <a href="terms.html" target="_blank" rel="noopener"
+         style="color:inherit;text-decoration:underline">Terms of Service</a>
+    </div>
   </div>
 
   <div id="battle-screen" class="screen">
