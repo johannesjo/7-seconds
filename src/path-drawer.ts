@@ -472,12 +472,18 @@ export class PathDrawer {
     return closest;
   }
 
+  /** Convert global (screen) coordinates to stage-local coordinates (handles stage scale/offset). */
+  private toLocal(global: { x: number; y: number }): { x: number; y: number } {
+    return this.stage.toLocal(global);
+  }
+
   private onPointerDown = (e: { global: { x: number; y: number }; button?: number }): void => {
     if (!this.enabled || !this.team) return;
     // Ignore right clicks for path drawing
     if (e.button === 2) return;
+    const pos = this.toLocal(e.global);
 
-    const closest = this.findNearestUnit(e.global.x, e.global.y);
+    const closest = this.findNearestUnit(pos.x, pos.y);
     if (closest) {
       this.hoveredEnemy = null;
       this.selectedUnit = closest;
@@ -489,22 +495,23 @@ export class PathDrawer {
     }
 
     // Tap on enemy → show their range
-    const enemy = this.findNearestEnemy(e.global.x, e.global.y);
+    const enemy = this.findNearestEnemy(pos.x, pos.y);
     this.hoveredEnemy = enemy;
     this.renderHoverLayer();
   };
 
   private onPointerMove = (e: { global: { x: number; y: number } }): void => {
     if (!this.enabled) return;
+    const pos = this.toLocal(e.global);
 
     // Update hover state
     if (!this.selectedUnit) {
       const prev = this.hoveredUnit;
-      this.hoveredUnit = this.findNearestUnit(e.global.x, e.global.y);
+      this.hoveredUnit = this.findNearestUnit(pos.x, pos.y);
       // If not hovering own unit, check for enemy
       const prevEnemy = this.hoveredEnemy;
       if (!this.hoveredUnit) {
-        this.hoveredEnemy = this.findNearestEnemy(e.global.x, e.global.y);
+        this.hoveredEnemy = this.findNearestEnemy(pos.x, pos.y);
       } else {
         this.hoveredEnemy = null;
       }
@@ -513,7 +520,7 @@ export class PathDrawer {
 
     // Drawing mode
     if (this.selectedUnit) {
-      this.rawPoints.push({ x: e.global.x, y: e.global.y });
+      this.rawPoints.push({ x: pos.x, y: pos.y });
       this.renderPaths();
     }
   };
@@ -532,8 +539,8 @@ export class PathDrawer {
 
   private onRightDown = (e: { global: { x: number; y: number } }): void => {
     if (!this.enabled || !this.team) return;
-
-    const unit = this.findNearestUnit(e.global.x, e.global.y);
+    const pos = this.toLocal(e.global);
+    const unit = this.findNearestUnit(pos.x, pos.y);
     if (unit) {
       unit.waypoints = [];
       unit.moveTarget = null;

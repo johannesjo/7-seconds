@@ -607,6 +607,32 @@ export class Renderer {
     return this.app.ticker;
   }
 
+  /**
+   * Adapt the renderer to display a remote map size (e.g. host's map on guest's screen).
+   * Scales the stage to fit the remote map, centers it, and shows black bars for extra space.
+   */
+  adaptToRemoteMap(remoteWidth: number, remoteHeight: number): void {
+    const canvasW = this.app.canvas.width;
+    const canvasH = this.app.canvas.height;
+
+    // Scale to fit the remote map within the local canvas
+    const scale = Math.min(canvasW / remoteWidth, canvasH / remoteHeight);
+    const offsetX = (canvasW - remoteWidth * scale) / 2;
+    const offsetY = (canvasH - remoteHeight * scale) / 2;
+
+    this.app.stage.scale.set(scale);
+    this.app.stage.position.set(offsetX, offsetY);
+
+    // Set background to black so letterbox bars are black
+    this.app.renderer.background.color = 0x000000;
+
+    // Update MAP_WIDTH/MAP_HEIGHT so PathDrawer and other systems use the remote dimensions
+    setMapSize(remoteWidth, remoteHeight);
+
+    // Redraw background grid at correct size
+    this.drawBackground();
+  }
+
   destroy(): void {
     this.unitGraphics.clear();
     this.bladeSpinAngles.clear();

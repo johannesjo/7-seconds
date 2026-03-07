@@ -693,6 +693,9 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       onlineLobby.style.display = 'none';
       document.body.classList.toggle('day-mode', dayModeCb.checked);
       renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+      // Adapt to host's map size — scales stage, adds black letterbox bars
+      // Called after setTheme so background grid uses correct theme colors
+      renderer!.adaptToRemoteMap(state.mapWidth, state.mapHeight);
 
       // Update units in-place to preserve PathDrawer references.
       // If PathDrawer holds refs to guestUnits objects and we replace the
