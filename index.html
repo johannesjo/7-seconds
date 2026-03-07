@@ -344,8 +344,11 @@
     body.day-mode #age-gate-yes { background: #cce8cc; color: #226633; border-color: #44aa66; }
     body.day-mode #age-gate-no { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #online-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
-    body.day-mode #online-lobby { background: rgba(245,240,224,0.85); color: #443322; }
-    body.day-mode #online-share-url { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #online-lobby { background: rgba(245,240,224,0.92); color: #443322; }
+    body.day-mode #online-lobby-title { color: #226633; }
+    body.day-mode #online-status { color: #665544; }
+    body.day-mode #online-share-container { background: rgba(0,0,0,0.04); border-color: #bb9; }
+    body.day-mode #online-share-url { background: #fff; color: #443322; border-color: #aa9977; }
     body.day-mode #online-copy-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
     body.day-mode #online-cancel-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
   </style>
@@ -444,15 +447,15 @@
     </div>
   </div>
 
-  <div id="online-lobby" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:rgba(0,0,0,0.85);z-index:25;padding:32px">
-    <h2 style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:#44ff88">Online PvP</h2>
-    <p id="online-status" style="font-size:16px;opacity:0.8">Creating room...</p>
-    <div id="online-share-container" style="display:none;flex-direction:column;align-items:center;gap:12px">
-      <p style="font-size:14px;opacity:0.7">Share this link with your opponent:</p>
-      <input id="online-share-url" type="text" readonly style="width:320px;max-width:90vw;padding:10px;font-size:14px;background:#1a1a2a;color:#eee;border:1px solid #555;border-radius:4px;text-align:center" />
-      <button id="online-copy-btn" style="padding:8px 24px;font-size:14px;background:#2a4a2a;color:#44ff88;border:1px solid #228844;border-radius:4px;cursor:pointer">Share Link</button>
+  <div id="online-lobby" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:rgba(0,0,0,0.85);z-index:25;padding:32px">
+    <h2 id="online-lobby-title" style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:#44ff88;margin:0">Online PvP</h2>
+    <p id="online-status" style="font-size:16px;color:#ccc;margin:0">Creating room...</p>
+    <div id="online-share-container" style="display:none;flex-direction:column;align-items:center;gap:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:20px;max-width:400px;width:90vw">
+      <p style="font-size:14px;opacity:0.7;margin:0">Share this link with your opponent:</p>
+      <input id="online-share-url" type="text" readonly style="width:100%;box-sizing:border-box;padding:10px;font-size:14px;background:#1a1a2a;color:#eee;border:1px solid #555;border-radius:4px;text-align:center" />
+      <button id="online-copy-btn" style="padding:10px 32px;font-size:15px;font-weight:bold;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer;width:100%">Share Link</button>
     </div>
-    <button id="online-cancel-btn" style="padding:8px 24px;font-size:14px;background:#2a2a4a;color:#eee;border:1px solid #555;border-radius:4px;cursor:pointer;opacity:0.7;margin-top:16px">Cancel</button>
+    <button id="online-cancel-btn" style="padding:8px 24px;font-size:14px;background:#2a2a4a;color:#eee;border:1px solid #555;border-radius:4px;cursor:pointer;opacity:0.7;margin-top:8px">Cancel</button>
   </div>
 
   <div id="cover-screen">
