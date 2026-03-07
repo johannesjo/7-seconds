@@ -1,11 +1,16 @@
 import { UnitStats, UnitType } from './types';
 
+export const MIN_MAP_WIDTH = 360;
+export const MIN_MAP_HEIGHT = 620;
+export const MAX_MAP_WIDTH = 1000;
+export const MAX_MAP_HEIGHT = 1000;
+
 export let MAP_WIDTH = 1200;
 export let MAP_HEIGHT = 800;
 
 export function setMapSize(w: number, h: number): void {
-  MAP_WIDTH = w;
-  MAP_HEIGHT = h;
+  MAP_WIDTH = Math.max(MIN_MAP_WIDTH, Math.min(MAX_MAP_WIDTH, w));
+  MAP_HEIGHT = Math.max(MIN_MAP_HEIGHT, Math.min(MAX_MAP_HEIGHT, h));
 }
 
 export const UNIT_STATS: Record<UnitType, UnitStats> = {
