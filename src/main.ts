@@ -882,12 +882,21 @@ onlineBtn.addEventListener('click', async () => {
   onlineHost.createRoom();
 });
 
-// Online lobby copy/cancel buttons
-onlineCopyBtn.addEventListener('click', () => {
-  onlineShareUrl.select();
-  navigator.clipboard.writeText(onlineShareUrl.value);
-  onlineCopyBtn.textContent = 'Copied!';
-  setTimeout(() => { onlineCopyBtn.textContent = 'Copy Link'; }, 2000);
+// Online lobby share/copy button
+onlineCopyBtn.addEventListener('click', async () => {
+  const url = onlineShareUrl.value;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: '7 Seconds — Online PvP', text: 'Join my game!', url });
+    } catch {
+      // User cancelled share sheet — ignore
+    }
+  } else {
+    onlineShareUrl.select();
+    await navigator.clipboard.writeText(url);
+    onlineCopyBtn.textContent = 'Copied!';
+    setTimeout(() => { onlineCopyBtn.textContent = 'Share Link'; }, 2000);
+  }
 });
 
 onlineCancelBtn.addEventListener('click', () => {
@@ -909,6 +918,7 @@ onlineCancelBtn.addEventListener('click', () => {
   showPreview();
   showScreen('prompt');
 
+  // Check URL for join param (works for both web links and Android deep links)
   const joinRoomId = getJoinRoomId();
   if (joinRoomId) {
     const cleanUrl = new URL(window.location.href);
