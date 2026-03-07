@@ -686,31 +686,51 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       document.body.classList.toggle('day-mode', dayModeCb.checked);
       renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
 
-      // Store units and elevation zones for path drawing
-      guestUnits = state.units.map(u => ({
-        id: u.id,
-        type: u.type,
-        team: u.team,
-        pos: { x: u.x, y: u.y },
-        vel: { x: 0, y: 0 },
-        gunAngle: 0,
-        hp: u.hp,
-        maxHp: u.maxHp,
-        alive: true,
-        radius: u.radius,
-        speed: u.speed,
-        damage: 0,
-        range: u.range,
-        moveTarget: null,
-        waypoints: [],
-        attackTargetId: null,
-        fireCooldown: 0,
-        fireTimer: 0,
-        projectileSpeed: 0,
-        projectileRadius: 0,
-        turnSpeed: 0,
-      } as Unit));
+      // Update units in-place to preserve PathDrawer references.
+      // If PathDrawer holds refs to guestUnits objects and we replace the
+      // array, drawn waypoints go to stale objects and get lost.
       guestElevationZones = state.elevationZones;
+      if (guestUnits.length === 0) {
+        // First state — create unit objects
+        guestUnits = state.units.map(u => ({
+          id: u.id,
+          type: u.type,
+          team: u.team,
+          pos: { x: u.x, y: u.y },
+          vel: { x: 0, y: 0 },
+          gunAngle: 0,
+          hp: u.hp,
+          maxHp: u.maxHp,
+          alive: true,
+          radius: u.radius,
+          speed: u.speed,
+          damage: 0,
+          range: u.range,
+          moveTarget: null,
+          waypoints: [],
+          attackTargetId: null,
+          fireCooldown: 0,
+          fireTimer: 0,
+          projectileSpeed: 0,
+          projectileRadius: 0,
+          turnSpeed: 0,
+        } as Unit));
+      } else {
+        // Subsequent states — update existing objects in-place
+        for (const su of state.units) {
+          const existing = guestUnits.find(u => u.id === su.id);
+          if (existing) {
+            existing.pos.x = su.x;
+            existing.pos.y = su.y;
+            existing.hp = su.hp;
+            existing.maxHp = su.maxHp;
+            existing.alive = su.hp > 0;
+            existing.speed = su.speed;
+            existing.range = su.range;
+            existing.waypoints = [];
+          }
+        }
+      }
 
       renderer!.renderElevationZones(state.elevationZones);
       renderer!.renderObstacles(state.obstacles);
