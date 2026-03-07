@@ -210,17 +210,44 @@ export function flankScore(attackerPos: Vec2, targetPos: Vec2, targetGunAngle: n
   return Math.abs(diff) / Math.PI;
 }
 
-export function createArmy(team: Team): Unit[] {
+/** Pick a random army composition with weighted unit selection. */
+export function generateRandomComposition(): { type: UnitType; count: number }[] {
+  const pool: { type: UnitType; weight: number }[] = [
+    { type: 'soldier', weight: 2.5 },
+    { type: 'sniper', weight: 1 },
+    { type: 'shielder', weight: 1 },
+  ];
+  const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
+
+  const unitCount = 3 + Math.floor(Math.random() * 3); // 3, 4, or 5
+
+  const counts = new Map<UnitType, number>();
+  for (let i = 0; i < unitCount; i++) {
+    let roll = Math.random() * totalWeight;
+    for (const { type, weight } of pool) {
+      roll -= weight;
+      if (roll <= 0) {
+        counts.set(type, (counts.get(type) ?? 0) + 1);
+        break;
+      }
+    }
+  }
+
+  return Array.from(counts.entries()).map(([type, count]) => ({ type, count }));
+}
+
+export function createArmy(team: Team, composition?: { type: UnitType; count: number }[]): Unit[] {
+  const comp = composition ?? ARMY_COMPOSITION;
   const units: Unit[] = [];
   const isBlue = team === 'blue';
   const baseY = isBlue ? MAP_HEIGHT * 0.92 : MAP_HEIGHT * 0.08;
-  const totalUnits = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
+  const totalUnits = comp.reduce((sum, c) => sum + c.count, 0);
   const spacing = 60;
   const groupWidth = spacing * (totalUnits - 1);
   const startX = (MAP_WIDTH - groupWidth) / 2;
   let index = 0;
 
-  for (const { type, count } of ARMY_COMPOSITION) {
+  for (const { type, count } of comp) {
     for (let i = 0; i < count; i++) {
       const x = startX + spacing * index;
       const pos = { x, y: baseY };

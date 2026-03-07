@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState } from './types';
 import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { createArmy, createMissionArmy, createCtfArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
+import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 import { PathDrawer } from './path-drawer';
@@ -102,7 +102,8 @@ export class GameEngine {
         }
         this.units = [...this.hordeBlueUnits, ...redUnits];
       } else {
-        this.units = [...createArmy('blue'), ...createArmy('red')];
+        const composition = generateRandomComposition();
+        this.units = [...createArmy('blue', composition), ...createArmy('red', composition)];
       }
     }
     // One-shot mode: set all damage to 9999
