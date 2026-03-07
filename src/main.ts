@@ -91,6 +91,7 @@ let onlineRole: 'host' | 'guest' | null = null;
 let guestPathDrawer: PathDrawer | null = null;
 let guestUnits: Unit[] = [];
 let guestElevationZones: ElevationZone[] = [];
+let hostPlanConfirmed = false;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -107,7 +108,15 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
 function onPhaseChange(phase: TurnPhase): void {
   if (onlineActive && onlineRole === 'host') {
     if (phase === 'cover' || phase === 'red-planning') {
-      planningLabel.textContent = 'Opponent Planning';
+      // Check if guest paths already arrived while host was planning
+      const pathData = onlineHost?.consumeGuestPaths();
+      if (pathData && phase === 'red-planning') {
+        // Guest was faster — apply paths and start battle immediately
+        engine?.setRedPaths(pathData.paths);
+        engine?.confirmPlan();
+        return;
+      }
+      planningLabel.textContent = 'Waiting for opponent...';
       planningOverlay.classList.add('active');
       confirmBtn.classList.remove('active');
       battleHud.style.display = 'none';
@@ -507,8 +516,8 @@ confirmBtn.addEventListener('click', () => {
     guestPathDrawer.disable();
     guestPathDrawer.clearGraphics();
     guestPathDrawer = null;
-    planningOverlay.classList.remove('active');
     confirmBtn.classList.remove('active');
+    planningLabel.textContent = 'Waiting for opponent...';
     return;
   }
   engine?.confirmPlan();
@@ -711,8 +720,8 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
     },
 
     onPhaseChange(phase: OnlinePhase) {
-      if (phase === 'red-planning') {
-        // Guest draws red paths
+      if (phase === 'blue-planning') {
+        // Both players plan simultaneously — guest draws red paths right away
         guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
         guestPathDrawer.enable('red', guestUnits, guestElevationZones);
         planningLabel.textContent = 'Your Planning';
@@ -720,13 +729,16 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         planningOverlay.classList.add('active');
         confirmBtn.classList.add('active');
         battleHud.style.display = 'none';
-      } else if (phase === 'blue-planning') {
-        planningLabel.textContent = 'Opponent Planning';
-        planningLabel.style.color = dayModeCb.checked ? '#2266aa' : '#4a9eff';
-        planningOverlay.classList.add('active');
-        confirmBtn.classList.remove('active');
-        battleHud.style.display = 'none';
+      } else if (phase === 'red-planning') {
+        // Host confirmed but guest may still be planning — no change needed
+        // (guest is already drawing, or already submitted)
       } else if (phase === 'playing') {
+        // Clean up any remaining path drawer if guest was slow
+        if (guestPathDrawer) {
+          guestPathDrawer.disable();
+          guestPathDrawer.clearGraphics();
+          guestPathDrawer = null;
+        }
         planningOverlay.classList.remove('active');
         confirmBtn.classList.remove('active');
         battleHud.style.display = '';
@@ -854,12 +866,16 @@ onlineBtn.addEventListener('click', async () => {
     },
     onGuestPathsReceived() {
       if (!engine || !onlineHost) return;
-      const pathData = onlineHost.consumeGuestPaths();
-      if (pathData) {
-        engine.setRedPaths(pathData.paths);
-        engine.confirmPlan();
-        planningOverlay.classList.remove('active');
+      // If host already confirmed and engine is waiting in red-planning, start battle
+      if (engine.phase === 'red-planning') {
+        const pathData = onlineHost.consumeGuestPaths();
+        if (pathData) {
+          engine.setRedPaths(pathData.paths);
+          engine.confirmPlan();
+          planningOverlay.classList.remove('active');
+        }
       }
+      // Otherwise paths are stored — will be consumed when host confirms
     },
   });
 
