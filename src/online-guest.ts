@@ -24,6 +24,11 @@ export class OnlineGuest {
   private connection: OnlineConnection | null = null;
   private connectionState: OnlineConnectionState = 'idle';
   private readonly callbacks: OnlineGuestCallbacks;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryCount = 0;
+
+  private static readonly RETRY_TIMEOUT_MS = 8000;
+  private static readonly MAX_RETRIES = 3;
 
   constructor(callbacks: OnlineGuestCallbacks) {
     this.callbacks = callbacks;
@@ -35,12 +40,26 @@ export class OnlineGuest {
 
   /** Join an existing room hosted by another player. */
   joinRoom(roomId: string): void {
+    this.retryCount = 0;
+    this.attemptJoin(roomId);
+  }
+
+  private attemptJoin(roomId: string): void {
     this.setConnectionState('connecting');
+
+    // Clean up previous attempt
+    if (this.connection) {
+      this.connection.leave();
+      this.connection = null;
+    }
 
     this.connection = createOnlineRoom(
       roomId,
       'guest',
-      () => this.setConnectionState('connected'),
+      () => {
+        this.clearRetryTimer();
+        this.setConnectionState('connected');
+      },
       () => this.setConnectionState('disconnected'),
     );
 
@@ -53,6 +72,25 @@ export class OnlineGuest {
     receivePhase((phase) => this.callbacks.onPhaseChange(phase));
     receiveFrame((frame) => this.callbacks.onFrame(frame));
     receiveResult((result) => this.callbacks.onResult(result));
+
+    // Auto-retry if no peer joins within timeout
+    this.clearRetryTimer();
+    this.retryTimer = setTimeout(() => {
+      if (this.connectionState !== 'connected' && this.retryCount < OnlineGuest.MAX_RETRIES) {
+        this.retryCount++;
+        console.log(`[online-guest] Retry ${this.retryCount}/${OnlineGuest.MAX_RETRIES}...`);
+        this.attemptJoin(roomId);
+      } else if (this.connectionState !== 'connected') {
+        this.setConnectionState('error');
+      }
+    }, OnlineGuest.RETRY_TIMEOUT_MS);
+  }
+
+  private clearRetryTimer(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
   }
 
   /** Send planned unit paths to the host. */
@@ -64,6 +102,7 @@ export class OnlineGuest {
 
   /** Tear down the connection and reset state. */
   destroy(): void {
+    this.clearRetryTimer();
     if (this.connection) {
       this.connection.leave();
       this.connection = null;

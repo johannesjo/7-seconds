@@ -681,9 +681,11 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       if (state === 'connected') {
         onlineStatus.textContent = 'Connected! Waiting for game...';
       } else if (state === 'connecting') {
-        onlineStatus.textContent = 'Connecting...';
+        onlineStatus.textContent = 'Connecting... (retrying if needed)';
       } else if (state === 'disconnected') {
         onlineStatus.textContent = 'Disconnected from host.';
+      } else if (state === 'error') {
+        onlineStatus.textContent = 'Could not connect. Try refreshing both tabs.';
       }
     },
 

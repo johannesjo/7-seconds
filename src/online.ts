@@ -4,6 +4,15 @@ import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, Onl
 const TRYSTERO_CONFIG = {
   appId: 'https://puoxmqovckvfoqyihasl.supabase.co',
   supabaseKey: 'sb_publishable_qyF4kAgyDBgJhSpEEIx_1g_6tOzqkqm',
+  // Extra STUN servers for better NAT traversal
+  rtcConfig: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+    ],
+  },
 };
 
 /** Characters excluding ambiguous ones (l, 1, o, 0, I, O). */
