@@ -55,18 +55,21 @@ export function createOnlineRoom(
   room.onPeerJoin(onPeerJoin);
   room.onPeerLeave(onPeerLeave);
 
-  const state = room.makeAction<OnlineGameState>('state');
-  const phase = room.makeAction<OnlinePhase>('phase');
-  const paths = room.makeAction<OnlinePathData>('paths');
-  const frame = room.makeAction<OnlineFrameData>('frame');
-  const result = room.makeAction<OnlineRoundResult>('result');
+  // Trystero's makeAction requires DataPayload (index-signature objects).
+  // Our interfaces don't have index signatures, so we use `any` at the
+  // boundary and keep the rest of the codebase fully typed via ActionPair.
+  const state = room.makeAction('state') as unknown as ActionPair<OnlineGameState>;
+  const phase = room.makeAction('phase') as unknown as ActionPair<OnlinePhase>;
+  const paths = room.makeAction('paths') as unknown as ActionPair<OnlinePathData>;
+  const frame = room.makeAction('frame') as unknown as ActionPair<OnlineFrameData>;
+  const result = room.makeAction('result') as unknown as ActionPair<OnlineRoundResult>;
 
   return {
-    state: [state[0], state[1]] as ActionPair<OnlineGameState>,
-    phase: [phase[0], phase[1]] as ActionPair<OnlinePhase>,
-    paths: [paths[0], paths[1]] as ActionPair<OnlinePathData>,
-    frame: [frame[0], frame[1]] as ActionPair<OnlineFrameData>,
-    result: [result[0], result[1]] as ActionPair<OnlineRoundResult>,
+    state,
+    phase,
+    paths,
+    frame,
+    result,
     leave: () => room.leave(),
   };
 }
