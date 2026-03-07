@@ -542,7 +542,9 @@ speedToggle.addEventListener('click', () => {
 
 rematchBtn.addEventListener('click', async () => {
   await initRenderer();
-  if (ctfActive) {
+  if (onlineActive && onlineRole === 'host') {
+    startOnlineHostGame();
+  } else if (ctfActive) {
     startCtfGame();
   } else if (hordeActive) {
     startHorde(); // restart from wave 1
@@ -702,7 +704,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
           team: u.team,
           pos: { x: u.x, y: u.y },
           vel: { x: 0, y: 0 },
-          gunAngle: 0,
+          gunAngle: u.team === 'blue' ? -Math.PI / 2 : Math.PI / 2,
           hp: u.hp,
           maxHp: u.maxHp,
           alive: true,
@@ -745,6 +747,8 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 
     onPhaseChange(phase: OnlinePhase) {
       if (phase === 'blue-planning') {
+        // Clear effects from previous round (blood, kill text, etc.)
+        renderer!.effects?.clear();
         // Both players plan simultaneously — guest draws red paths right away
         guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
         guestPathDrawer.enable('red', guestUnits, guestElevationZones);
@@ -810,22 +814,28 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       renderer!.renderUnits(units, 1 / 60);
       renderer!.renderProjectiles(projectiles);
 
-      // Trigger effects for events
+      // Trigger effects for events (match host logic for blood/impact)
       const fx = renderer!.effects;
+      const bloodOn = bloodCb.checked;
       if (fx) {
         for (const event of frame.events) {
           if (event.type === 'fire') {
             fx.addMuzzleFlash(event.pos, event.angle, 6);
           } else if (event.type === 'hit') {
-            const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
-            const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
-            fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-            fx.addImpactBurst(event.pos, event.team);
+            if (bloodOn) {
+              const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
+              const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
+              fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
+            } else {
+              fx.addImpactBurst(event.pos, event.team);
+            }
           } else if (event.type === 'kill') {
-            const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
-            const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
-            fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-            fx.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
+            if (bloodOn) {
+              const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
+              const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
+              fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
+              fx.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
+            }
             fx.addKillText(event.pos, event.team);
           }
         }
