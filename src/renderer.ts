@@ -562,6 +562,14 @@ export class Renderer {
     return this.unitGraphics.get(id);
   }
 
+  /** Remove all dying-unit sprites immediately (used by guest on new round/rematch). */
+  clearDyingUnits(): void {
+    for (const [, dying] of this.dyingUnits) {
+      this.app.stage.removeChild(dying.container);
+    }
+    this.dyingUnits.clear();
+  }
+
   get currentTheme(): Theme {
     return this.theme;
   }

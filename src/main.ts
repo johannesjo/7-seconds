@@ -741,6 +741,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         }
       }
 
+      renderer!.clearDyingUnits();
       renderer!.renderElevationZones(state.elevationZones);
       renderer!.renderObstacles(state.obstacles);
       renderer!.renderUnits(guestUnits);
@@ -750,8 +751,6 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 
     onPhaseChange(phase: OnlinePhase) {
       if (phase === 'blue-planning') {
-        // Clear effects from previous round (blood, kill text, etc.)
-        renderer!.effects?.clear();
         // Both players plan simultaneously — guest draws red paths right away
         guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
         guestPathDrawer.enable('red', guestUnits, guestElevationZones);
