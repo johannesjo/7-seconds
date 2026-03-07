@@ -107,10 +107,10 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
 
 function onPhaseChange(phase: TurnPhase): void {
   if (onlineActive && onlineRole === 'host') {
-    if (phase === 'cover' || phase === 'red-planning') {
+    if (phase === 'red-planning') {
       // Check if guest paths already arrived while host was planning
       const pathData = onlineHost?.consumeGuestPaths();
-      if (pathData && phase === 'red-planning') {
+      if (pathData) {
         // Guest was faster — apply paths and start battle immediately
         engine?.setRedPaths(pathData.paths);
         engine?.confirmPlan();
@@ -120,6 +120,10 @@ function onPhaseChange(phase: TurnPhase): void {
       planningOverlay.classList.add('active');
       confirmBtn.classList.remove('active');
       battleHud.style.display = 'none';
+      return;
+    }
+    if (phase === 'cover') {
+      // Cover is skipped in online host mode, no action needed
       return;
     }
   }
