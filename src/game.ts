@@ -42,6 +42,7 @@ export class GameEngine {
   private ctfHotseat = false;
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
+  private onlineHostMode = false;
   private onFrameCallback?: (frame: OnlineFrameData) => void;
   private onPhaseChangeCallback?: (phase: TurnPhase) => void;
 
@@ -53,6 +54,7 @@ export class GameEngine {
     hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[] };
     ctfMode?: boolean;
     ctfHotseat?: boolean;
+    onlineHost?: boolean;
     onFrame?: (frame: OnlineFrameData) => void;
     onPhaseChange?: (phase: TurnPhase) => void;
   }) {
@@ -65,6 +67,7 @@ export class GameEngine {
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.ctfHotseat = opts?.ctfHotseat ?? false;
+    this.onlineHostMode = opts?.onlineHost ?? false;
     this.onFrameCallback = opts?.onFrame;
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
@@ -164,6 +167,12 @@ export class GameEngine {
       this.pathDrawer?.enable('blue', this.units, this.elevationZones);
     } else if (phase === 'cover') {
       this.pathDrawer?.disable();
+      if (this.onlineHostMode) {
+        // Online host: skip cover, go to red-planning without local path drawing
+        this.onEvent('phase-change', { phase, round: this.roundNumber });
+        this.setPhase('red-planning');
+        return;
+      }
       if (this.aiMode) {
         // Skip cover screen, generate AI paths, go straight to playing
         if (!this.hordeMode) {
@@ -174,8 +183,11 @@ export class GameEngine {
         return;
       }
     } else if (phase === 'red-planning') {
-      this.pathDrawer?.clearPaths('red');
-      this.pathDrawer?.enable('red', this.units, this.elevationZones);
+      if (!this.onlineHostMode) {
+        this.pathDrawer?.clearPaths('red');
+        this.pathDrawer?.enable('red', this.units, this.elevationZones);
+      }
+      // When onlineHostMode, we wait for external setRedPaths() + confirmPlan()
     } else if (phase === 'playing') {
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
