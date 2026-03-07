@@ -3,8 +3,8 @@ import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, Onl
 
 const TRYSTERO_CONFIG = {
   appId: '7-seconds-pvp',
-  supabaseUrl: '', // placeholder
-  supabaseKey: '', // placeholder
+  supabaseUrl: 'https://puoxmqovckvfoqyihasl.supabase.co',
+  supabaseKey: 'sb_publishable_qyF4kAgyDBgJhSpEEIx_1g_6tOzqkqm',
 };
 
 /** Characters excluding ambiguous ones (l, 1, o, 0, I, O). */
