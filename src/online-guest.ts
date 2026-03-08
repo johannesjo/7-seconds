@@ -24,9 +24,15 @@ export class OnlineGuest {
   private connection: OnlineConnection | null = null;
   private connectionState: OnlineConnectionState = 'idle';
   private readonly callbacks: OnlineGuestCallbacks;
-  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryCount = 0;
   private _hostWantsRematch = false;
   private hostPeerId: string | null = null;
+  private destroyed = false;
+
+  private static readonly ATTEMPT_TIMEOUT_MS = 8_000;
+  private static readonly MAX_RETRIES = 3;
+  private static readonly RETRY_DELAY_MS = 2_000;
 
   constructor(callbacks: OnlineGuestCallbacks) {
     this.callbacks = callbacks;
@@ -41,14 +47,26 @@ export class OnlineGuest {
   }
 
   joinRoom(roomId: string): void {
+    this.destroyed = false;
+    this.retryCount = 0;
+    this.attemptJoin(roomId);
+  }
+
+  private attemptJoin(roomId: string): void {
     this.setConnectionState('connecting');
+
+    // Clean up previous attempt
+    if (this.connection) {
+      this.connection.leave();
+      this.connection = null;
+    }
 
     this.connection = createOnlineRoom(
       roomId,
       'guest',
       (peerId) => {
         this.hostPeerId = peerId;
-        this.clearTimeout();
+        this.clearRetryTimer();
         this.setConnectionState('connected');
         this.sendIdentity();
       },
@@ -77,12 +95,26 @@ export class OnlineGuest {
       }
     });
 
-    // Show error if no connection after 30s
-    this.timeoutTimer = setTimeout(() => {
-      if (this.connectionState !== 'connected') {
+    // Retry if no peer joins within timeout
+    this.clearRetryTimer();
+    this.retryTimer = setTimeout(() => {
+      if (this.connectionState === 'connected' || this.destroyed) return;
+
+      if (this.retryCount < OnlineGuest.MAX_RETRIES) {
+        this.retryCount++;
+        console.log(`[online-guest] Retry ${this.retryCount}/${OnlineGuest.MAX_RETRIES}…`);
+        // Delay before retry to let old Supabase client clean up
+        if (this.connection) {
+          this.connection.leave();
+          this.connection = null;
+        }
+        this.retryTimer = setTimeout(() => {
+          if (!this.destroyed) this.attemptJoin(roomId);
+        }, OnlineGuest.RETRY_DELAY_MS);
+      } else {
         this.setConnectionState('error');
       }
-    }, 30_000);
+    }, OnlineGuest.ATTEMPT_TIMEOUT_MS);
   }
 
   /** Reset rematch state for a new game. */
@@ -107,7 +139,8 @@ export class OnlineGuest {
   }
 
   destroy(): void {
-    this.clearTimeout();
+    this.destroyed = true;
+    this.clearRetryTimer();
     if (this.connection) {
       this.connection.leave();
       this.connection = null;
@@ -117,10 +150,10 @@ export class OnlineGuest {
     this.setConnectionState('idle');
   }
 
-  private clearTimeout(): void {
-    if (this.timeoutTimer) {
-      clearTimeout(this.timeoutTimer);
-      this.timeoutTimer = null;
+  private clearRetryTimer(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
     }
   }
 
