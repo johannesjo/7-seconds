@@ -4,13 +4,28 @@ import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, Onl
 const TRYSTERO_CONFIG = {
   appId: 'https://puoxmqovckvfoqyihasl.supabase.co',
   supabaseKey: 'sb_publishable_qyF4kAgyDBgJhSpEEIx_1g_6tOzqkqm',
-  // Extra STUN servers for better NAT traversal
+  // STUN + TURN servers for NAT traversal
+  // TURN fallback is needed for symmetric NATs (mobile/corporate networks)
   rtcConfig: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turns:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
     ],
   },
 };
