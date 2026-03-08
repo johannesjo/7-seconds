@@ -27,6 +27,12 @@ export class OnlineHost {
   private guestPeerId: string | null = null;
   private _guestWantsRematch = false;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private resubTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
+
+  private static readonly RESUB_INTERVAL_MS = 12_000;
+  private static readonly RESUB_DELAY_MS = 2_000;
+  private static readonly MAX_RESUBS = 8;
 
   constructor(callbacks: OnlineHostCallbacks) {
     this.callbacks = callbacks;
@@ -42,7 +48,20 @@ export class OnlineHost {
 
   createRoom(): string {
     const roomId = generateRoomId();
+    this.destroyed = false;
+    this.setupRoom(roomId, 0);
+    this.callbacks.onShareUrl(getShareUrl(roomId));
+    return roomId;
+  }
+
+  private setupRoom(roomId: string, resubCount: number): void {
     this.setConnectionState('waiting');
+
+    // Clean up previous connection
+    if (this.connection) {
+      this.connection.leave();
+      this.connection = null;
+    }
 
     this.connection = createOnlineRoom(
       roomId,
@@ -67,15 +86,29 @@ export class OnlineHost {
       }
     });
 
-    // Timeout if no guest joins within 2 minutes
-    this.timeoutTimer = setTimeout(() => {
-      if (this.connectionState === 'waiting') {
-        this.setConnectionState('error');
-      }
-    }, 120_000);
-
-    this.callbacks.onShareUrl(getShareUrl(roomId));
-    return roomId;
+    // Periodically re-create the room if no guest joins,
+    // to recover from stalled Supabase Realtime subscriptions
+    this.clearResubTimer();
+    if (resubCount < OnlineHost.MAX_RESUBS) {
+      this.resubTimer = setTimeout(() => {
+        if (this.connectionState !== 'waiting' || this.destroyed) return;
+        console.log(`[online-host] Resubscribing (${resubCount + 1}/${OnlineHost.MAX_RESUBS})…`);
+        if (this.connection) {
+          this.connection.leave();
+          this.connection = null;
+        }
+        this.resubTimer = setTimeout(() => {
+          if (!this.destroyed) this.setupRoom(roomId, resubCount + 1);
+        }, OnlineHost.RESUB_DELAY_MS);
+      }, OnlineHost.RESUB_INTERVAL_MS);
+    } else {
+      // Final timeout — give up after all resubs exhausted
+      this.timeoutTimer = setTimeout(() => {
+        if (this.connectionState === 'waiting') {
+          this.setConnectionState('error');
+        }
+      }, OnlineHost.RESUB_INTERVAL_MS);
+    }
   }
 
   consumeGuestPaths(): OnlinePathData | null {
@@ -116,7 +149,9 @@ export class OnlineHost {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.clearTimeout();
+    this.clearResubTimer();
     this.connection?.leave();
     this.connection = null;
     this.pendingPaths = null;
@@ -130,6 +165,7 @@ export class OnlineHost {
     if (this.guestPeerId) return;
     this.guestPeerId = peerId;
     this.clearTimeout();
+    this.clearResubTimer();
     this.setConnectionState('connected');
     this.sendIdentity();
   }
@@ -145,6 +181,13 @@ export class OnlineHost {
     if (this.timeoutTimer) {
       clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
+    }
+  }
+
+  private clearResubTimer(): void {
+    if (this.resubTimer) {
+      clearTimeout(this.resubTimer);
+      this.resubTimer = null;
     }
   }
 
