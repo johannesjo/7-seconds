@@ -3,14 +3,29 @@ import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, Onl
 
 const TRYSTERO_CONFIG = {
   appId: 'https://puoxmqovckvfoqyihasl.supabase.co',
-  supabaseKey: 'sb_publishable_qyF4kAgyDBgJhSpEEIx_1g_6tOzqkqm',
-  // Extra STUN servers for better NAT traversal
+  supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4',
+  // STUN + TURN servers for NAT traversal
+  // TURN fallback is needed for symmetric NATs (mobile/corporate networks)
   rtcConfig: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turns:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
     ],
   },
 };
