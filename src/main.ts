@@ -61,6 +61,8 @@ const replayExitBtn = document.getElementById('replay-exit-btn')!;
 const replayProgress = document.getElementById('replay-progress')!;
 const replaySpeedToggle = document.getElementById('replay-speed-toggle') as HTMLButtonElement;
 
+const exitGameBtn = document.getElementById('exit-game-btn')!;
+
 // Online lobby elements
 const onlineBtn = document.getElementById('online-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
@@ -623,6 +625,12 @@ newBattleBtn.addEventListener('click', () => {
 
   showPreview();
   showScreen('prompt');
+});
+
+// Exit game button (in battle HUD)
+exitGameBtn.addEventListener('click', () => {
+  if (!confirm('Exit the current game?')) return;
+  newBattleBtn.click();
 });
 
 // Replay button on result screen

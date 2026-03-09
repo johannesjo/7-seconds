@@ -344,6 +344,7 @@
     body.day-mode #age-gate-yes { background: #cce8cc; color: #226633; border-color: #44aa66; }
     body.day-mode #age-gate-no { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #online-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
+    body.day-mode #exit-game-btn { color: #443322; }
     body.day-mode #online-lobby { background: rgba(245,240,224,0.92); color: #443322; }
     body.day-mode #online-lobby-title { color: #226633; }
     body.day-mode #online-status { color: #665544; }
@@ -362,8 +363,8 @@
       <button id="age-gate-no" style="padding:10px 28px;font-size:15px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer;opacity:0.7">I'm under 13</button>
     </div>
     <div style="font-size:12px;opacity:0.4;margin-top:16px;display:flex;gap:12px">
-      <a href="privacy-policy.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Privacy Policy</a>
-      <a href="terms.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Terms of Service</a>
+      <a href="privacy-policy.html" rel="noopener" style="color:inherit;text-decoration:underline">Privacy Policy</a>
+      <a href="terms.html" rel="noopener" style="color:inherit;text-decoration:underline">Terms of Service</a>
     </div>
   </div>
   <script>
@@ -409,9 +410,9 @@
       </label>
     </div>
     <div style="font-size:12px;opacity:0.4;margin-top:12px;display:flex;gap:12px">
-      <a href="privacy-policy.html" target="_blank" rel="noopener"
+      <a href="privacy-policy.html" rel="noopener"
          style="color:inherit;text-decoration:underline">Privacy Policy</a>
-      <a href="terms.html" target="_blank" rel="noopener"
+      <a href="terms.html" rel="noopener"
          style="color:inherit;text-decoration:underline">Terms of Service</a>
     </div>
   </div>
@@ -429,6 +430,7 @@
         </div>
       </div>
       <span id="red-count" style="color:#ff4a4a">Red: 4</span>
+      <button id="exit-game-btn" title="Exit game" style="position:absolute;top:calc(4px + var(--sat));right:4px;background:none;border:none;color:#eee;font-size:18px;cursor:pointer;opacity:0.5;padding:4px 8px;z-index:11">&#x2715;</button>
     </div>
     <div id="pixi-container"></div>
 
