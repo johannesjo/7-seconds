@@ -340,15 +340,15 @@
     body.day-mode #replay-overlay button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #battle-btn, body.day-mode #ai-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #horde-btn { background: #e8dcc8; color: #886633; border-color: #aa8844; }
-    body.day-mode #age-gate { background: rgba(245,240,224,0.95); color: #443322; }
-    body.day-mode #age-gate-yes { background: #cce8cc; color: #226633; border-color: #44aa66; }
-    body.day-mode #age-gate-no { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #age-gate { background: rgba(245,240,224,0.95) !important; color: #443322; }
+    body.day-mode #age-gate-yes { background: #cce8cc !important; color: #226633 !important; border-color: #44aa66 !important; }
+    body.day-mode #age-gate-no { background: #e8e0cc !important; color: #443322 !important; border-color: #aa9977 !important; }
     body.day-mode #online-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
     body.day-mode #exit-game-btn { color: #443322; }
-    body.day-mode #online-lobby { background: rgba(245,240,224,0.92); color: #443322; }
+    body.day-mode #online-lobby { background: rgba(245,240,224,0.92) !important; color: #443322; }
     body.day-mode #online-lobby-title { color: #226633; }
     body.day-mode #online-status { color: #665544; }
-    body.day-mode #online-share-container { background: rgba(0,0,0,0.04); border-color: #bb9; }
+    body.day-mode #online-share-container { background: rgba(0,0,0,0.04) !important; border-color: #bb9 !important; }
     body.day-mode #online-share-url { background: #fff; color: #443322; border-color: #aa9977; }
     body.day-mode #online-copy-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
     body.day-mode #online-cancel-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
@@ -369,6 +369,9 @@
   </div>
   <script>
     (function() {
+      // Apply day-mode early so age gate renders with correct theme
+      var cb = document.getElementById('day-mode-cb');
+      if (cb && cb.checked) document.body.classList.add('day-mode');
       if (!localStorage.getItem('7s-age-verified')) {
         var gate = document.getElementById('age-gate');
         gate.style.display = 'flex';
