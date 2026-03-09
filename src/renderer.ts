@@ -466,14 +466,16 @@ export class Renderer {
       shape.poly(points);
       shape.fill(color);
     } else if (unit.type === 'shielder') {
-      // Wider ellipse body
+      // Wider ellipse body in team color
       shape.ellipse(0, 0, unit.radius * 1.4, unit.radius * 0.9);
-      shape.fill(this.theme.shielder);
-      // Shield arc on front (120° cone)
+      shape.fill(color);
+      // Golden shield arc on front (120° cone)
       const arcRadius = unit.radius * 1.6;
-      const shieldColor = unit.team === 'blue' ? 0x88ccff : 0xffcc88;
       shape.arc(0, 0, arcRadius, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3);
-      shape.stroke({ width: 3, color: shieldColor, alpha: 0.8 });
+      shape.stroke({ width: 3, color: this.theme.shieldGold, alpha: 0.9 });
+      // Inner shield glow
+      shape.arc(0, 0, arcRadius - 1.5, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3);
+      shape.stroke({ width: 1.5, color: this.theme.shieldGoldBright, alpha: 0.4 });
     } else if (unit.type === 'bomber') {
       // Pulsing circle — pulse speed increases as HP drops
       const hpRatio = unit.hp / unit.maxHp;
