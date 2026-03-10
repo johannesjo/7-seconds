@@ -35,10 +35,10 @@ function ensureOverlay(): HTMLPreElement {
 
 /** Log a debug message to the on-screen overlay (only when ?debug=1). */
 export function dlog(msg: string): void {
+  if (!debugEnabled) return;
   const ts = new Date().toISOString().slice(11, 23);
   const line = `[${ts}] ${msg}`;
   console.log(`[online-debug] ${msg}`);
-  if (!debugEnabled) return;
   lines.push(line);
   if (lines.length > MAX_LINES) lines.shift();
   const el = ensureOverlay();

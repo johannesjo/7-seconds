@@ -738,6 +738,8 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         onlineStatus.textContent = 'Connecting...';
       } else if (state === 'disconnected') {
         // Show disconnect on result screen so player can go back
+        planningOverlay.classList.remove('active');
+        confirmBtn.classList.remove('active');
         winnerTextEl.innerHTML = 'Opponent Disconnected';
         winnerTextEl.style.color = '#888';
         resultStatsEl.innerHTML = '';
@@ -1012,6 +1014,8 @@ onlineBtn.addEventListener('click', async () => {
       } else if (state === 'disconnected') {
         // Show disconnect on result screen so host can go back
         engine?.stop();
+        planningOverlay.classList.remove('active');
+        confirmBtn.classList.remove('active');
         winnerTextEl.innerHTML = 'Opponent Disconnected';
         winnerTextEl.style.color = '#888';
         resultStatsEl.innerHTML = '';

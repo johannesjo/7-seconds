@@ -113,6 +113,9 @@ export async function createOnlineRoom(
   onPeerLeave: (peerId: string) => void,
 ): Promise<OnlineConnection> {
   const iceServers = await fetchIceServers();
+  if (iceServers.length === 0) {
+    throw new Error('No TURN servers available — cannot connect in relay-only mode');
+  }
   dlog(`createRoom role=${role} room=${roomId} ice=${iceServers.length}`);
   const room = joinRoom({
     ...SUPABASE_CONFIG,

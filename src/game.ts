@@ -635,10 +635,17 @@ export class GameEngine {
   }
 
   setRedPaths(paths: { unitId: string; waypoints: Vec2[] }[]): void {
+    const maxWaypoints = 100;
     for (const p of paths) {
+      if (!Array.isArray(p.waypoints)) continue;
       const unit = this.units.find(u => u.id === p.unitId);
       if (unit && unit.team === 'red') {
-        unit.waypoints = p.waypoints;
+        // Validate and cap waypoints from remote peer
+        const valid = p.waypoints.slice(0, maxWaypoints).filter(
+          w => typeof w.x === 'number' && typeof w.y === 'number'
+            && Number.isFinite(w.x) && Number.isFinite(w.y),
+        );
+        unit.waypoints = valid;
       }
     }
   }

@@ -49,19 +49,25 @@ export class OnlineGuest {
   async joinRoom(roomId: string): Promise<void> {
     this.setConnectionState('connecting');
 
-    this.connection = await createOnlineRoom(
-      roomId,
-      'guest',
-      (peerId) => {
-        this.hostPeerId = peerId;
-        this.clearTimeout();
-        this.setConnectionState('connected');
-        this.sendIdentity();
-      },
-      (peerId) => {
-        if (peerId === this.hostPeerId) this.setConnectionState('disconnected');
-      },
-    );
+    try {
+      this.connection = await createOnlineRoom(
+        roomId,
+        'guest',
+        (peerId) => {
+          this.hostPeerId = peerId;
+          this.clearTimeout();
+          this.setConnectionState('connected');
+          this.sendIdentity();
+        },
+        (peerId) => {
+          if (peerId === this.hostPeerId) this.setConnectionState('disconnected');
+        },
+      );
+    } catch (e) {
+      dlog(`guest joinRoom failed: ${e}`);
+      this.setConnectionState('error');
+      return;
+    }
 
     this.stopPeerMonitor?.();
     this.stopPeerMonitor = startPeerMonitor(() => this.connection?.getPeers() ?? {}, 'guest');
@@ -72,10 +78,22 @@ export class OnlineGuest {
     const [, receiveFrame] = this.connection.frame;
     const [, receiveResult] = this.connection.result;
 
-    receiveState((state) => this.callbacks.onGameState(state));
-    receivePhase((phase) => this.callbacks.onPhaseChange(phase));
-    receiveFrame((frame) => this.callbacks.onFrame(frame));
-    receiveResult((result) => this.callbacks.onResult(result));
+    receiveState((state, peerId) => {
+      if (peerId !== this.hostPeerId) return;
+      this.callbacks.onGameState(state);
+    });
+    receivePhase((phase, peerId) => {
+      if (peerId !== this.hostPeerId) return;
+      this.callbacks.onPhaseChange(phase);
+    });
+    receiveFrame((frame, peerId) => {
+      if (peerId !== this.hostPeerId) return;
+      this.callbacks.onFrame(frame);
+    });
+    receiveResult((result, peerId) => {
+      if (peerId !== this.hostPeerId) return;
+      this.callbacks.onResult(result);
+    });
 
     this.connection.signal[1]((data: OnlineSignal, peerId: string) => {
       if (peerId !== this.hostPeerId) return;
@@ -128,7 +146,7 @@ export class OnlineGuest {
     }
     this._hostWantsRematch = false;
     this.hostPeerId = null;
-    this.setConnectionState('idle');
+    this.connectionState = 'idle';
   }
 
   private clearTimeout(): void {

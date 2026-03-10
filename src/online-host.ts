@@ -50,12 +50,18 @@ export class OnlineHost {
     const roomId = generateRoomId();
     this.setConnectionState('waiting');
 
-    this.connection = await createOnlineRoom(
-      roomId,
-      'host',
-      (peerId) => this.handlePeerJoin(peerId),
-      (peerId) => this.handlePeerLeave(peerId),
-    );
+    try {
+      this.connection = await createOnlineRoom(
+        roomId,
+        'host',
+        (peerId) => this.handlePeerJoin(peerId),
+        (peerId) => this.handlePeerLeave(peerId),
+      );
+    } catch (e) {
+      dlog(`host createRoom failed: ${e}`);
+      this.setConnectionState('error');
+      return roomId;
+    }
 
     this.stopPeerMonitor?.();
     this.stopPeerMonitor = startPeerMonitor(() => this.connection?.getPeers() ?? {}, 'host');
@@ -136,7 +142,7 @@ export class OnlineHost {
     this.pendingPaths = null;
     this.guestPeerId = null;
     this._guestWantsRematch = false;
-    this.setConnectionState('idle');
+    this.connectionState = 'idle';
   }
 
   private handlePeerJoin(peerId: string): void {
