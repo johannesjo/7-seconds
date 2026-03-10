@@ -12,19 +12,23 @@ const SUPABASE_CONFIG = {
 };
 
 /** Fetch short-lived TURN credentials from Metered.ca REST API.
- *  We limit total ICE servers to keep gathering fast (< 3s) so
- *  trystero's 4.8s prune timeout doesn't kill the pending offer. */
+ *  Credentials are cached for 30 minutes (metered.ca issues ~12h TTL,
+ *  but refreshing sooner avoids edge-case expiry during long sessions).
+ *  We pick one UDP + one TCP/TLS server to keep ICE gathering fast. */
+const TURN_CACHE_TTL_MS = 30 * 60 * 1000;
 let cachedIceServers: RTCIceServer[] | null = null;
+let cachedAt = 0;
+
 export async function fetchIceServers(): Promise<RTCIceServer[]> {
-  if (cachedIceServers) return cachedIceServers;
+  if (cachedIceServers && Date.now() - cachedAt < TURN_CACHE_TTL_MS) {
+    return cachedIceServers;
+  }
   try {
     const res = await fetch(
       `https://7seconds.metered.live/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`,
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const allServers: RTCIceServer[] = await res.json();
-    // Pick one UDP relay and one TCP/TLS relay for firewall traversal.
-    // Fewer servers → faster ICE gathering → answer arrives before prune.
     const udpTurn = allServers.find(s => {
       const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
       return url?.startsWith('turn:') && !url.includes('transport=tcp');
@@ -35,15 +39,19 @@ export async function fetchIceServers(): Promise<RTCIceServer[]> {
     });
     const turnServers = [udpTurn, tcpTurn].filter((s): s is RTCIceServer => !!s);
     dlog(`TURN: picked ${turnServers.length}/${allServers.length} servers`);
-    cachedIceServers = [
-      { urls: 'stun:stun.l.google.com:19302' },
-      ...turnServers,
-    ];
+    cachedIceServers = turnServers;
+    cachedAt = Date.now();
     return cachedIceServers;
   } catch (e) {
     dlog(`TURN: fetch failed — ${e}`);
-    return [{ urls: 'stun:stun.l.google.com:19302' }];
+    // Return stale cache if available, otherwise empty (relay-only will fail gracefully)
+    return cachedIceServers ?? [];
   }
+}
+
+/** Pre-fetch TURN credentials so they're ready when creating/joining rooms. */
+export function prefetchIceServers(): void {
+  fetchIceServers().catch(() => {/* logged inside */});
 }
 
 const LOCAL_ID_KEY = '7s-player-id';

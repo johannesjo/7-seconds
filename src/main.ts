@@ -9,7 +9,7 @@ import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 import { OnlineHost } from './online-host';
 import { OnlineGuest } from './online-guest';
-import { getJoinRoomId, getLocalPlayerId } from './online';
+import { getJoinRoomId, getLocalPlayerId, prefetchIceServers } from './online';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
 import { PathDrawer } from './path-drawer';
@@ -1097,6 +1097,9 @@ window.addEventListener('beforeunload', () => {
   onlineHost?.destroy();
   onlineGuest?.destroy();
 });
+
+// Pre-fetch TURN credentials so they're ready when creating/joining rooms
+prefetchIceServers();
 
 // Initialize renderer and show battlefield preview behind start screen
 (async () => {

@@ -30,7 +30,7 @@ export class OnlineGuest {
   private hostPeerId: string | null = null;
   private stopPeerMonitor: (() => void) | null = null;
 
-  // Single long timeout — trystero retries announces every ~5.3s internally,
+  // Single long timeout — trystero retries announces every ~15s (patched),
   // so we just wait for peer discovery without recreating clients.
   private static readonly CONNECTION_TIMEOUT_MS = 60_000;
 
