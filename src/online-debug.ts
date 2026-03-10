@@ -173,6 +173,51 @@ function parseBinaryBroadcast(buf: ArrayBuffer): string {
   }
 }
 
+/** Patch RTCPeerConnection to log ALL connection state changes and ICE candidates. */
+function interceptRTC(): void {
+  if (typeof window === 'undefined') return;
+  const OrigRTC = window.RTCPeerConnection;
+  let pcCount = 0;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).RTCPeerConnection = function (config?: RTCConfiguration) {
+    const id = pcCount++;
+    const pc = new OrigRTC(config);
+    // Only log first few and any that get remote descriptions (active peers)
+    if (id < 3) {
+      dlog(`rtc#${id} created servers=${config?.iceServers?.length ?? 0}`);
+    }
+    pc.addEventListener('connectionstatechange', () => {
+      dlog(`rtc#${id} conn: ${pc.connectionState}`);
+    });
+    pc.addEventListener('iceconnectionstatechange', () => {
+      dlog(`rtc#${id} ice: ${pc.iceConnectionState}`);
+    });
+    pc.addEventListener('icegatheringstatechange', () => {
+      if (pc.iceGatheringState === 'complete') {
+        // Count candidate types in the local description
+        const sdp = pc.localDescription?.sdp ?? '';
+        const host = (sdp.match(/typ host/g) || []).length;
+        const srflx = (sdp.match(/typ srflx/g) || []).length;
+        const relay = (sdp.match(/typ relay/g) || []).length;
+        dlog(`rtc#${id} ice-done: host=${host} srflx=${srflx} relay=${relay}`);
+      }
+    });
+    // Log when remote description is set (SDP answer/offer received)
+    const origSetRemote = pc.setRemoteDescription.bind(pc);
+    pc.setRemoteDescription = function (desc: RTCSessionDescriptionInit) {
+      const sdp = desc.sdp ?? '';
+      const host = (sdp.match(/typ host/g) || []).length;
+      const srflx = (sdp.match(/typ srflx/g) || []).length;
+      const relay = (sdp.match(/typ relay/g) || []).length;
+      dlog(`rtc#${id} setRemote(${desc.type}) host=${host} srflx=${srflx} relay=${relay}`);
+      return origSetRemote(desc);
+    };
+    return pc;
+  } as unknown as typeof RTCPeerConnection;
+  (window as any).RTCPeerConnection.prototype = OrigRTC.prototype;
+}
+
 /** Intercept WebSocket to log Supabase Realtime connection lifecycle. */
 function interceptWebSocket(): void {
   if (typeof window === 'undefined') return;
@@ -191,10 +236,17 @@ function interceptWebSocket(): void {
       const summary = parseWsMsg(data);
       if (summary) dlog(`ws→ ${summary}`);
     } else {
-      // Supabase v2 encodes broadcasts as binary (ArrayBuffer)
-      const buf = data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer as ArrayBuffer;
-      const summary = parseBinaryBroadcast(buf);
-      dlog(`ws→bin ${summary}`);
+      // Supabase v2 encodes broadcasts as binary (ArrayBuffer/TypedArray)
+      try {
+        let buf: ArrayBuffer;
+        if (data instanceof ArrayBuffer) buf = data;
+        else if (ArrayBuffer.isView(data)) buf = data.buffer as ArrayBuffer;
+        else { dlog(`ws→ non-string type=${typeof data} ctor=${data?.constructor?.name}`); return origSend.call(this, data); }
+        const summary = parseBinaryBroadcast(buf);
+        dlog(`ws→bin ${summary}`);
+      } catch (e) {
+        dlog(`ws→bin parse-err: ${e}`);
+      }
     }
     return origSend.call(this, data);
   };
@@ -283,6 +335,7 @@ if (debugEnabled) {
   window.addEventListener('error', (e) => {
     dlog(`ERROR: ${e.message}`);
   });
+  interceptRTC();
   interceptWebSocket();
   dlog('debug mode active');
   runDiagnostics();
