@@ -39,7 +39,7 @@
     <tr>
       <td>IP address</td>
       <td>Required by WebRTC to establish a direct connection between players</td>
-      <td>Not stored by us. However, your IP address is visible to the other player as an inherent part of P2P networking. Supabase and Cloudflare may log your IP address as part of standard infrastructure operations (see Third-Party Services below).</td>
+      <td>Not stored by us. Your IP address is typically visible to the other player as an inherent part of P2P networking. When a relay (TURN) server is used, your IP is visible to the relay provider instead. Supabase, Cloudflare, and TURN relay providers (Metered.ca, freestun.net) may log your IP address as part of standard infrastructure operations (see Third-Party Services below).</td>
     </tr>
     <tr>
       <td>Signaling messages (SDP offers, ICE candidates)</td>
@@ -49,7 +49,7 @@
     <tr>
       <td>Game state (unit positions, events, results)</td>
       <td>Gameplay synchronization between players</td>
-      <td>Transmitted directly between players via encrypted P2P connection (DTLS). Not sent to any server.</td>
+      <td>Transmitted between players via encrypted connection (DTLS), either directly (P2P) or through an encrypted relay (TURN) when direct connection is not possible. Game data is not stored on any server.</td>
     </tr>
     <tr>
       <td>Player ID (random UUID)</td>
@@ -64,7 +64,7 @@
   </table>
 
   <h3>IP address disclosure</h3>
-  <p><strong>Important:</strong> Online play uses peer-to-peer connections. This means your public IP address may be visible to the other player, and their IP address may be visible to you. This is an inherent property of WebRTC P2P connections. When a direct connection is not possible (e.g., on mobile networks), traffic is routed through a TURN relay server, in which case your IP address is visible to the relay provider but not to the other player. If you do not want your IP address exposed, do not use online play.</p>
+  <p><strong>Important:</strong> Online play uses peer-to-peer connections. Your public IP address may be visible to the other player during connection negotiation, and their IP address may be visible to you. This is an inherent property of WebRTC P2P connections. When a direct connection is not possible (e.g., on mobile networks), game traffic is routed through a TURN relay server, in which case the relay provider also processes your IP address. If you do not want your IP address exposed, do not use online play.</p>
 
   <h2>Third-Party Services</h2>
   <p>The following third-party services are used <strong>only during online play</strong>:</p>
@@ -72,7 +72,7 @@
     <li><strong>Supabase</strong> — Provides the signaling relay for WebRTC connection setup. Signaling messages are ephemeral, but Supabase's infrastructure (including Cloudflare edge servers) logs connection metadata such as IP addresses and approximate geolocation. These logs are retained for 1-7 days depending on plan tier. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase Privacy Policy</a>.</li>
     <li><strong>Google and Cloudflare STUN servers</strong> — Used to determine your public IP address for NAT traversal during connection setup. These servers see your IP address but no game data.</li>
     <li><strong>Metered.ca TURN relay servers</strong> — When a direct P2P connection cannot be established (common on mobile/cellular networks), game traffic is routed through Metered's relay servers. In this case, Metered's servers process your IP address and relay encrypted game data between players. Game data remains encrypted (DTLS) in transit. <a href="https://www.metered.ca/privacy" target="_blank" rel="noopener">Metered Privacy Policy</a>.</li>
-    <li><strong>freestun.net TURN relay</strong> — Used as a fallback relay server when direct connections fail. Functions the same as the Metered relay described above.</li>
+    <li><strong>freestun.net TURN relay</strong> — Used as a fallback relay server when direct connections fail. Functions the same as the Metered relay described above. <a href="https://freestun.net" target="_blank" rel="noopener">freestun.net</a>.</li>
   </ul>
   <p>No analytics, advertising, tracking, or telemetry services are used.</p>
 
@@ -90,7 +90,7 @@
   <p>This app does not intentionally collect personal data. No accounts, logins, or registrations are required. The only personal data processed is your IP address during online play, as described above.</p>
 
   <h2>Legal Basis (GDPR)</h2>
-  <p>For users in the European Economic Area: the processing of IP addresses during online play is based on <strong>Legitimate Interest</strong> (GDPR Art. 6(1)(f)). The IP address exchange is technically necessary for establishing a peer-to-peer connection and is initiated by the user choosing to play online. No IP addresses are logged or stored by this app. However, third-party infrastructure providers (Supabase, Cloudflare) may retain connection metadata including IP addresses in their standard operational logs, as described in the Third-Party Services section above.</p>
+  <p>For users in the European Economic Area: the processing of IP addresses during online play is based on <strong>Legitimate Interest</strong> (GDPR Art. 6(1)(f)). The IP address exchange is technically necessary for establishing a peer-to-peer connection and is initiated by the user choosing to play online. No IP addresses are logged or stored by this app. However, third-party infrastructure providers (Supabase, Cloudflare, Metered.ca, freestun.net) may retain connection metadata including IP addresses in their standard operational logs, as described in the Third-Party Services section above.</p>
 
   <h2>Your Rights (GDPR)</h2>
   <p>If you are in the EEA, you have the right to:</p>

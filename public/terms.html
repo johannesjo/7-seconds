@@ -27,7 +27,8 @@
   <h2>Online Play</h2>
   <p>Online play creates a direct peer-to-peer (P2P) connection between you and another player using WebRTC. By choosing to play online, you acknowledge that:</p>
   <ul>
-    <li>Your public IP address will be visible to the other player, and theirs to you. This is inherent to P2P connections.</li>
+    <li>Your public IP address may be visible to the other player during connection negotiation, and theirs to you. This is inherent to P2P connections.</li>
+    <li>When a direct connection is not possible (e.g., on mobile networks), traffic may be routed through third-party TURN relay servers, which process your IP address and relay encrypted game data.</li>
     <li>A signaling service (Supabase) is used to establish the connection. Signaling messages are ephemeral and not stored.</li>
     <li>You are responsible for your conduct during online play.</li>
   </ul>
@@ -51,13 +52,13 @@
   <p>To the maximum extent permitted by law, the developer is not liable for:</p>
   <ul>
     <li>Any interactions between players during online play</li>
-    <li>IP address exposure inherent to P2P connections</li>
+    <li>IP address exposure inherent to P2P connections or relay-mediated connections</li>
     <li>Connection failures, latency, or disconnections</li>
     <li>Any damages arising from the use of the game</li>
   </ul>
 
   <h2>Third-Party Services</h2>
-  <p>Online play relies on third-party services for connection setup:</p>
+  <p>Online play relies on third-party services for connection setup and data relay. See our <a href="privacy-policy.html">Privacy Policy</a> for details on data processing.</p>
   <ul>
     <li><strong>Supabase</strong> — signaling relay. Subject to <a href="https://supabase.com/terms" target="_blank" rel="noopener">Supabase Terms of Service</a>.</li>
     <li><strong>Google and Cloudflare STUN servers</strong> — NAT traversal.</li>
