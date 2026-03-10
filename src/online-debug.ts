@@ -115,9 +115,40 @@ export async function testSupabaseRealtime(appId: string, supabaseKey: string): 
   client.removeAllChannels();
 }
 
+/** Parse a Phoenix/Supabase WS message and return a loggable summary. */
+function parseWsMsg(data: string): string | null {
+  try {
+    const parsed = JSON.parse(data);
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    const parts: string[] = [];
+    for (const msg of arr) {
+      const event = Array.isArray(msg) ? msg[3] : msg?.event;
+      const topic = Array.isArray(msg) ? msg[2] : msg?.topic;
+      if (event && event !== 'heartbeat' && event !== 'phx_reply') {
+        parts.push(`${event} topic=${String(topic).slice(0, 30)}`);
+      }
+    }
+    return parts.length > 0 ? parts.join('; ') : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Intercept WebSocket to log Supabase Realtime connection lifecycle. */
 function interceptWebSocket(): void {
   if (typeof window === 'undefined') return;
+
+  // Patch WebSocket.prototype.send to log ALL outgoing messages
+  const origSend = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (this: WebSocket, data) {
+    if (typeof data === 'string' && this.url?.includes('supabase')) {
+      const summary = parseWsMsg(data);
+      if (summary) dlog(`ws→ ${summary}`);
+    }
+    return origSend.call(this, data);
+  };
+
+  // Patch WebSocket constructor to log connections and incoming messages
   const OrigWS = window.WebSocket;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).WebSocket = function (url: string | URL, protocols?: string | string[]) {
@@ -128,47 +159,15 @@ function interceptWebSocket(): void {
       ws.addEventListener('open', () => dlog('ws connected'));
       ws.addEventListener('close', (e) => dlog(`ws closed code=${e.code} reason=${e.reason}`));
       ws.addEventListener('error', () => dlog('ws error'));
-
-      // Log outgoing messages (channel joins and broadcasts)
-      const origSend = ws.send.bind(ws);
-      ws.send = (data: string | ArrayBufferLike | Blob | ArrayBufferView) => {
-        if (typeof data === 'string') {
-          try {
-            const parsed = JSON.parse(data);
-            // Phoenix protocol: [joinRef, ref, topic, event, payload]
-            const arr = Array.isArray(parsed) ? parsed : [parsed];
-            for (const msg of arr) {
-              const event = Array.isArray(msg) ? msg[3] : msg?.event;
-              const topic = Array.isArray(msg) ? msg[2] : msg?.topic;
-              if (event && event !== 'heartbeat') {
-                dlog(`ws→ ${event} topic=${String(topic).slice(0, 30)}`);
-              }
-            }
-          } catch { /* not JSON, ignore */ }
-        }
-        return origSend(data);
-      };
-
-      // Log incoming messages (broadcasts from other peers)
       ws.addEventListener('message', (e) => {
         if (typeof e.data === 'string') {
-          try {
-            const parsed = JSON.parse(e.data);
-            const arr = Array.isArray(parsed) ? parsed : [parsed];
-            for (const msg of arr) {
-              const event = Array.isArray(msg) ? msg[3] : msg?.event;
-              const topic = Array.isArray(msg) ? msg[2] : msg?.topic;
-              if (event && event !== 'heartbeat' && event !== 'phx_reply') {
-                dlog(`ws← ${event} topic=${String(topic).slice(0, 30)}`);
-              }
-            }
-          } catch { /* not JSON, ignore */ }
+          const summary = parseWsMsg(e.data);
+          if (summary) dlog(`ws← ${summary}`);
         }
       });
     }
     return ws;
   } as unknown as typeof WebSocket;
-  // Preserve prototype chain for instanceof checks
   (window as any).WebSocket.prototype = OrigWS.prototype;
   (window as any).WebSocket.CONNECTING = OrigWS.CONNECTING;
   (window as any).WebSocket.OPEN = OrigWS.OPEN;
