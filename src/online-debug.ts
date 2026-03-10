@@ -140,8 +140,14 @@ function interceptWebSocket(): void {
 
   // Patch WebSocket.prototype.send to log ALL outgoing messages
   const origSend = WebSocket.prototype.send;
+  let sendCount = 0;
   WebSocket.prototype.send = function (this: WebSocket, data) {
     if (typeof data === 'string' && this.url?.includes('supabase')) {
+      // Log first 5 raw messages in full, then summaries only
+      if (sendCount < 5) {
+        dlog(`ws→raw[${sendCount}] ${data.slice(0, 200)}`);
+        sendCount++;
+      }
       const summary = parseWsMsg(data);
       if (summary) dlog(`ws→ ${summary}`);
     }
