@@ -1,5 +1,6 @@
 import { createOnlineRoom, generateRoomId, getShareUrl, getLocalPlayerId } from './online';
 import type { OnlineConnection } from './online';
+import { dlog, startPeerMonitor } from './online-debug';
 import type {
   OnlineGameState,
   OnlinePhase,
@@ -28,6 +29,7 @@ export class OnlineHost {
   private _guestWantsRematch = false;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private resubTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopPeerMonitor: (() => void) | null = null;
   private destroyed = false;
 
   // Total max wait: (20s × 5 resubs) + (2s × 5 delays) + 20s final = ~130s before error
@@ -71,6 +73,10 @@ export class OnlineHost {
       (peerId) => this.handlePeerJoin(peerId),
       (peerId) => this.handlePeerLeave(peerId),
     );
+
+    this.stopPeerMonitor?.();
+    this.stopPeerMonitor = startPeerMonitor(() => this.connection?.getPeers() ?? {}, 'host');
+    dlog(`host setupRoom resub=${resubCount}`);
 
     this.connection.paths[1]((data: OnlinePathData, peerId: string) => {
       if (peerId !== this.guestPeerId) return;
@@ -156,6 +162,8 @@ export class OnlineHost {
     this.destroyed = true;
     this.clearTimeout();
     this.clearResubTimer();
+    this.stopPeerMonitor?.();
+    this.stopPeerMonitor = null;
     this.connection?.leave();
     this.connection = null;
     this.pendingPaths = null;

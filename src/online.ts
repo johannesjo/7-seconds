@@ -1,5 +1,6 @@
 import { joinRoom } from 'trystero/supabase';
 import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal } from './online-types';
+import { dlog } from './online-debug';
 
 // Metered.ca TURN credentials — these are free-tier static credentials.
 // TODO: Replace with server-issued short-lived credentials (e.g. via Supabase
@@ -80,6 +81,7 @@ export interface OnlineConnection {
   frame: ActionPair<OnlineFrameData>;
   result: ActionPair<OnlineRoundResult>;
   signal: ActionPair<OnlineSignal>;
+  getPeers: () => Record<string, RTCPeerConnection>;
   leave: () => void;
 }
 
@@ -90,10 +92,17 @@ export function createOnlineRoom(
   onPeerJoin: (peerId: string) => void,
   onPeerLeave: (peerId: string) => void,
 ): OnlineConnection {
+  dlog(`createRoom role=${role} room=${roomId}`);
   const room = joinRoom(TRYSTERO_CONFIG, roomId);
 
-  room.onPeerJoin(onPeerJoin);
-  room.onPeerLeave(onPeerLeave);
+  room.onPeerJoin((peerId) => {
+    dlog(`peerJoin: ${peerId.slice(0, 8)}…`);
+    onPeerJoin(peerId);
+  });
+  room.onPeerLeave((peerId) => {
+    dlog(`peerLeave: ${peerId.slice(0, 8)}…`);
+    onPeerLeave(peerId);
+  });
 
   // Trystero's makeAction requires DataPayload (index-signature objects).
   // Our interfaces don't have index signatures, so we use `any` at the
@@ -112,6 +121,7 @@ export function createOnlineRoom(
     frame,
     result,
     signal,
+    getPeers: () => room.getPeers(),
     leave: () => room.leave(),
   };
 }

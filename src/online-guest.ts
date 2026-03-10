@@ -1,4 +1,5 @@
 import { createOnlineRoom, getLocalPlayerId, type OnlineConnection } from './online';
+import { dlog, startPeerMonitor } from './online-debug';
 import type {
   OnlineConnectionState,
   OnlineGameState,
@@ -28,6 +29,7 @@ export class OnlineGuest {
   private retryCount = 0;
   private _hostWantsRematch = false;
   private hostPeerId: string | null = null;
+  private stopPeerMonitor: (() => void) | null = null;
   private destroyed = false;
 
   // Total max wait: (8s × 4 attempts) + (2s × 3 delays) = ~38s before error
@@ -75,6 +77,10 @@ export class OnlineGuest {
         if (peerId === this.hostPeerId) this.setConnectionState('disconnected');
       },
     );
+
+    this.stopPeerMonitor?.();
+    this.stopPeerMonitor = startPeerMonitor(() => this.connection?.getPeers() ?? {}, 'guest');
+    dlog(`guest attemptJoin retry=${this.retryCount}`);
 
     const [, receiveState] = this.connection.state;
     const [, receivePhase] = this.connection.phase;
@@ -144,6 +150,8 @@ export class OnlineGuest {
   destroy(): void {
     this.destroyed = true;
     this.clearRetryTimer();
+    this.stopPeerMonitor?.();
+    this.stopPeerMonitor = null;
     if (this.connection) {
       this.connection.leave();
       this.connection = null;
