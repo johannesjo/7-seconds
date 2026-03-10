@@ -86,6 +86,35 @@ export function startPeerMonitor(getPeers: () => Record<string, RTCPeerConnectio
   return () => clearInterval(interval);
 }
 
+/** Run a Supabase Realtime connectivity test. */
+export async function testSupabaseRealtime(appId: string, supabaseKey: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const { createClient } = await import('@supabase/supabase-js');
+  const client = createClient(appId, supabaseKey);
+  const testTopic = `_diag_${Date.now()}`;
+  const chan = client.channel(testTopic);
+
+  dlog('supabase: testing realtime...');
+
+  const result = await new Promise<string>((resolve) => {
+    const timeout = setTimeout(() => resolve('timeout (10s)'), 10_000);
+    chan.subscribe((status) => {
+      dlog(`supabase: channel status = ${status}`);
+      if (status === 'SUBSCRIBED') {
+        clearTimeout(timeout);
+        resolve('ok');
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        clearTimeout(timeout);
+        resolve(`failed: ${status}`);
+      }
+    });
+  });
+
+  dlog(`supabase: realtime test = ${result}`);
+  client.removeChannel(chan);
+  client.removeAllChannels();
+}
+
 // Show overlay immediately so user knows debug mode is active
 if (debugEnabled) {
   dlog('debug mode active');

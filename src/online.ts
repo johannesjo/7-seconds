@@ -1,6 +1,6 @@
 import { joinRoom } from 'trystero/supabase';
 import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal } from './online-types';
-import { dlog } from './online-debug';
+import { dlog, debugEnabled, testSupabaseRealtime } from './online-debug';
 
 // Metered.ca TURN credentials — these are free-tier static credentials.
 // TODO: Replace with server-issued short-lived credentials (e.g. via Supabase
@@ -93,6 +93,12 @@ export function createOnlineRoom(
   onPeerLeave: (peerId: string) => void,
 ): OnlineConnection {
   dlog(`createRoom role=${role} room=${roomId}`);
+
+  // Run Supabase Realtime connectivity test in background (debug only)
+  if (debugEnabled) {
+    testSupabaseRealtime(TRYSTERO_CONFIG.appId, TRYSTERO_CONFIG.supabaseKey);
+  }
+
   const room = joinRoom(TRYSTERO_CONFIG, roomId);
 
   room.onPeerJoin((peerId) => {
