@@ -30,9 +30,11 @@ export class OnlineHost {
   private resubTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
 
-  private static readonly RESUB_INTERVAL_MS = 12_000;
+  // Total max wait: (20s × 5 resubs) + (2s × 5 delays) + 20s final = ~130s before error
+  // 20s interval gives slow mobile ICE negotiation enough time to complete
+  private static readonly RESUB_INTERVAL_MS = 20_000;
   private static readonly RESUB_DELAY_MS = 2_000;
-  private static readonly MAX_RESUBS = 8;
+  private static readonly MAX_RESUBS = 5;
 
   constructor(callbacks: OnlineHostCallbacks) {
     this.callbacks = callbacks;
@@ -91,6 +93,7 @@ export class OnlineHost {
     this.clearResubTimer();
     if (resubCount < OnlineHost.MAX_RESUBS) {
       this.resubTimer = setTimeout(() => {
+        this.resubTimer = null;
         if (this.connectionState !== 'waiting' || this.destroyed) return;
         console.log(`[online-host] Resubscribing (${resubCount + 1}/${OnlineHost.MAX_RESUBS})…`);
         if (this.connection) {
@@ -98,6 +101,7 @@ export class OnlineHost {
           this.connection = null;
         }
         this.resubTimer = setTimeout(() => {
+          this.resubTimer = null;
           if (!this.destroyed) this.setupRoom(roomId, resubCount + 1);
         }, OnlineHost.RESUB_DELAY_MS);
       }, OnlineHost.RESUB_INTERVAL_MS);

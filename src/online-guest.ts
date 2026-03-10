@@ -30,6 +30,7 @@ export class OnlineGuest {
   private hostPeerId: string | null = null;
   private destroyed = false;
 
+  // Total max wait: (8s × 4 attempts) + (2s × 3 delays) = ~38s before error
   private static readonly ATTEMPT_TIMEOUT_MS = 8_000;
   private static readonly MAX_RETRIES = 3;
   private static readonly RETRY_DELAY_MS = 2_000;
@@ -98,6 +99,7 @@ export class OnlineGuest {
     // Retry if no peer joins within timeout
     this.clearRetryTimer();
     this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
       if (this.connectionState === 'connected' || this.destroyed) return;
 
       if (this.retryCount < OnlineGuest.MAX_RETRIES) {
@@ -109,6 +111,7 @@ export class OnlineGuest {
           this.connection = null;
         }
         this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
           if (!this.destroyed) this.attemptJoin(roomId);
         }, OnlineGuest.RETRY_DELAY_MS);
       } else {
