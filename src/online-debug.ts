@@ -140,6 +140,39 @@ function parseWsMsg(data: string): string | null {
   }
 }
 
+/** Parse a Supabase v2 binary broadcast message. */
+function parseBinaryBroadcast(buf: ArrayBuffer): string {
+  try {
+    const view = new DataView(buf);
+    const kind = view.getUint8(0);
+    // kind 3 = userBroadcastPush (outgoing), kind 4 = userBroadcast (incoming)
+    if (kind !== 3 && kind !== 4) return `kind=${kind} len=${buf.byteLength}`;
+    const decoder = new TextDecoder();
+    if (kind === 3) {
+      // [kind, joinRefLen, refLen, topicLen, eventLen, metaLen, encoding, ...data]
+      const topicLen = view.getUint8(3);
+      const eventLen = view.getUint8(4);
+      let offset = 7;
+      const joinRefLen = view.getUint8(1);
+      const refLen = view.getUint8(2);
+      offset += joinRefLen + refLen;
+      const topic = decoder.decode(buf.slice(offset, offset + topicLen));
+      offset += topicLen;
+      const event = decoder.decode(buf.slice(offset, offset + eventLen));
+      return `event=${event} topic=${topic.slice(0, 30)} (${buf.byteLength}B)`;
+    }
+    // kind 4: [kind, topicLen, eventLen, metaLen, encoding, ...data]
+    const topicLen = view.getUint8(1);
+    const eventLen = view.getUint8(2);
+    const offset = 5;
+    const topic = decoder.decode(buf.slice(offset, offset + topicLen));
+    const event = decoder.decode(buf.slice(offset + topicLen, offset + topicLen + eventLen));
+    return `event=${event} topic=${topic.slice(0, 30)} (${buf.byteLength}B)`;
+  } catch {
+    return `binary len=${buf.byteLength}`;
+  }
+}
+
 /** Intercept WebSocket to log Supabase Realtime connection lifecycle. */
 function interceptWebSocket(): void {
   if (typeof window === 'undefined') return;
@@ -148,14 +181,20 @@ function interceptWebSocket(): void {
   const origSend = WebSocket.prototype.send;
   let sendCount = 0;
   WebSocket.prototype.send = function (this: WebSocket, data) {
-    if (typeof data === 'string' && this.url?.includes('supabase')) {
-      // Log first 5 raw messages in full, then summaries only
+    if (!this.url?.includes('supabase')) return origSend.call(this, data);
+
+    if (typeof data === 'string') {
       if (sendCount < 5) {
         dlog(`ws→raw[${sendCount}] ${data.slice(0, 200)}`);
         sendCount++;
       }
       const summary = parseWsMsg(data);
       if (summary) dlog(`ws→ ${summary}`);
+    } else {
+      // Supabase v2 encodes broadcasts as binary (ArrayBuffer)
+      const buf = data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer as ArrayBuffer;
+      const summary = parseBinaryBroadcast(buf);
+      dlog(`ws→bin ${summary}`);
     }
     return origSend.call(this, data);
   };
@@ -174,13 +213,20 @@ function interceptWebSocket(): void {
       let recvCount = 0;
       ws.addEventListener('message', (e) => {
         if (typeof e.data === 'string') {
-          // Log first 5 raw incoming messages
           if (recvCount < 5) {
             dlog(`ws←raw[${recvCount}] ${e.data.slice(0, 200)}`);
             recvCount++;
           }
           const summary = parseWsMsg(e.data);
           if (summary) dlog(`ws← ${summary}`);
+        } else if (e.data instanceof ArrayBuffer) {
+          const summary = parseBinaryBroadcast(e.data);
+          dlog(`ws←bin ${summary}`);
+        } else if (e.data instanceof Blob) {
+          e.data.arrayBuffer().then((buf) => {
+            const summary = parseBinaryBroadcast(buf);
+            dlog(`ws←bin ${summary}`);
+          });
         }
       });
     }
