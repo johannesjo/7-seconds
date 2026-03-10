@@ -64,13 +64,15 @@
   </table>
 
   <h3>IP address disclosure</h3>
-  <p><strong>Important:</strong> Online play uses peer-to-peer connections. This means your public IP address is visible to the other player, and their IP address is visible to you. This is an inherent property of WebRTC P2P connections and cannot be avoided without routing through a relay server. If you do not want your IP address exposed, do not use online play.</p>
+  <p><strong>Important:</strong> Online play uses peer-to-peer connections. This means your public IP address may be visible to the other player, and their IP address may be visible to you. This is an inherent property of WebRTC P2P connections. When a direct connection is not possible (e.g., on mobile networks), traffic is routed through a TURN relay server, in which case your IP address is visible to the relay provider but not to the other player. If you do not want your IP address exposed, do not use online play.</p>
 
   <h2>Third-Party Services</h2>
   <p>The following third-party services are used <strong>only during online play</strong>:</p>
   <ul>
     <li><strong>Supabase</strong> — Provides the signaling relay for WebRTC connection setup. Signaling messages are ephemeral, but Supabase's infrastructure (including Cloudflare edge servers) logs connection metadata such as IP addresses and approximate geolocation. These logs are retained for 1-7 days depending on plan tier. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase Privacy Policy</a>.</li>
     <li><strong>Google and Cloudflare STUN servers</strong> — Used to determine your public IP address for NAT traversal during connection setup. These servers see your IP address but no game data.</li>
+    <li><strong>Metered.ca TURN relay servers</strong> — When a direct P2P connection cannot be established (common on mobile/cellular networks), game traffic is routed through Metered's relay servers. In this case, Metered's servers process your IP address and relay encrypted game data between players. Game data remains encrypted (DTLS) in transit. <a href="https://www.metered.ca/privacy" target="_blank" rel="noopener">Metered Privacy Policy</a>.</li>
+    <li><strong>freestun.net TURN relay</strong> — Used as a fallback relay server when direct connections fail. Functions the same as the Metered relay described above.</li>
   </ul>
   <p>No analytics, advertising, tracking, or telemetry services are used.</p>
 
@@ -112,6 +114,6 @@
   <h2>Contact</h2>
   <p>If you have questions about this privacy policy, you can reach the developer at <a href="https://github.com/johannesjo/7-seconds">github.com/johannesjo/7-seconds</a>.</p>
 
-  <p><em>Last updated: March 7, 2026</em></p>
+  <p><em>Last updated: March 10, 2026</em></p>
 </body>
 </html>
