@@ -115,7 +115,32 @@ export async function testSupabaseRealtime(appId: string, supabaseKey: string): 
   client.removeAllChannels();
 }
 
+/** Intercept WebSocket to log Supabase Realtime connection lifecycle. */
+function interceptWebSocket(): void {
+  if (typeof window === 'undefined') return;
+  const OrigWS = window.WebSocket;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).WebSocket = function (url: string | URL, protocols?: string | string[]) {
+    const ws = new OrigWS(url, protocols);
+    const urlStr = typeof url === 'string' ? url : url.toString();
+    if (urlStr.includes('supabase') || urlStr.includes('realtime')) {
+      dlog(`ws open: ${urlStr.slice(0, 80)}…`);
+      ws.addEventListener('open', () => dlog('ws connected'));
+      ws.addEventListener('close', (e) => dlog(`ws closed code=${e.code} reason=${e.reason}`));
+      ws.addEventListener('error', () => dlog('ws error'));
+    }
+    return ws;
+  } as unknown as typeof WebSocket;
+  // Preserve prototype chain for instanceof checks
+  (window as any).WebSocket.prototype = OrigWS.prototype;
+  (window as any).WebSocket.CONNECTING = OrigWS.CONNECTING;
+  (window as any).WebSocket.OPEN = OrigWS.OPEN;
+  (window as any).WebSocket.CLOSING = OrigWS.CLOSING;
+  (window as any).WebSocket.CLOSED = OrigWS.CLOSED;
+}
+
 // Show overlay immediately so user knows debug mode is active
 if (debugEnabled) {
+  interceptWebSocket();
   dlog('debug mode active');
 }
