@@ -128,6 +128,43 @@ function interceptWebSocket(): void {
       ws.addEventListener('open', () => dlog('ws connected'));
       ws.addEventListener('close', (e) => dlog(`ws closed code=${e.code} reason=${e.reason}`));
       ws.addEventListener('error', () => dlog('ws error'));
+
+      // Log outgoing messages (channel joins and broadcasts)
+      const origSend = ws.send.bind(ws);
+      ws.send = (data: string | ArrayBufferLike | Blob | ArrayBufferView) => {
+        if (typeof data === 'string') {
+          try {
+            const parsed = JSON.parse(data);
+            // Phoenix protocol: [joinRef, ref, topic, event, payload]
+            const arr = Array.isArray(parsed) ? parsed : [parsed];
+            for (const msg of arr) {
+              const event = Array.isArray(msg) ? msg[3] : msg?.event;
+              const topic = Array.isArray(msg) ? msg[2] : msg?.topic;
+              if (event && event !== 'heartbeat') {
+                dlog(`ws→ ${event} topic=${String(topic).slice(0, 30)}`);
+              }
+            }
+          } catch { /* not JSON, ignore */ }
+        }
+        return origSend(data);
+      };
+
+      // Log incoming messages (broadcasts from other peers)
+      ws.addEventListener('message', (e) => {
+        if (typeof e.data === 'string') {
+          try {
+            const parsed = JSON.parse(e.data);
+            const arr = Array.isArray(parsed) ? parsed : [parsed];
+            for (const msg of arr) {
+              const event = Array.isArray(msg) ? msg[3] : msg?.event;
+              const topic = Array.isArray(msg) ? msg[2] : msg?.topic;
+              if (event && event !== 'heartbeat' && event !== 'phx_reply') {
+                dlog(`ws← ${event} topic=${String(topic).slice(0, 30)}`);
+              }
+            }
+          } catch { /* not JSON, ignore */ }
+        }
+      });
     }
     return ws;
   } as unknown as typeof WebSocket;
