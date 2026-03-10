@@ -106,7 +106,17 @@ export async function createOnlineRoom(
 ): Promise<OnlineConnection> {
   const iceServers = await fetchIceServers();
   dlog(`createRoom role=${role} room=${roomId} ice=${iceServers.length}`);
-  const room = joinRoom({ ...SUPABASE_CONFIG, rtcConfig: { iceServers } }, roomId);
+  const room = joinRoom({
+    ...SUPABASE_CONFIG,
+    rtcConfig: {
+      iceServers,
+      // Force relay-only so ICE gathering is nearly instant (< 1s).
+      // Without this, gathering takes 5s (iceTimeout in trystero),
+      // and the host prunes the pending offer at 4.8s before the
+      // guest's answer arrives.
+      iceTransportPolicy: 'relay',
+    },
+  }, roomId);
 
   room.onPeerJoin((peerId) => {
     dlog(`peerJoin: ${peerId.slice(0, 8)}…`);

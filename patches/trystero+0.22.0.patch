@@ -1,0 +1,13 @@
+diff --git a/node_modules/trystero/src/strategy.js b/node_modules/trystero/src/strategy.js
+index 965356e..b6c43db 100644
+--- a/node_modules/trystero/src/strategy.js
++++ b/node_modules/trystero/src/strategy.js
+@@ -15,7 +15,7 @@ import {
+ } from './utils.js'
+ 
+ const poolSize = 20
+-const announceIntervalMs = 5_333
++const announceIntervalMs = 15_000
+ const offerTtl = 57_333
+ 
+ export default ({init, subscribe, announce}) => {
