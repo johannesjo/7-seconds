@@ -5,12 +5,35 @@ const TRYSTERO_CONFIG = {
   appId: 'https://puoxmqovckvfoqyihasl.supabase.co',
   supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4',
   // STUN + TURN servers for NAT traversal
+  // TURN relays are critical for mobile/cellular connections where carriers
+  // use symmetric NAT (CGNAT) that STUN alone cannot traverse.
   rtcConfig: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' },
-      // Free TURN relays for symmetric NAT / cross-network connections
+      // Metered.ca free TURN relays — more reliable for symmetric NAT / mobile
+      {
+        urls: 'turn:a.relay.metered.ca:80',
+        username: 'e73585f28138d34a3b5e7db1',
+        credential: 'kHunen+voMBpLMj/',
+      },
+      {
+        urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+        username: 'e73585f28138d34a3b5e7db1',
+        credential: 'kHunen+voMBpLMj/',
+      },
+      {
+        urls: 'turn:a.relay.metered.ca:443',
+        username: 'e73585f28138d34a3b5e7db1',
+        credential: 'kHunen+voMBpLMj/',
+      },
+      {
+        urls: 'turns:a.relay.metered.ca:443',
+        username: 'e73585f28138d34a3b5e7db1',
+        credential: 'kHunen+voMBpLMj/',
+      },
+      // Fallback free TURN relays
       {
         urls: 'turn:freestun.net:3478',
         username: 'free',
