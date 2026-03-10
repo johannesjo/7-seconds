@@ -178,12 +178,29 @@ function interceptRTC(): void {
   if (typeof window === 'undefined') return;
   const OrigRTC = window.RTCPeerConnection;
   let pcCount = 0;
+  const pcIds = new WeakMap<RTCPeerConnection, number>();
+
+  // Patch prototype.setRemoteDescription to catch ALL calls reliably
+  const origSetRemote = OrigRTC.prototype.setRemoteDescription;
+  OrigRTC.prototype.setRemoteDescription = function (
+    this: RTCPeerConnection,
+    desc: RTCSessionDescriptionInit,
+  ) {
+    const id = pcIds.get(this) ?? '?';
+    const sdp = desc.sdp ?? '';
+    const host = (sdp.match(/typ host/g) || []).length;
+    const srflx = (sdp.match(/typ srflx/g) || []).length;
+    const relay = (sdp.match(/typ relay/g) || []).length;
+    dlog(`rtc#${id} setRemote(${desc.type}) host=${host} srflx=${srflx} relay=${relay}`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (origSetRemote as any).call(this, desc);
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).RTCPeerConnection = function (config?: RTCConfiguration) {
     const id = pcCount++;
     const pc = new OrigRTC(config);
-    // Only log first few and any that get remote descriptions (active peers)
+    pcIds.set(pc, id);
     if (id < 3) {
       dlog(`rtc#${id} created servers=${config?.iceServers?.length ?? 0}`);
     }
@@ -194,25 +211,12 @@ function interceptRTC(): void {
       dlog(`rtc#${id} ice: ${pc.iceConnectionState}`);
     });
     pc.addEventListener('icegatheringstatechange', () => {
-      if (pc.iceGatheringState === 'complete') {
-        // Count candidate types in the local description
-        const sdp = pc.localDescription?.sdp ?? '';
-        const host = (sdp.match(/typ host/g) || []).length;
-        const srflx = (sdp.match(/typ srflx/g) || []).length;
-        const relay = (sdp.match(/typ relay/g) || []).length;
-        dlog(`rtc#${id} ice-done: host=${host} srflx=${srflx} relay=${relay}`);
-      }
-    });
-    // Log when remote description is set (SDP answer/offer received)
-    const origSetRemote = pc.setRemoteDescription.bind(pc);
-    pc.setRemoteDescription = function (desc: RTCSessionDescriptionInit) {
-      const sdp = desc.sdp ?? '';
+      const sdp = pc.localDescription?.sdp ?? '';
       const host = (sdp.match(/typ host/g) || []).length;
       const srflx = (sdp.match(/typ srflx/g) || []).length;
       const relay = (sdp.match(/typ relay/g) || []).length;
-      dlog(`rtc#${id} setRemote(${desc.type}) host=${host} srflx=${srflx} relay=${relay}`);
-      return origSetRemote(desc);
-    };
+      dlog(`rtc#${id} gather=${pc.iceGatheringState} host=${host} srflx=${srflx} relay=${relay}`);
+    });
     return pc;
   } as unknown as typeof RTCPeerConnection;
   (window as any).RTCPeerConnection.prototype = OrigRTC.prototype;
