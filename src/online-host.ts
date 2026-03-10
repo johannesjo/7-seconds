@@ -48,6 +48,12 @@ export class OnlineHost {
 
   async createRoom(): Promise<string> {
     const roomId = generateRoomId();
+    await this.createRoomWithId(roomId);
+    this.callbacks.onShareUrl(getShareUrl(roomId));
+    return roomId;
+  }
+
+  async createRoomWithId(roomId: string): Promise<void> {
     this.setConnectionState('waiting');
 
     try {
@@ -60,7 +66,7 @@ export class OnlineHost {
     } catch (e) {
       dlog(`host createRoom failed: ${e}`);
       this.setConnectionState('error');
-      return roomId;
+      return;
     }
 
     this.stopPeerMonitor?.();
@@ -91,9 +97,6 @@ export class OnlineHost {
         this.setConnectionState('error');
       }
     }, OnlineHost.CONNECTION_TIMEOUT_MS);
-
-    this.callbacks.onShareUrl(getShareUrl(roomId));
-    return roomId;
   }
 
   consumeGuestPaths(): OnlinePathData | null {

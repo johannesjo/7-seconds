@@ -4,11 +4,14 @@ import { dlog } from './online-debug';
 
 const METERED_API_KEY = 'c6d3fd98814ae0f5e636b38bdde327ef2eae';
 
+export const SUPABASE_URL = 'https://puoxmqovckvfoqyihasl.supabase.co';
+// Full JWT form required — the short `sb_publishable_*` format causes
+// Supabase Realtime subscription failures. Do not replace with short key.
+export const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4';
+
 const SUPABASE_CONFIG = {
-  appId: 'https://puoxmqovckvfoqyihasl.supabase.co',
-  // Full JWT form required — the short `sb_publishable_*` format causes
-  // Supabase Realtime subscription failures. Do not replace with short key.
-  supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4',
+  appId: SUPABASE_URL,
+  supabaseKey: SUPABASE_KEY,
 };
 
 /** Fetch short-lived TURN credentials from Metered.ca REST API.

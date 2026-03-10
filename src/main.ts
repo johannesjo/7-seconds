@@ -10,6 +10,7 @@ import { DAY_THEME, NIGHT_THEME } from './theme';
 import { OnlineHost } from './online-host';
 import { OnlineGuest } from './online-guest';
 import { getJoinRoomId, getLocalPlayerId, prefetchIceServers } from './online';
+import { findMatch } from './online-matchmaking';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
 import { PathDrawer } from './path-drawer';
@@ -66,6 +67,7 @@ const exitGameBtn = document.getElementById('exit-game-btn')!;
 
 // Online lobby elements
 const onlineBtn = document.getElementById('online-btn')!;
+const onlineRandomBtn = document.getElementById('online-random-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
 const onlineStatus = document.getElementById('online-status')!;
 const onlineShareContainer = document.getElementById('online-share-container')!;
@@ -101,6 +103,7 @@ let guestReplayEvents: ReplayEvent[] = [];
 let guestReplayFrameIndex = 0;
 let opponentPlayerId: string | null = null;
 let localRematchRequested = false;
+let cancelMatchmaking: (() => void) | null = null;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -1063,6 +1066,85 @@ onlineBtn.addEventListener('click', async () => {
   await onlineHost.createRoom();
 });
 
+// Online vs Random — client-side matchmaking via Supabase Realtime
+onlineRandomBtn.addEventListener('click', async () => {
+  onlineActive = true;
+
+  await initRenderer();
+
+  onlineLobby.style.display = 'flex';
+  onlineShareContainer.style.display = 'none';
+  onlineStatus.textContent = 'Searching for opponent...';
+
+  const { promise, cancel } = findMatch();
+  cancelMatchmaking = cancel;
+
+  try {
+    const result = await promise;
+    cancelMatchmaking = null;
+
+    if (result.role === 'host') {
+      onlineRole = 'host';
+      onlineStatus.textContent = 'Opponent found! Setting up game...';
+      // Reuse the existing host flow but with the matched roomId
+      onlineHost = new OnlineHost({
+        onConnectionStateChange(state: OnlineConnectionState) {
+          if (state === 'connected') {
+            onlineLobby.style.display = 'none';
+            startOnlineHostGame();
+          } else if (state === 'disconnected') {
+            engine?.stop();
+            planningOverlay.classList.remove('active');
+            confirmBtn.classList.remove('active');
+            winnerTextEl.innerHTML = 'Opponent Disconnected';
+            winnerTextEl.style.color = '#888';
+            resultStatsEl.innerHTML = '';
+            rematchBtn.style.display = 'none';
+            replayBtn.style.display = 'none';
+            newBattleBtn.textContent = 'Back';
+            showScreen('result');
+          } else if (state === 'waiting') {
+            onlineStatus.textContent = 'Waiting for opponent to connect...';
+          } else if (state === 'error') {
+            onlineStatus.textContent = 'Connection failed. Try again.';
+          }
+        },
+        onShareUrl() { /* no-op for random match */ },
+        onGuestPathsReceived() {
+          if (!engine || !onlineHost) return;
+          if (engine.phase === 'red-planning') {
+            const pathData = onlineHost.consumeGuestPaths();
+            if (pathData) {
+              engine.setRedPaths(pathData.paths);
+              engine.confirmPlan();
+              planningOverlay.classList.remove('active');
+            }
+          }
+        },
+        onGuestRematchRequested() {
+          if (localRematchRequested) {
+            startOnlineRematch();
+          } else {
+            rematchBtn.textContent = 'Rematch (opponent ready)';
+          }
+        },
+        onGuestIdentity(playerId: string) {
+          opponentPlayerId = playerId;
+        },
+      });
+      await onlineHost.createRoomWithId(result.roomId);
+    } else {
+      // Guest flow — reuse existing startOnlineGuestMode
+      startOnlineGuestMode(result.roomId);
+    }
+  } catch {
+    cancelMatchmaking = null;
+    if (onlineActive) {
+      onlineStatus.textContent = 'No opponent found. Try again.';
+    }
+  }
+});
+
 // Online lobby share/copy button
 onlineCopyBtn.addEventListener('click', async () => {
   const url = onlineShareUrl.value;
@@ -1081,6 +1163,8 @@ onlineCopyBtn.addEventListener('click', async () => {
 });
 
 onlineCancelBtn.addEventListener('click', () => {
+  cancelMatchmaking?.();
+  cancelMatchmaking = null;
   onlineHost?.destroy();
   onlineHost = null;
   onlineGuest?.destroy();

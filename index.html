@@ -59,7 +59,7 @@
       border-radius: 4px;
       cursor: pointer;
     }
-    #battle-btn:hover, #ai-btn:hover, #online-btn:hover, #horde-btn:hover { background: #3a3a5a; border-color: #777; }
+    #battle-btn:hover, #ai-btn:hover, #online-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: #3a3a5a; border-color: #777; }
     .beta-tag { font-size: 10px; vertical-align: super; opacity: 0.6; letter-spacing: 1px; }
 
     /* Battle Screen */
@@ -343,7 +343,7 @@
     body.day-mode #age-gate { background: rgba(245,240,224,0.95) !important; color: #443322; }
     body.day-mode #age-gate-yes { background: #cce8cc !important; color: #226633 !important; border-color: #44aa66 !important; }
     body.day-mode #age-gate-no { background: #e8e0cc !important; color: #443322 !important; border-color: #aa9977 !important; }
-    body.day-mode #online-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
+    body.day-mode #online-btn, body.day-mode #online-random-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
     body.day-mode #exit-game-btn { color: #443322; }
     body.day-mode #online-lobby { background: rgba(245,240,224,0.92) !important; color: #443322; }
     body.day-mode #online-lobby-title { color: #226633; }
@@ -398,7 +398,8 @@
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
       <button id="ai-btn">vs AI</button>
       <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#4a2a2a;color:#ff8844;border:2px solid #884422;border-radius:4px;cursor:pointer">Horde</button>
-      <button id="online-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">Online PvP <span class="beta-tag">BETA</span></button>
+      <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">Online vs Random <span class="beta-tag">BETA</span></button>
+      <button id="online-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">Online vs Friend</button>
       <button id="battle-btn">Local PvP</button>
     </div>
     <!-- CTF buttons hidden for now -->
