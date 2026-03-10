@@ -620,25 +620,26 @@ export class Renderer {
    * Scales the stage to fit the remote map, centers it, and shows black bars for extra space.
    */
   adaptToRemoteMap(remoteWidth: number, remoteHeight: number): void {
-    const canvasW = this.app.canvas.width;
-    const canvasH = this.app.canvas.height;
-
-    // Scale to fit the remote map within the local canvas
-    const scale = Math.min(canvasW / remoteWidth, canvasH / remoteHeight);
-    const offsetX = (canvasW - remoteWidth * scale) / 2;
-    const offsetY = (canvasH - remoteHeight * scale) / 2;
-
-    this.app.stage.scale.set(scale);
-    this.app.stage.position.set(offsetX, offsetY);
-
-    // Black canvas background for letterbox bars; theme bg is drawn as a
-    // filled rect inside the stage so the playable area keeps its color.
-    this.app.renderer.background.color = 0x000000;
-
-    // Update MAP_WIDTH/MAP_HEIGHT so PathDrawer and other systems use the remote dimensions
+    // Update logical map dimensions first
     setMapSize(remoteWidth, remoteHeight);
 
-    // Redraw background grid at correct size
+    // Resize the renderer to match the remote map (1:1 internal pixels)
+    this.app.renderer.resize(MAP_WIDTH, MAP_HEIGHT);
+
+    // Fit the canvas CSS size within the container without stretching
+    const container = this.app.canvas.parentElement;
+    const containerW = container?.clientWidth || window.innerWidth;
+    const containerH = container?.clientHeight || window.innerHeight;
+    const cssScale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
+    this.app.canvas.style.width = `${MAP_WIDTH * cssScale}px`;
+    this.app.canvas.style.height = `${MAP_HEIGHT * cssScale}px`;
+
+    // Reset stage transform — no internal scaling needed since renderer
+    // now matches the remote map dimensions exactly
+    this.app.stage.scale.set(1);
+    this.app.stage.position.set(0, 0);
+
+    this.app.renderer.background.color = 0x000000;
     this.drawBackground();
   }
 

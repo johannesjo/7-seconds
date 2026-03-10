@@ -74,6 +74,12 @@ const onlineShareContainer = document.getElementById('online-share-container')!;
 const onlineShareUrl = document.getElementById('online-share-url') as HTMLInputElement;
 const onlineCopyBtn = document.getElementById('online-copy-btn')!;
 const onlineCancelBtn = document.getElementById('online-cancel-btn')!;
+const onlineSpinner = document.getElementById('online-spinner')!;
+
+function setOnlineStatus(text: string, showSpinner = false): void {
+  onlineStatus.textContent = text;
+  onlineSpinner.style.display = showSpinner ? 'block' : 'none';
+}
 
 // State
 let renderer: Renderer | null = null;
@@ -731,14 +737,14 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 
   onlineLobby.style.display = 'flex';
   onlineShareContainer.style.display = 'none';
-  onlineStatus.textContent = 'Connecting to host...';
+  setOnlineStatus('Connecting to host...', true);
 
   onlineGuest = new OnlineGuest({
     onConnectionStateChange(state: OnlineConnectionState) {
       if (state === 'connected') {
-        onlineStatus.textContent = 'Connected! Waiting for game...';
+        setOnlineStatus('Connected! Waiting for game...', true);
       } else if (state === 'connecting') {
-        onlineStatus.textContent = 'Connecting...';
+        setOnlineStatus('Connecting...', true);
       } else if (state === 'disconnected') {
         // Show disconnect on result screen so player can go back
         planningOverlay.classList.remove('active');
@@ -751,7 +757,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         newBattleBtn.textContent = 'Back';
         showScreen('result');
       } else if (state === 'error') {
-        onlineStatus.textContent = 'Could not connect. Ask host to create a new room.';
+        setOnlineStatus('Could not connect. Ask host to create a new room.');
       }
     },
 
@@ -1007,7 +1013,7 @@ onlineBtn.addEventListener('click', async () => {
 
   onlineLobby.style.display = 'flex';
   onlineShareContainer.style.display = 'none';
-  onlineStatus.textContent = 'Creating room...';
+  setOnlineStatus('Creating room...', true);
 
   onlineHost = new OnlineHost({
     onConnectionStateChange(state: OnlineConnectionState) {
@@ -1027,9 +1033,9 @@ onlineBtn.addEventListener('click', async () => {
         newBattleBtn.textContent = 'Back';
         showScreen('result');
       } else if (state === 'waiting') {
-        onlineStatus.textContent = 'Waiting for opponent...';
+        setOnlineStatus('Waiting for opponent...', true);
       } else if (state === 'error') {
-        onlineStatus.textContent = 'Timed out. No opponent joined. Try creating a new room.';
+        setOnlineStatus('Timed out. No opponent joined. Try creating a new room.');
       }
     },
     onShareUrl(url: string) {
@@ -1074,7 +1080,7 @@ onlineRandomBtn.addEventListener('click', async () => {
 
   onlineLobby.style.display = 'flex';
   onlineShareContainer.style.display = 'none';
-  onlineStatus.textContent = 'Searching for opponent...';
+  setOnlineStatus('Searching for opponent...', true);
 
   const { promise, cancel } = findMatch();
   cancelMatchmaking = cancel;
@@ -1085,7 +1091,7 @@ onlineRandomBtn.addEventListener('click', async () => {
 
     if (result.role === 'host') {
       onlineRole = 'host';
-      onlineStatus.textContent = 'Opponent found! Setting up game...';
+      setOnlineStatus('Opponent found! Setting up game...', true);
       // Reuse the existing host flow but with the matched roomId
       onlineHost = new OnlineHost({
         onConnectionStateChange(state: OnlineConnectionState) {
@@ -1104,9 +1110,9 @@ onlineRandomBtn.addEventListener('click', async () => {
             newBattleBtn.textContent = 'Back';
             showScreen('result');
           } else if (state === 'waiting') {
-            onlineStatus.textContent = 'Waiting for opponent to connect...';
+            setOnlineStatus('Waiting for opponent to connect...', true);
           } else if (state === 'error') {
-            onlineStatus.textContent = 'Connection failed. Try again.';
+            setOnlineStatus('Connection failed. Try again.');
           }
         },
         onShareUrl() { /* no-op for random match */ },
@@ -1140,7 +1146,7 @@ onlineRandomBtn.addEventListener('click', async () => {
   } catch {
     cancelMatchmaking = null;
     if (onlineActive) {
-      onlineStatus.textContent = 'No opponent found. Try again.';
+      setOnlineStatus('No opponent found. Try again.');
     }
   }
 });

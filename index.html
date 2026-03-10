@@ -61,6 +61,7 @@
     }
     #battle-btn:hover, #ai-btn:hover, #online-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: #3a3a5a; border-color: #777; }
     .beta-tag { font-size: 10px; vertical-align: super; opacity: 0.6; letter-spacing: 1px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Battle Screen */
     #battle-screen {
@@ -455,6 +456,7 @@
 
   <div id="online-lobby" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:rgba(0,0,0,0.85);z-index:25;padding:32px">
     <h2 id="online-lobby-title" style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:#44ff88;margin:0">Online PvP</h2>
+    <div id="online-spinner" style="display:none;width:32px;height:32px;border:3px solid rgba(68,255,136,0.2);border-top-color:#44ff88;border-radius:50%;animation:spin 0.8s linear infinite"></div>
     <p id="online-status" style="font-size:16px;color:#ccc;margin:0">Creating room...</p>
     <div id="online-share-container" style="display:none;flex-direction:column;align-items:center;gap:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:20px;max-width:400px;width:90vw">
       <p style="font-size:14px;opacity:0.7;margin:0">Share this link with your opponent:</p>
