@@ -11,13 +11,9 @@ const SUPABASE_CONFIG = {
   supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4',
 };
 
-const STUN_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-];
-
-/** Fetch short-lived TURN credentials from Metered.ca REST API. */
+/** Fetch short-lived TURN credentials from Metered.ca REST API.
+ *  We limit total ICE servers to keep gathering fast (< 3s) so
+ *  trystero's 4.8s prune timeout doesn't kill the pending offer. */
 let cachedIceServers: RTCIceServer[] | null = null;
 export async function fetchIceServers(): Promise<RTCIceServer[]> {
   if (cachedIceServers) return cachedIceServers;
@@ -26,14 +22,27 @@ export async function fetchIceServers(): Promise<RTCIceServer[]> {
       `https://7seconds.metered.live/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`,
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const turnServers: RTCIceServer[] = await res.json();
-    dlog(`TURN: fetched ${turnServers.length} servers`);
-    cachedIceServers = [...STUN_SERVERS, ...turnServers];
+    const allServers: RTCIceServer[] = await res.json();
+    // Pick one UDP relay and one TCP/TLS relay for firewall traversal.
+    // Fewer servers → faster ICE gathering → answer arrives before prune.
+    const udpTurn = allServers.find(s => {
+      const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
+      return url?.startsWith('turn:') && !url.includes('transport=tcp');
+    });
+    const tcpTurn = allServers.find(s => {
+      const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
+      return url?.startsWith('turns:') || (url?.startsWith('turn:') && url.includes('transport=tcp'));
+    });
+    const turnServers = [udpTurn, tcpTurn].filter((s): s is RTCIceServer => !!s);
+    dlog(`TURN: picked ${turnServers.length}/${allServers.length} servers`);
+    cachedIceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      ...turnServers,
+    ];
     return cachedIceServers;
   } catch (e) {
     dlog(`TURN: fetch failed — ${e}`);
-    // Fall back to STUN-only (will fail behind CGNAT)
-    return STUN_SERVERS;
+    return [{ urls: 'stun:stun.l.google.com:19302' }];
   }
 }
 
