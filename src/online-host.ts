@@ -28,15 +28,11 @@ export class OnlineHost {
   private guestPeerId: string | null = null;
   private _guestWantsRematch = false;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  private resubTimer: ReturnType<typeof setTimeout> | null = null;
   private stopPeerMonitor: (() => void) | null = null;
-  private destroyed = false;
 
-  // Total max wait: (20s × 5 resubs) + (2s × 5 delays) + 20s final = ~130s before error
-  // 20s interval gives slow mobile ICE negotiation enough time to complete
-  private static readonly RESUB_INTERVAL_MS = 20_000;
-  private static readonly RESUB_DELAY_MS = 2_000;
-  private static readonly MAX_RESUBS = 5;
+  // Single long timeout — trystero retries announces every ~5.3s internally.
+  // No room re-creation; creating multiple Supabase clients breaks signaling.
+  private static readonly CONNECTION_TIMEOUT_MS = 120_000;
 
   constructor(callbacks: OnlineHostCallbacks) {
     this.callbacks = callbacks;
@@ -52,20 +48,7 @@ export class OnlineHost {
 
   createRoom(): string {
     const roomId = generateRoomId();
-    this.destroyed = false;
-    this.setupRoom(roomId, 0);
-    this.callbacks.onShareUrl(getShareUrl(roomId));
-    return roomId;
-  }
-
-  private setupRoom(roomId: string, resubCount: number): void {
     this.setConnectionState('waiting');
-
-    // Clean up previous connection
-    if (this.connection) {
-      this.connection.leave();
-      this.connection = null;
-    }
 
     this.connection = createOnlineRoom(
       roomId,
@@ -76,7 +59,7 @@ export class OnlineHost {
 
     this.stopPeerMonitor?.();
     this.stopPeerMonitor = startPeerMonitor(() => this.connection?.getPeers() ?? {}, 'host');
-    dlog(`host setupRoom resub=${resubCount}`);
+    dlog('host createRoom');
 
     this.connection.paths[1]((data: OnlinePathData, peerId: string) => {
       if (peerId !== this.guestPeerId) return;
@@ -94,31 +77,17 @@ export class OnlineHost {
       }
     });
 
-    // Periodically re-create the room if no guest joins,
-    // to recover from stalled Supabase Realtime subscriptions
-    this.clearResubTimer();
-    if (resubCount < OnlineHost.MAX_RESUBS) {
-      this.resubTimer = setTimeout(() => {
-        this.resubTimer = null;
-        if (this.connectionState !== 'waiting' || this.destroyed) return;
-        console.log(`[online-host] Resubscribing (${resubCount + 1}/${OnlineHost.MAX_RESUBS})…`);
-        if (this.connection) {
-          this.connection.leave();
-          this.connection = null;
-        }
-        this.resubTimer = setTimeout(() => {
-          this.resubTimer = null;
-          if (!this.destroyed) this.setupRoom(roomId, resubCount + 1);
-        }, OnlineHost.RESUB_DELAY_MS);
-      }, OnlineHost.RESUB_INTERVAL_MS);
-    } else {
-      // Final timeout — give up after all resubs exhausted
-      this.timeoutTimer = setTimeout(() => {
-        if (this.connectionState === 'waiting') {
-          this.setConnectionState('error');
-        }
-      }, OnlineHost.RESUB_INTERVAL_MS);
-    }
+    // Single timeout — let trystero handle internal announce retries
+    this.timeoutTimer = setTimeout(() => {
+      this.timeoutTimer = null;
+      if (this.connectionState === 'waiting') {
+        dlog('host connection timeout');
+        this.setConnectionState('error');
+      }
+    }, OnlineHost.CONNECTION_TIMEOUT_MS);
+
+    this.callbacks.onShareUrl(getShareUrl(roomId));
+    return roomId;
   }
 
   consumeGuestPaths(): OnlinePathData | null {
@@ -159,9 +128,7 @@ export class OnlineHost {
   }
 
   destroy(): void {
-    this.destroyed = true;
     this.clearTimeout();
-    this.clearResubTimer();
     this.stopPeerMonitor?.();
     this.stopPeerMonitor = null;
     this.connection?.leave();
@@ -173,11 +140,9 @@ export class OnlineHost {
   }
 
   private handlePeerJoin(peerId: string): void {
-    // Reject additional peers if a guest is already connected
     if (this.guestPeerId) return;
     this.guestPeerId = peerId;
     this.clearTimeout();
-    this.clearResubTimer();
     this.setConnectionState('connected');
     this.sendIdentity();
   }
@@ -193,13 +158,6 @@ export class OnlineHost {
     if (this.timeoutTimer) {
       clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
-    }
-  }
-
-  private clearResubTimer(): void {
-    if (this.resubTimer) {
-      clearTimeout(this.resubTimer);
-      this.resubTimer = null;
     }
   }
 

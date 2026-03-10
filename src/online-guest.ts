@@ -25,17 +25,14 @@ export class OnlineGuest {
   private connection: OnlineConnection | null = null;
   private connectionState: OnlineConnectionState = 'idle';
   private readonly callbacks: OnlineGuestCallbacks;
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private retryCount = 0;
+  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private _hostWantsRematch = false;
   private hostPeerId: string | null = null;
   private stopPeerMonitor: (() => void) | null = null;
-  private destroyed = false;
 
-  // Total max wait: (8s × 4 attempts) + (2s × 3 delays) = ~38s before error
-  private static readonly ATTEMPT_TIMEOUT_MS = 8_000;
-  private static readonly MAX_RETRIES = 3;
-  private static readonly RETRY_DELAY_MS = 2_000;
+  // Single long timeout — trystero retries announces every ~5.3s internally,
+  // so we just wait for peer discovery without recreating clients.
+  private static readonly CONNECTION_TIMEOUT_MS = 60_000;
 
   constructor(callbacks: OnlineGuestCallbacks) {
     this.callbacks = callbacks;
@@ -50,26 +47,14 @@ export class OnlineGuest {
   }
 
   joinRoom(roomId: string): void {
-    this.destroyed = false;
-    this.retryCount = 0;
-    this.attemptJoin(roomId);
-  }
-
-  private attemptJoin(roomId: string): void {
     this.setConnectionState('connecting');
-
-    // Clean up previous attempt
-    if (this.connection) {
-      this.connection.leave();
-      this.connection = null;
-    }
 
     this.connection = createOnlineRoom(
       roomId,
       'guest',
       (peerId) => {
         this.hostPeerId = peerId;
-        this.clearRetryTimer();
+        this.clearTimeout();
         this.setConnectionState('connected');
         this.sendIdentity();
       },
@@ -80,7 +65,7 @@ export class OnlineGuest {
 
     this.stopPeerMonitor?.();
     this.stopPeerMonitor = startPeerMonitor(() => this.connection?.getPeers() ?? {}, 'guest');
-    dlog(`guest attemptJoin retry=${this.retryCount}`);
+    dlog('guest joinRoom');
 
     const [, receiveState] = this.connection.state;
     const [, receivePhase] = this.connection.phase;
@@ -102,28 +87,14 @@ export class OnlineGuest {
       }
     });
 
-    // Retry if no peer joins within timeout
-    this.clearRetryTimer();
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      if (this.connectionState === 'connected' || this.destroyed) return;
-
-      if (this.retryCount < OnlineGuest.MAX_RETRIES) {
-        this.retryCount++;
-        console.log(`[online-guest] Retry ${this.retryCount}/${OnlineGuest.MAX_RETRIES}…`);
-        // Delay before retry to let old Supabase client clean up
-        if (this.connection) {
-          this.connection.leave();
-          this.connection = null;
-        }
-        this.retryTimer = setTimeout(() => {
-          this.retryTimer = null;
-          if (!this.destroyed) this.attemptJoin(roomId);
-        }, OnlineGuest.RETRY_DELAY_MS);
-      } else {
+    // Single timeout — let trystero handle internal retries
+    this.timeoutTimer = setTimeout(() => {
+      this.timeoutTimer = null;
+      if (this.connectionState !== 'connected') {
+        dlog('guest connection timeout');
         this.setConnectionState('error');
       }
-    }, OnlineGuest.ATTEMPT_TIMEOUT_MS);
+    }, OnlineGuest.CONNECTION_TIMEOUT_MS);
   }
 
   /** Reset rematch state for a new game. */
@@ -148,8 +119,7 @@ export class OnlineGuest {
   }
 
   destroy(): void {
-    this.destroyed = true;
-    this.clearRetryTimer();
+    this.clearTimeout();
     this.stopPeerMonitor?.();
     this.stopPeerMonitor = null;
     if (this.connection) {
@@ -161,10 +131,10 @@ export class OnlineGuest {
     this.setConnectionState('idle');
   }
 
-  private clearRetryTimer(): void {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = null;
+  private clearTimeout(): void {
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
     }
   }
 
