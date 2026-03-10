@@ -124,7 +124,7 @@ function parseWsMsg(data: string): string | null {
     for (const msg of arr) {
       const event = Array.isArray(msg) ? msg[3] : msg?.event;
       const topic = Array.isArray(msg) ? msg[2] : msg?.topic;
-      if (event && event !== 'heartbeat' && event !== 'phx_reply') {
+      if (event && event !== 'heartbeat') {
         parts.push(`${event} topic=${String(topic).slice(0, 30)}`);
       }
     }
@@ -165,8 +165,14 @@ function interceptWebSocket(): void {
       ws.addEventListener('open', () => dlog('ws connected'));
       ws.addEventListener('close', (e) => dlog(`ws closed code=${e.code} reason=${e.reason}`));
       ws.addEventListener('error', () => dlog('ws error'));
+      let recvCount = 0;
       ws.addEventListener('message', (e) => {
         if (typeof e.data === 'string') {
+          // Log first 5 raw incoming messages
+          if (recvCount < 5) {
+            dlog(`ws←raw[${recvCount}] ${e.data.slice(0, 200)}`);
+            recvCount++;
+          }
           const summary = parseWsMsg(e.data);
           if (summary) dlog(`ws← ${summary}`);
         }
