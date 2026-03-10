@@ -656,7 +656,7 @@ export class GameEngine {
         id: u.id, type: u.type, team: u.team,
         x: u.pos.x, y: u.pos.y,
         hp: u.hp, maxHp: u.maxHp, radius: u.radius,
-        speed: u.speed, range: u.range,
+        speed: u.speed, range: u.range, gunAngle: u.gunAngle,
       })),
       obstacles: this.obstacles,
       elevationZones: this.elevationZones,

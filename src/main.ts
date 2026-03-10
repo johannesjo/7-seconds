@@ -790,7 +790,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
           team: u.team,
           pos: { x: u.x, y: u.y },
           vel: { x: 0, y: 0 },
-          gunAngle: u.team === 'blue' ? -Math.PI / 2 : Math.PI / 2,
+          gunAngle: u.gunAngle,
           hp: u.hp,
           maxHp: u.maxHp,
           alive: true,

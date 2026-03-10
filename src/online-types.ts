@@ -12,6 +12,7 @@ export interface OnlineGameState {
     radius: number;
     speed: number;
     range: number;
+    gunAngle: number;
   }[];
   obstacles: Obstacle[];
   elevationZones: ElevationZone[];
