@@ -2,37 +2,40 @@ import { joinRoom } from 'trystero/supabase';
 import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal } from './online-types';
 import { dlog } from './online-debug';
 
-// Metered.ca TURN credentials — these are free-tier static credentials.
-// TODO: Replace with server-issued short-lived credentials (e.g. via Supabase
-// Edge Function) to prevent quota abuse. Static credentials in the JS bundle
-// can be extracted and used by third parties.
-const TURN_USERNAME = 'e73585f28138d34a3b5e7db1';
-const TURN_CREDENTIAL = 'kHunen+voMBpLMj/';
+const METERED_API_KEY = 'c6d3fd98814ae0f5e636b38bdde327ef2eae';
 
-const TRYSTERO_CONFIG = {
+const SUPABASE_CONFIG = {
   appId: 'https://puoxmqovckvfoqyihasl.supabase.co',
   // Full JWT form required — the short `sb_publishable_*` format causes
   // Supabase Realtime subscription failures. Do not replace with short key.
   supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4',
-  // STUN + TURN servers for NAT traversal.
-  // TURN relays are critical for mobile/cellular connections where carriers
-  // use symmetric NAT (CGNAT) that STUN alone cannot traverse.
-  rtcConfig: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun.cloudflare.com:3478' },
-      // Metered.ca free TURN relays — more reliable for symmetric NAT / mobile
-      { urls: 'turn:a.relay.metered.ca:80', username: TURN_USERNAME, credential: TURN_CREDENTIAL },
-      { urls: 'turn:a.relay.metered.ca:80?transport=tcp', username: TURN_USERNAME, credential: TURN_CREDENTIAL },
-      { urls: 'turn:a.relay.metered.ca:443', username: TURN_USERNAME, credential: TURN_CREDENTIAL },
-      { urls: 'turns:a.relay.metered.ca:443', username: TURN_USERNAME, credential: TURN_CREDENTIAL },
-      // Fallback free TURN relays (community-run, may be unreliable)
-      { urls: 'turn:freestun.net:3478', username: 'free', credential: 'free' },
-      { urls: 'turns:freestun.net:5350', username: 'free', credential: 'free' },
-    ],
-  },
 };
+
+const STUN_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+];
+
+/** Fetch short-lived TURN credentials from Metered.ca REST API. */
+let cachedIceServers: RTCIceServer[] | null = null;
+export async function fetchIceServers(): Promise<RTCIceServer[]> {
+  if (cachedIceServers) return cachedIceServers;
+  try {
+    const res = await fetch(
+      `https://7seconds.metered.live/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`,
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const turnServers: RTCIceServer[] = await res.json();
+    dlog(`TURN: fetched ${turnServers.length} servers`);
+    cachedIceServers = [...STUN_SERVERS, ...turnServers];
+    return cachedIceServers;
+  } catch (e) {
+    dlog(`TURN: fetch failed — ${e}`);
+    // Fall back to STUN-only (will fail behind CGNAT)
+    return STUN_SERVERS;
+  }
+}
 
 const LOCAL_ID_KEY = '7s-player-id';
 
@@ -86,14 +89,15 @@ export interface OnlineConnection {
 }
 
 /** Create a Trystero room and return typed action channels. */
-export function createOnlineRoom(
+export async function createOnlineRoom(
   roomId: string,
   role: 'host' | 'guest',
   onPeerJoin: (peerId: string) => void,
   onPeerLeave: (peerId: string) => void,
-): OnlineConnection {
-  dlog(`createRoom role=${role} room=${roomId}`);
-  const room = joinRoom(TRYSTERO_CONFIG, roomId);
+): Promise<OnlineConnection> {
+  const iceServers = await fetchIceServers();
+  dlog(`createRoom role=${role} room=${roomId} ice=${iceServers.length}`);
+  const room = joinRoom({ ...SUPABASE_CONFIG, rtcConfig: { iceServers } }, roomId);
 
   room.onPeerJoin((peerId) => {
     dlog(`peerJoin: ${peerId.slice(0, 8)}…`);

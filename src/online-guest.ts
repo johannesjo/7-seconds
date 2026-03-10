@@ -46,10 +46,10 @@ export class OnlineGuest {
     return this._hostWantsRematch;
   }
 
-  joinRoom(roomId: string): void {
+  async joinRoom(roomId: string): Promise<void> {
     this.setConnectionState('connecting');
 
-    this.connection = createOnlineRoom(
+    this.connection = await createOnlineRoom(
       roomId,
       'guest',
       (peerId) => {

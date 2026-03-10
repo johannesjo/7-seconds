@@ -990,7 +990,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
     },
   });
 
-  onlineGuest.joinRoom(roomId);
+  await onlineGuest.joinRoom(roomId);
 }
 
 // Online PvP button (host flow)
@@ -1056,7 +1056,7 @@ onlineBtn.addEventListener('click', async () => {
     },
   });
 
-  onlineHost.createRoom();
+  await onlineHost.createRoom();
 });
 
 // Online lobby share/copy button
