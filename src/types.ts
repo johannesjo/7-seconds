@@ -48,6 +48,8 @@ export interface Unit {
   knockbackVel?: Vec2;
   /** Blade only: 0–1 directional momentum; builds when moving in a consistent direction. */
   momentum?: number;
+  /** Shielder only: number of frontal hits absorbed by shield. Shield breaks at SHIELD_MAX_HITS. */
+  shieldHits?: number;
 }
 
 export interface Projectile {

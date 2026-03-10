@@ -37,6 +37,7 @@ export const COVER_SCREEN_DURATION_MS = 1500;
 export const ELEVATION_RANGE_BONUS = 0.2;
 export const FLANK_ANGLE_THRESHOLD = Math.PI / 3; // 60° half-cone = 120° front
 export const FLANK_DAMAGE_MULTIPLIER = 1.5;
+export const SHIELD_MAX_HITS = 7;
 export const HORDE_MAX_WAVES = 15;
 export const HORDE_STARTING_ARMY: { type: UnitType; count: number }[] = [
   { type: 'soldier', count: 2 },

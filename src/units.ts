@@ -9,7 +9,7 @@ export interface ProjectileHit {
   damage: number;
   flanked: boolean;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE, SHIELD_MAX_HITS } from './constants';
 
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
@@ -1016,9 +1016,10 @@ export function updateProjectiles(
       if (dx * dx + dy * dy <= hitDist * hitDist) {
         const projAngle = Math.atan2(p.vel.y, p.vel.x);
 
-        // Shield blocks frontal hits
-        if (unit.type === 'shielder') {
+        // Shield blocks frontal hits (breaks after SHIELD_MAX_HITS)
+        if (unit.type === 'shielder' && (unit.shieldHits ?? 0) < SHIELD_MAX_HITS) {
           if (!isFlanked(projAngle, unit.gunAngle)) {
+            unit.shieldHits = (unit.shieldHits ?? 0) + 1;
             // Shield absorbs — destroy projectile
             if (!p.piercing) {
               consumed = true;
