@@ -10,6 +10,7 @@ import { DAY_THEME, NIGHT_THEME } from './theme';
 import { OnlineHost } from './online-host';
 import { OnlineGuest } from './online-guest';
 import { getJoinRoomId, getLocalPlayerId } from './online';
+import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
 import { PathDrawer } from './path-drawer';
 import { recordWin, recordLoss, getScore } from './online-score';

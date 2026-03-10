@@ -85,3 +85,8 @@ export function startPeerMonitor(getPeers: () => Record<string, RTCPeerConnectio
   }, 500);
   return () => clearInterval(interval);
 }
+
+// Show overlay immediately so user knows debug mode is active
+if (debugEnabled) {
+  dlog('debug mode active');
+}
