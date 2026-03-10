@@ -119,16 +119,22 @@ export async function testSupabaseRealtime(appId: string, supabaseKey: string): 
 function parseWsMsg(data: string): string | null {
   try {
     const parsed = JSON.parse(data);
-    const arr = Array.isArray(parsed) ? parsed : [parsed];
-    const parts: string[] = [];
-    for (const msg of arr) {
-      const event = Array.isArray(msg) ? msg[3] : msg?.event;
-      const topic = Array.isArray(msg) ? msg[2] : msg?.topic;
-      if (event && event !== 'heartbeat') {
-        parts.push(`${event} topic=${String(topic).slice(0, 30)}`);
+    // Phoenix messages are arrays: [joinRef, ref, topic, event, payload]
+    if (Array.isArray(parsed) && parsed.length >= 4 && typeof parsed[3] === 'string') {
+      const event = parsed[3];
+      const topic = parsed[2];
+      if (event !== 'heartbeat') {
+        return `${event} topic=${String(topic).slice(0, 30)}`;
+      }
+      return null;
+    }
+    // Object-style message
+    if (parsed && typeof parsed === 'object' && parsed.event) {
+      if (parsed.event !== 'heartbeat') {
+        return `${parsed.event} topic=${String(parsed.topic ?? '').slice(0, 30)}`;
       }
     }
-    return parts.length > 0 ? parts.join('; ') : null;
+    return null;
   } catch {
     return null;
   }
@@ -187,8 +193,51 @@ function interceptWebSocket(): void {
   (window as any).WebSocket.CLOSED = OrigWS.CLOSED;
 }
 
+/** Run environment capability tests to diagnose mobile failures. */
+async function runDiagnostics(): Promise<void> {
+  // Test 1: Secure context (crypto.subtle requires HTTPS or localhost)
+  const isSecure = window.isSecureContext;
+  dlog(`secure-context: ${isSecure}`);
+  dlog(`crypto.subtle: ${crypto.subtle ? 'available' : 'MISSING'}`);
+
+  if (!crypto.subtle) {
+    dlog('FATAL: crypto.subtle unavailable — need HTTPS!');
+    return;
+  }
+
+  // Test 2: SHA-1 digest (trystero uses this for topic hashing)
+  try {
+    const encoder = new TextEncoder();
+    const t0 = performance.now();
+    await crypto.subtle.digest('SHA-1', encoder.encode('test'));
+    dlog(`sha1: ok (${(performance.now() - t0).toFixed(0)}ms)`);
+  } catch (e) {
+    dlog(`sha1: FAILED — ${e}`);
+  }
+
+  // Test 3: RTCPeerConnection creation
+  try {
+    const pc = new RTCPeerConnection();
+    dlog(`rtc: ok state=${pc.connectionState}`);
+    pc.close();
+  } catch (e) {
+    dlog(`rtc: FAILED — ${e}`);
+  }
+
+  // Test 4: location protocol
+  dlog(`proto: ${location.protocol} host: ${location.hostname}`);
+}
+
 // Show overlay immediately so user knows debug mode is active
 if (debugEnabled) {
+  // Catch silent promise rejections (e.g. crypto.subtle failures in trystero)
+  window.addEventListener('unhandledrejection', (e) => {
+    dlog(`UNHANDLED REJECT: ${e.reason}`);
+  });
+  window.addEventListener('error', (e) => {
+    dlog(`ERROR: ${e.message}`);
+  });
   interceptWebSocket();
   dlog('debug mode active');
+  runDiagnostics();
 }
