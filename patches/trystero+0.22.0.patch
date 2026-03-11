@@ -1,5 +1,5 @@
 diff --git a/node_modules/trystero/src/strategy.js b/node_modules/trystero/src/strategy.js
-index 965356e..418e252 100644
+index 965356e..5946769 100644
 --- a/node_modules/trystero/src/strategy.js
 +++ b/node_modules/trystero/src/strategy.js
 @@ -14,8 +14,8 @@ import {
@@ -8,8 +8,55 @@ index 965356e..418e252 100644
  
 -const poolSize = 20
 -const announceIntervalMs = 5_333
-+const poolSize = 2
++const poolSize = 10
 +const announceIntervalMs = 8_000
  const offerTtl = 57_333
  
  export default ({init, subscribe, announce}) => {
+diff --git a/node_modules/trystero/src/supabase.js b/node_modules/trystero/src/supabase.js
+index d35a8e5..d9bcdfc 100644
+--- a/node_modules/trystero/src/supabase.js
++++ b/node_modules/trystero/src/supabase.js
+@@ -51,11 +51,14 @@ export const joinRoom = strategy({
+       )
+     )
+ 
+-    subscribe(rootTopic, chan =>
++    subscribe(rootTopic, chan => {
++      // Store the subscribed root channel on the client so announce() can
++      // reuse it instead of creating a new (unsubscribed) channel each time.
++      client.__trysteroRootChan = chan
+       chan.on(events.broadcast, {event: events.join}, ({payload}) =>
+         onMessage(rootTopic, payload, handleMessage)
+       )
+-    )
++    })
+ 
+     let didUnsub = false
+ 
+@@ -65,12 +68,19 @@ export const joinRoom = strategy({
+     }
+   },
+ 
+-  announce: (client, rootTopic) =>
+-    client.channel(rootTopic).send({
+-      type: events.broadcast,
+-      event: events.join,
+-      payload: {peerId: selfId}
+-    })
++  announce: (client, rootTopic) => {
++    // Use the already-subscribed root channel stored during subscribe().
++    // Creating a new channel via client.channel() returns an unsubscribed
++    // instance whose send() silently fails, breaking peer discovery.
++    const chan = client.__trysteroRootChan
++    if (chan) {
++      chan.send({
++        type: events.broadcast,
++        event: events.join,
++        payload: {peerId: selfId}
++      })
++    }
++  }
+ })
+ 
+ export {selfId} from './utils.js'
