@@ -32,7 +32,7 @@ export class OnlineGuest {
 
   // Single long timeout — trystero retries announces every ~15s (patched),
   // so we just wait for peer discovery without recreating clients.
-  private static readonly CONNECTION_TIMEOUT_MS = 60_000;
+  private static readonly CONNECTION_TIMEOUT_MS = 120_000;
 
   constructor(callbacks: OnlineGuestCallbacks) {
     this.callbacks = callbacks;
