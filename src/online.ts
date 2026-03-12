@@ -1,59 +1,11 @@
-import { joinRoom } from 'trystero/supabase';
 import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal } from './online-types';
 import { dlog } from './online-debug';
-
-const METERED_API_KEY = 'c6d3fd98814ae0f5e636b38bdde327ef2eae';
+import { createPeerConnection } from './online-peer';
 
 export const SUPABASE_URL = 'https://puoxmqovckvfoqyihasl.supabase.co';
 // Full JWT form required — the short `sb_publishable_*` format causes
 // Supabase Realtime subscription failures. Do not replace with short key.
 export const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4';
-
-const SUPABASE_CONFIG = {
-  appId: SUPABASE_URL,
-  supabaseKey: SUPABASE_KEY,
-};
-
-/** Fetch short-lived TURN credentials from Metered.ca REST API.
- *  Credentials are cached for 30 minutes (metered.ca issues ~12h TTL,
- *  but refreshing sooner avoids edge-case expiry during long sessions).
- *  All TURN servers are passed through — mobile carriers block unpredictable
- *  port/protocol combos, so the browser needs every available fallback. */
-const TURN_CACHE_TTL_MS = 30 * 60 * 1000;
-let cachedIceServers: RTCIceServer[] | null = null;
-let cachedAt = 0;
-
-async function fetchIceServers(): Promise<RTCIceServer[]> {
-  if (cachedIceServers && Date.now() - cachedAt < TURN_CACHE_TTL_MS) {
-    return cachedIceServers;
-  }
-  try {
-    const res = await fetch(
-      `https://7seconds.metered.live/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`,
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const allServers: RTCIceServer[] = await res.json();
-    // Keep all TURN/TURNS servers, drop any STUN-only entries (we force relay).
-    const turnServers = allServers.filter(s => {
-      const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
-      return url?.startsWith('turn:') || url?.startsWith('turns:');
-    });
-    const urls = turnServers.map(s => Array.isArray(s.urls) ? s.urls[0] : s.urls);
-    dlog(`TURN: using ${turnServers.length}/${allServers.length} servers: ${urls.join(', ')}`);
-    cachedIceServers = turnServers;
-    cachedAt = Date.now();
-    return cachedIceServers;
-  } catch (e) {
-    dlog(`TURN: fetch failed — ${e}`);
-    // Return stale cache if available, otherwise empty (relay-only will fail gracefully)
-    return cachedIceServers ?? [];
-  }
-}
-
-/** Pre-fetch TURN credentials so they're ready when creating/joining rooms. */
-export function prefetchIceServers(): void {
-  fetchIceServers().catch(() => {/* logged inside */});
-}
 
 const LOCAL_ID_KEY = '7s-player-id';
 
@@ -106,55 +58,41 @@ export interface OnlineConnection {
   leave: () => void;
 }
 
-/** Create a Trystero room and return typed action channels. */
+/** Create a WebRTC peer connection and return typed action channels. */
 export async function createOnlineRoom(
   roomId: string,
   role: 'host' | 'guest',
   onPeerJoin: (peerId: string) => void,
   onPeerLeave: (peerId: string) => void,
 ): Promise<OnlineConnection> {
-  // Fetch TURN credentials — used as relay fallback alongside STUN.
-  // Don't throw on empty: STUN (trystero defaults) can still connect
-  // through non-symmetric NATs even without TURN.
-  const turnServers = await fetchIceServers();
-  dlog(`createRoom role=${role} room=${roomId} turn=${turnServers.length}`);
-  // Use turnConfig so trystero's built-in STUN servers (Google, Cloudflare)
-  // remain in the iceServers list. No iceTransportPolicy restriction — let
-  // the browser try all candidate types (host, srflx, relay). Relay-only
-  // policy was causing 100% failure on mobile carriers that block Metered's
-  // TURN servers; STUN servers are virtually never blocked.
-  const room = joinRoom({
-    ...SUPABASE_CONFIG,
-    turnConfig: turnServers,
-  } as Parameters<typeof joinRoom>[0], roomId);
+  dlog(`createRoom role=${role} room=${roomId}`);
 
-  room.onPeerJoin((peerId) => {
-    dlog(`peerJoin: ${peerId.slice(0, 8)}…`);
-    onPeerJoin(peerId);
-  });
-  room.onPeerLeave((peerId) => {
-    dlog(`peerLeave: ${peerId.slice(0, 8)}…`);
-    onPeerLeave(peerId);
+  const receivers = new Map<string, (data: unknown, peerId: string) => void>();
+
+  const handle = await createPeerConnection(roomId, role, {
+    onOpen: onPeerJoin,
+    onClose: onPeerLeave,
+    onMessage: (type, data, peerId) => {
+      receivers.get(type)?.(data, peerId);
+    },
   });
 
-  // Trystero's makeAction requires DataPayload (index-signature objects).
-  // Our interfaces don't have index signatures, so we use `any` at the
-  // boundary and keep the rest of the codebase fully typed via ActionPair.
-  const state = room.makeAction('state') as unknown as ActionPair<OnlineGameState>;
-  const phase = room.makeAction('phase') as unknown as ActionPair<OnlinePhase>;
-  const paths = room.makeAction('paths') as unknown as ActionPair<OnlinePathData>;
-  const frame = room.makeAction('frame') as unknown as ActionPair<OnlineFrameData>;
-  const result = room.makeAction('result') as unknown as ActionPair<OnlineRoundResult>;
-  const signal = room.makeAction('signal') as unknown as ActionPair<OnlineSignal>;
+  function makeAction<T>(type: string): ActionPair<T> {
+    const send = (data: T) => handle.send(type, data);
+    const receive = (cb: (data: T, peerId: string) => void) => {
+      receivers.set(type, cb as (data: unknown, peerId: string) => void);
+    };
+    return [send, receive];
+  }
 
   return {
-    state,
-    phase,
-    paths,
-    frame,
-    result,
-    signal,
-    getPeers: () => room.getPeers(),
-    leave: () => room.leave(),
+    state: makeAction<OnlineGameState>('state'),
+    phase: makeAction<OnlinePhase>('phase'),
+    paths: makeAction<OnlinePathData>('paths'),
+    frame: makeAction<OnlineFrameData>('frame'),
+    result: makeAction<OnlineRoundResult>('result'),
+    signal: makeAction<OnlineSignal>('signal'),
+    getPeers: () => handle.getPeers(),
+    leave: () => handle.leave(),
   };
 }

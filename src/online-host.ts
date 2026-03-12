@@ -30,8 +30,7 @@ export class OnlineHost {
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private stopPeerMonitor: (() => void) | null = null;
 
-  // Single long timeout — trystero retries announces every ~15s (patched).
-  // No room re-creation; creating multiple Supabase clients breaks signaling.
+  // Single long timeout for peer discovery via Supabase signaling.
   private static readonly CONNECTION_TIMEOUT_MS = 120_000;
 
   constructor(callbacks: OnlineHostCallbacks) {
@@ -89,7 +88,7 @@ export class OnlineHost {
       }
     });
 
-    // Single timeout — let trystero handle internal announce retries
+    // Single timeout — host re-announces offer every 10s automatically
     this.timeoutTimer = setTimeout(() => {
       this.timeoutTimer = null;
       if (this.connectionState === 'waiting') {

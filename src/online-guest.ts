@@ -30,8 +30,7 @@ export class OnlineGuest {
   private hostPeerId: string | null = null;
   private stopPeerMonitor: (() => void) | null = null;
 
-  // Single long timeout — trystero retries announces every ~15s (patched),
-  // so we just wait for peer discovery without recreating clients.
+  // Single long timeout for peer discovery via Supabase signaling.
   private static readonly CONNECTION_TIMEOUT_MS = 120_000;
 
   constructor(callbacks: OnlineGuestCallbacks) {
@@ -105,7 +104,7 @@ export class OnlineGuest {
       }
     });
 
-    // Single timeout — let trystero handle internal retries
+    // Single timeout — signaling channel stays open for peer discovery
     this.timeoutTimer = setTimeout(() => {
       this.timeoutTimer = null;
       if (this.connectionState !== 'connected') {

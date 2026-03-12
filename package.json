@@ -15,8 +15,7 @@
     "cap:open": "npx cap open android",
     "cap:build": "npm run build && npx cap sync && cd android && ./gradlew bundleRelease",
     "version": "node scripts/sync-android-version.js && git add android/app/build.gradle",
-    "postversion": "npm run build && npx cap sync android && cd android && ./gradlew bundleRelease",
-    "postinstall": "patch-package"
+    "postversion": "npm run build && npx cap sync android && cd android && ./gradlew bundleRelease"
   },
   "keywords": [],
   "author": "",
@@ -26,13 +25,11 @@
     "@capacitor/android": "^8.1.0",
     "@capacitor/core": "^8.1.0",
     "@mlc-ai/web-llm": "^0.2.81",
-    "pixi.js": "^8.16.0",
     "@supabase/supabase-js": "^2.98.0",
-    "trystero": "^0.22.0"
+    "pixi.js": "^8.16.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.1.0",
-    "patch-package": "^8.0.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"

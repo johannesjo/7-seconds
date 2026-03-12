@@ -307,7 +307,7 @@ async function runDiagnostics(): Promise<void> {
     return;
   }
 
-  // Test 2: SHA-1 digest (trystero uses this for topic hashing)
+  // Test 2: SHA-1 digest
   try {
     const encoder = new TextEncoder();
     const t0 = performance.now();
@@ -332,7 +332,7 @@ async function runDiagnostics(): Promise<void> {
 
 // Show overlay immediately so user knows debug mode is active
 if (debugEnabled) {
-  // Catch silent promise rejections (e.g. crypto.subtle failures in trystero)
+  // Catch silent promise rejections (e.g. crypto.subtle failures)
   window.addEventListener('unhandledrejection', (e) => {
     dlog(`UNHANDLED REJECT: ${e.reason}`);
   });
