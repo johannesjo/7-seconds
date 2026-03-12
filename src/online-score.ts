@@ -44,3 +44,15 @@ export function getScore(opponentId: string): PlayerScore {
   const scores = loadScores();
   return scores[opponentId] ?? { wins: 0, losses: 0 };
 }
+
+/** Sum wins/losses across all opponents for an overall record. */
+export function getOverallScore(): PlayerScore {
+  const scores = loadScores();
+  let wins = 0;
+  let losses = 0;
+  for (const s of Object.values(scores)) {
+    wins += s.wins;
+    losses += s.losses;
+  }
+  return { wins, losses };
+}

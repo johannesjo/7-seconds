@@ -14,7 +14,7 @@ import { findMatch } from './online-matchmaking';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
 import { PathDrawer } from './path-drawer';
-import { recordWin, recordLoss, getScore } from './online-score';
+import { recordWin, recordLoss, getScore, getOverallScore } from './online-score';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -75,6 +75,17 @@ const onlineShareUrl = document.getElementById('online-share-url') as HTMLInputE
 const onlineCopyBtn = document.getElementById('online-copy-btn')!;
 const onlineCancelBtn = document.getElementById('online-cancel-btn')!;
 const onlineSpinner = document.getElementById('online-spinner')!;
+const onlineRecord = document.getElementById('online-record')!;
+
+function showOnlineRecord(): void {
+  const { wins, losses } = getOverallScore();
+  if (wins === 0 && losses === 0) {
+    onlineRecord.style.display = 'none';
+    return;
+  }
+  onlineRecord.textContent = `Record: ${wins}W - ${losses}L`;
+  onlineRecord.style.display = '';
+}
 
 function setOnlineStatus(text: string, showSpinner = false): void {
   onlineStatus.textContent = text;
@@ -737,6 +748,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 
   onlineLobby.style.display = 'flex';
   onlineShareContainer.style.display = 'none';
+  showOnlineRecord();
   setOnlineStatus('Connecting to host...', true);
 
   onlineGuest = new OnlineGuest({
@@ -1013,6 +1025,7 @@ onlineBtn.addEventListener('click', async () => {
 
   onlineLobby.style.display = 'flex';
   onlineShareContainer.style.display = 'none';
+  showOnlineRecord();
   setOnlineStatus('Creating room...', true);
 
   onlineHost = new OnlineHost({
@@ -1080,6 +1093,7 @@ onlineRandomBtn.addEventListener('click', async () => {
 
   onlineLobby.style.display = 'flex';
   onlineShareContainer.style.display = 'none';
+  showOnlineRecord();
   setOnlineStatus('Searching for opponent...', true);
 
   const { promise, cancel } = findMatch();
