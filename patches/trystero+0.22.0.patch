@@ -11,7 +11,7 @@ index 791fcec..bf25167 100644
  const offerType = 'offer'
  const answerType = 'answer'
 diff --git a/node_modules/trystero/src/strategy.js b/node_modules/trystero/src/strategy.js
-index 965356e..19c49bc 100644
+index 965356e..9582382 100644
 --- a/node_modules/trystero/src/strategy.js
 +++ b/node_modules/trystero/src/strategy.js
 @@ -14,8 +14,8 @@ import {
@@ -25,7 +25,21 @@ index 965356e..19c49bc 100644
  const offerTtl = 57_333
  
  export default ({init, subscribe, announce}) => {
-@@ -286,6 +286,12 @@ export default ({init, subscribe, announce}) => {
+@@ -84,6 +84,13 @@ export default ({init, subscribe, announce}) => {
+       const offer = pendingOffers[peerId]?.[relayId]
+ 
+       if (offer) {
++        // Don't destroy peers mid-DTLS handshake — ICE connected but data
++        // channel not yet open. Reschedule and let DTLS finish.
++        const iceState = offer.connection.iceConnectionState
++        if (iceState === 'checking' || iceState === 'connected') {
++          setTimeout(() => prunePendingOffer(peerId, relayId), 5000)
++          return
++        }
+         delete pendingOffers[peerId][relayId]
+         offer.destroy()
+       }
+@@ -286,6 +293,12 @@ export default ({init, subscribe, announce}) => {
          delete occupiedRooms[appId][roomId]
          announceTimeouts.forEach(clearTimeout)
          unsubFns.forEach(async f => (await f)())
