@@ -115,22 +115,20 @@ export async function createOnlineRoom(
   onPeerJoin: (peerId: string) => void,
   onPeerLeave: (peerId: string) => void,
 ): Promise<OnlineConnection> {
-  const iceServers = await fetchIceServers();
-  if (iceServers.length === 0) {
-    throw new Error('No TURN servers available — cannot connect in relay-only mode');
+  // Use cached TURN credentials (prefetched on page load). Don't block on
+  // fetch — trystero includes built-in STUN servers for fast gathering.
+  // TURN is bonus for restrictive NATs; refresh cache in background if stale.
+  const turnServers = cachedIceServers ?? [];
+  if (!cachedIceServers || Date.now() - cachedAt > TURN_CACHE_TTL_MS) {
+    fetchIceServers().catch(() => {/* logged inside */});
   }
-  dlog(`createRoom role=${role} room=${roomId} ice=${iceServers.length}`);
+  dlog(`createRoom role=${role} room=${roomId} turn=${turnServers.length}`);
+  // turnConfig is supported at runtime (peer.js concatenates it with built-in
+  // STUN servers) but missing from supabase.d.ts — cast to satisfy TS.
   const room = joinRoom({
     ...SUPABASE_CONFIG,
-    rtcConfig: {
-      iceServers,
-      // Force relay-only so ICE gathering is nearly instant (< 1s).
-      // Without this, gathering takes 5s (iceTimeout in trystero),
-      // and the host prunes the pending offer at 4.8s before the
-      // guest's answer arrives.
-      iceTransportPolicy: 'relay',
-    },
-  }, roomId);
+    turnConfig: turnServers,
+  } as Parameters<typeof joinRoom>[0], roomId);
 
   room.onPeerJoin((peerId) => {
     dlog(`peerJoin: ${peerId.slice(0, 8)}…`);

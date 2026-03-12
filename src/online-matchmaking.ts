@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { SUPABASE_URL, SUPABASE_KEY, generateRoomId, getLocalPlayerId } from './online';
+import { SUPABASE_URL, SUPABASE_KEY, generateRoomId } from './online';
 import { dlog } from './online-debug';
 
 const SEEK_STALE_MS = 10_000;
@@ -33,7 +33,10 @@ export interface MatchResult {
 /** Search for a random opponent via Supabase Realtime broadcast.
  *  Returns the role and roomId once matched. Throws on cancel or timeout. */
 export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void } {
-  const playerId = getLocalPlayerId();
+  // Use a per-session random ID, not the persistent localStorage player ID.
+  // localStorage is shared across tabs, so two tabs on the same device would
+  // have identical IDs and silently filter each other's seek messages.
+  const seekerId = crypto.randomUUID();
   const client = createClient(SUPABASE_URL, SUPABASE_KEY);
   const channel = client.channel('matchmaking-lobby', { config: { broadcast: { self: false } } });
 
@@ -46,7 +49,7 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
     resolved = true;
     if (seekInterval) { clearInterval(seekInterval); seekInterval = null; }
     if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-    channel.send({ type: 'broadcast', event: 'lobby', payload: { type: 'leave', playerId } as LeaveMessage });
+    channel.send({ type: 'broadcast', event: 'lobby', payload: { type: 'leave', playerId: seekerId } as LeaveMessage });
     client.removeChannel(channel);
   };
 
@@ -57,14 +60,14 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
     const tryMatch = (opponentId: string) => {
       if (resolved) return;
       // Deterministic: lower playerId is host
-      const iAmHost = playerId < opponentId;
+      const iAmHost = seekerId < opponentId;
       if (iAmHost) {
         const roomId = generateRoomId();
         dlog(`matchmaking: I am host, matched with ${opponentId.slice(0, 8)}`);
         channel.send({
           type: 'broadcast',
           event: 'lobby',
-          payload: { type: 'match', hostId: playerId, guestId: opponentId, roomId } as MatchMessage,
+          payload: { type: 'match', hostId: seekerId, guestId: opponentId, roomId } as MatchMessage,
         });
         cleanup();
         resolve({ role: 'host', roomId });
@@ -77,13 +80,13 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
       const msg = payload as LobbyMessage;
 
       if (msg.type === 'seek') {
-        if (msg.playerId === playerId) return;
+        if (msg.playerId === seekerId) return;
         if (Date.now() - msg.ts > SEEK_STALE_MS) return;
         activeSeekers.set(msg.playerId, msg.ts);
         dlog(`matchmaking: saw seeker ${msg.playerId.slice(0, 8)}`);
         tryMatch(msg.playerId);
       } else if (msg.type === 'match') {
-        if (msg.guestId === playerId) {
+        if (msg.guestId === seekerId) {
           dlog(`matchmaking: matched as guest, room=${msg.roomId}`);
           cleanup();
           resolve({ role: 'guest', roomId: msg.roomId });
@@ -102,7 +105,7 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
           channel.send({
             type: 'broadcast',
             event: 'lobby',
-            payload: { type: 'seek', playerId, ts: Date.now() } as SeekMessage,
+            payload: { type: 'seek', playerId: seekerId, ts: Date.now() } as SeekMessage,
           });
         };
         sendSeek();
