@@ -38,7 +38,8 @@ export async function fetchIceServers(): Promise<RTCIceServer[]> {
       const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
       return url?.startsWith('turn:') || url?.startsWith('turns:');
     });
-    dlog(`TURN: using ${turnServers.length}/${allServers.length} servers`);
+    const urls = turnServers.map(s => Array.isArray(s.urls) ? s.urls[0] : s.urls);
+    dlog(`TURN: using ${turnServers.length}/${allServers.length} servers: ${urls.join(', ')}`);
     cachedIceServers = turnServers;
     cachedAt = Date.now();
     return cachedIceServers;
