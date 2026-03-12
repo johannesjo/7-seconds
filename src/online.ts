@@ -113,19 +113,19 @@ export async function createOnlineRoom(
   onPeerJoin: (peerId: string) => void,
   onPeerLeave: (peerId: string) => void,
 ): Promise<OnlineConnection> {
-  // Await TURN credentials — on mobile/CGNAT networks relay is the only path.
+  // Fetch TURN credentials — used as relay fallback alongside STUN.
+  // Don't throw on empty: STUN (trystero defaults) can still connect
+  // through non-symmetric NATs even without TURN.
   const turnServers = await fetchIceServers();
-  if (turnServers.length === 0) {
-    throw new Error('No TURN servers available — cannot connect in relay-only mode');
-  }
   dlog(`createRoom role=${role} room=${roomId} turn=${turnServers.length}`);
-  // Use rtcConfig.iceServers directly instead of turnConfig — turnConfig gets
-  // concatenated with trystero's built-in STUN servers in peer.js, but we
-  // force relay-only so STUN servers are useless overhead. Putting TURN servers
-  // in iceServers with relay policy gives the browser only relay candidates.
+  // Use turnConfig so trystero's built-in STUN servers (Google, Cloudflare)
+  // remain in the iceServers list. No iceTransportPolicy restriction — let
+  // the browser try all candidate types (host, srflx, relay). Relay-only
+  // policy was causing 100% failure on mobile carriers that block Metered's
+  // TURN servers; STUN servers are virtually never blocked.
   const room = joinRoom({
     ...SUPABASE_CONFIG,
-    rtcConfig: { iceServers: turnServers, iceTransportPolicy: 'relay' },
+    turnConfig: turnServers,
   } as Parameters<typeof joinRoom>[0], roomId);
 
   room.onPeerJoin((peerId) => {
