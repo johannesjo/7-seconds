@@ -1,17 +1,17 @@
 diff --git a/node_modules/trystero/src/peer.js b/node_modules/trystero/src/peer.js
-index 791fcec..7118736 100644
+index 791fcec..bf25167 100644
 --- a/node_modules/trystero/src/peer.js
 +++ b/node_modules/trystero/src/peer.js
 @@ -1,6 +1,6 @@
  import {all, alloc} from './utils.js'
  
 -const iceTimeout = 5000
-+const iceTimeout = 2000
++const iceTimeout = 10000
  const iceStateEvent = 'icegatheringstatechange'
  const offerType = 'offer'
  const answerType = 'answer'
 diff --git a/node_modules/trystero/src/strategy.js b/node_modules/trystero/src/strategy.js
-index 965356e..13e88b8 100644
+index 965356e..19c49bc 100644
 --- a/node_modules/trystero/src/strategy.js
 +++ b/node_modules/trystero/src/strategy.js
 @@ -14,8 +14,8 @@ import {
@@ -21,7 +21,7 @@ index 965356e..13e88b8 100644
 -const poolSize = 20
 -const announceIntervalMs = 5_333
 +const poolSize = 2
-+const announceIntervalMs = 3_000
++const announceIntervalMs = 15_000
  const offerTtl = 57_333
  
  export default ({init, subscribe, announce}) => {

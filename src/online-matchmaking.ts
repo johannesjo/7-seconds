@@ -50,7 +50,7 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
     if (seekInterval) { clearInterval(seekInterval); seekInterval = null; }
     if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
     channel.send({ type: 'broadcast', event: 'lobby', payload: { type: 'leave', playerId: seekerId } as LeaveMessage });
-    client.removeChannel(channel);
+    client.removeAllChannels();
   };
 
   const promise = new Promise<MatchResult>((resolve, reject) => {
