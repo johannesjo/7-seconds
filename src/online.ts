@@ -17,7 +17,8 @@ const SUPABASE_CONFIG = {
 /** Fetch short-lived TURN credentials from Metered.ca REST API.
  *  Credentials are cached for 30 minutes (metered.ca issues ~12h TTL,
  *  but refreshing sooner avoids edge-case expiry during long sessions).
- *  We pick one UDP + one TCP/TLS server to keep ICE gathering fast. */
+ *  All TURN servers are passed through — mobile carriers block unpredictable
+ *  port/protocol combos, so the browser needs every available fallback. */
 const TURN_CACHE_TTL_MS = 30 * 60 * 1000;
 let cachedIceServers: RTCIceServer[] | null = null;
 let cachedAt = 0;
@@ -32,16 +33,12 @@ export async function fetchIceServers(): Promise<RTCIceServer[]> {
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const allServers: RTCIceServer[] = await res.json();
-    const udpTurn = allServers.find(s => {
+    // Keep all TURN/TURNS servers, drop any STUN-only entries (we force relay).
+    const turnServers = allServers.filter(s => {
       const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
-      return url?.startsWith('turn:') && !url.includes('transport=tcp');
+      return url?.startsWith('turn:') || url?.startsWith('turns:');
     });
-    const tcpTurn = allServers.find(s => {
-      const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
-      return url?.startsWith('turns:') || (url?.startsWith('turn:') && url.includes('transport=tcp'));
-    });
-    const turnServers = [udpTurn, tcpTurn].filter((s): s is RTCIceServer => !!s);
-    dlog(`TURN: picked ${turnServers.length}/${allServers.length} servers`);
+    dlog(`TURN: using ${turnServers.length}/${allServers.length} servers`);
     cachedIceServers = turnServers;
     cachedAt = Date.now();
     return cachedIceServers;
@@ -121,13 +118,13 @@ export async function createOnlineRoom(
     throw new Error('No TURN servers available — cannot connect in relay-only mode');
   }
   dlog(`createRoom role=${role} room=${roomId} turn=${turnServers.length}`);
-  // turnConfig concatenates with trystero's built-in STUN servers (peer.js).
-  // relay policy ensures ICE gathering is near-instant (<1s) by skipping STUN,
-  // which is critical on mobile/CGNAT where STUN candidates can't connect.
+  // Use rtcConfig.iceServers directly instead of turnConfig — turnConfig gets
+  // concatenated with trystero's built-in STUN servers in peer.js, but we
+  // force relay-only so STUN servers are useless overhead. Putting TURN servers
+  // in iceServers with relay policy gives the browser only relay candidates.
   const room = joinRoom({
     ...SUPABASE_CONFIG,
-    turnConfig: turnServers,
-    rtcConfig: { iceTransportPolicy: 'relay' },
+    rtcConfig: { iceServers: turnServers, iceTransportPolicy: 'relay' },
   } as Parameters<typeof joinRoom>[0], roomId);
 
   room.onPeerJoin((peerId) => {
