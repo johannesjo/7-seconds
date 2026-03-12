@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 
 let permissionGranted = false;
 let permissionPromise: Promise<void> | null = null;
-let activeNotification: Notification | null = null;
+let swRegistration: ServiceWorkerRegistration | null = null;
 
 function isNative(): boolean {
   return Capacitor.isNativePlatform();
@@ -29,6 +29,15 @@ async function doRequestPermission(): Promise<void> {
     } catch (err) {
       console.error('Failed to request notification permission:', err);
     }
+    if (permissionGranted && 'serviceWorker' in navigator) {
+      try {
+        swRegistration = await navigator.serviceWorker.register(
+          new URL('/sw-notify.js', import.meta.url).href,
+        );
+      } catch {
+        // SW optional — falls back to new Notification()
+      }
+    }
   }
 }
 
@@ -45,20 +54,17 @@ export async function notify(title: string, body: string): Promise<void> {
     } catch (err) {
       console.error('Failed to schedule notification:', err);
     }
-  } else if ('Notification' in window) {
-    activeNotification?.close();
-    activeNotification = new Notification(title, { body });
-    activeNotification.onclick = () => {
+  } else if (swRegistration) {
+    try {
+      await swRegistration.showNotification(title, { body });
+    } catch (err) {
+      console.error('Failed to show notification via SW:', err);
+    }
+  } else {
+    const n = new Notification(title, { body });
+    n.onclick = () => {
       window.focus();
-      activeNotification?.close();
-      activeNotification = null;
+      n.close();
     };
   }
 }
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && activeNotification) {
-    activeNotification.close();
-    activeNotification = null;
-  }
-});
