@@ -826,6 +826,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
           if (existing) {
             existing.pos.x = su.x;
             existing.pos.y = su.y;
+            existing.gunAngle = su.gunAngle;
             existing.hp = su.hp;
             existing.maxHp = su.maxHp;
             existing.alive = su.hp > 0;
