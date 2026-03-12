@@ -23,7 +23,7 @@ const TURN_CACHE_TTL_MS = 30 * 60 * 1000;
 let cachedIceServers: RTCIceServer[] | null = null;
 let cachedAt = 0;
 
-export async function fetchIceServers(): Promise<RTCIceServer[]> {
+async function fetchIceServers(): Promise<RTCIceServer[]> {
   if (cachedIceServers && Date.now() - cachedAt < TURN_CACHE_TTL_MS) {
     return cachedIceServers;
   }

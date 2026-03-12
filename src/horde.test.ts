@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, ALL_UNIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
 import { createUnit } from './units';
-import { MAP_WIDTH, MAP_HEIGHT, HORDE_MAX_WAVES } from './constants';
+import { MAP_HEIGHT, HORDE_MAX_WAVES } from './constants';
 import { Unit } from './types';
 
 describe('HORDE_WAVES', () => {

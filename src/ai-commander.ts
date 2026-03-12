@@ -1,35 +1,27 @@
 import { CreateMLCEngine, MLCEngine } from '@mlc-ai/web-llm';
-import { Unit, Team, Obstacle, AiResponse, AiUnitOrder } from './types';
+import { Unit, Team, AiResponse, AiUnitOrder } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 const MODEL_ID = 'SmolLM2-360M-Instruct-q4f32_1-MLC';
 
-const SYSTEM_PROMPT = `RTS game. Map: ${MAP_WIDTH}x${MAP_HEIGHT}px. You control {side} team.
+function buildSystemPrompt(): string {
+  return `RTS game. Map: ${MAP_WIDTH}x${MAP_HEIGHT}px. You control {side} team.
 Units have id, pos [x,y], hp. You MUST give an order for EVERY alive unit. Strategy: {userPrompt}
 Reply ONLY with JSON: {"orders":[{"id":"unit_id","move_to":[x,y],"attack":"enemy_id_or_null"}]}`;
+}
 
 // --- Shared WebLLM engine singleton ---
 
 let sharedEngine: MLCEngine | null = null;
 let engineReady = false;
 let engineLoading = false;
-let onProgress: ((progress: { text: string; progress: number }) => void) | null = null;
-
-export function setProgressCallback(cb: (progress: { text: string; progress: number }) => void): void {
-  onProgress = cb;
-}
-
 async function getEngine(): Promise<MLCEngine | null> {
   if (engineReady && sharedEngine) return sharedEngine;
   if (engineLoading) return null; // loading in progress, caller should wait
 
   engineLoading = true;
   try {
-    sharedEngine = await CreateMLCEngine(MODEL_ID, {
-      initProgressCallback: (progress) => {
-        onProgress?.({ text: progress.text, progress: progress.progress });
-      },
-    });
+    sharedEngine = await CreateMLCEngine(MODEL_ID);
     engineReady = true;
     return sharedEngine;
   } catch (err) {
@@ -44,7 +36,7 @@ async function getEngine(): Promise<MLCEngine | null> {
 // --- Pure functions (unchanged, used by tests) ---
 
 /** Serialize game state to JSON for a given team's perspective. */
-export function serializeState(units: Unit[], obstacles: Obstacle[], forTeam: Team): string {
+export function serializeState(units: Unit[], forTeam: Team): string {
   const myUnits = units.filter(u => u.alive && u.team === forTeam);
   const enemyUnits = units.filter(u => u.alive && u.team !== forTeam);
 
@@ -133,7 +125,7 @@ function backfillOrders(aiResponse: AiResponse, units: Unit[], team: Team): AiRe
 // --- AiCommander class ---
 
 /** Uses WebLLM (primary) or Chrome AI (fallback) to issue orders each tick. */
-export class AiCommander {
+class AiCommander {
   private engine: MLCEngine | null = null;
   private team: Team;
   private userPrompt: string;
@@ -147,7 +139,7 @@ export class AiCommander {
   async init(): Promise<boolean> {
     // Build system prompt (needed for both backends)
     const side = this.team === 'blue' ? 'BOTTOM' : 'TOP';
-    this.systemPrompt = SYSTEM_PROMPT
+    this.systemPrompt = buildSystemPrompt()
       .replace('{side}', side)
       .replace('{userPrompt}', this.userPrompt);
 
@@ -155,20 +147,19 @@ export class AiCommander {
     const engine = await getEngine();
     if (engine) {
       this.engine = engine;
-      console.log(`[${this.team}] WebLLM engine ready`);
       return true;
     }
 
-    console.warn(`[${this.team}] WebLLM unavailable, using fallback`);
+
     return false;
   }
 
-  async getOrders(units: Unit[], obstacles: Obstacle[]): Promise<AiResponse> {
+  async getOrders(units: Unit[]): Promise<AiResponse> {
     if (!this.engine) {
       throw new Error(`[${this.team}] AI engine not initialized`);
     }
 
-    const stateJson = serializeState(units, obstacles, this.team);
+    const stateJson = serializeState(units, this.team);
 
     const response = await this.engine.chat.completions.create({
       messages: [
@@ -179,11 +170,8 @@ export class AiCommander {
     });
 
     const raw = response.choices[0].message.content ?? '';
-    console.log(`[${this.team}] AI responded:`, raw.substring(0, 200));
-
     const parsed = parseAiResponse(raw);
     if (!parsed) {
-      console.warn(`[${this.team}] Failed to parse AI response, skipping`);
       return { orders: [] };
     }
 

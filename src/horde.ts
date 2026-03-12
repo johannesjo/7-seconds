@@ -1,5 +1,5 @@
 import { HordeWave, HordeUpgrade, UpgradeRarity, Unit, UnitType, Obstacle } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, UNIT_STATS } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createUnit, nudgeOutOfBlocks } from './units';
 
 export const HORDE_WAVES: HordeWave[] = [

@@ -1,8 +1,8 @@
 import { Renderer } from './renderer';
-import { ReplayData, ReplayEvent, Unit, Projectile, Team, Vec2, CtfState } from './types';
-import { FLANK_DAMAGE_MULTIPLIER } from './constants';
+import { ReplayData, CtfState } from './types';
+import { snapshotToUnit, snapshotToProjectile } from './units';
 
-export type ReplayEventCallback = (event: 'frame' | 'end', data?: { time: number; duration: number }) => void;
+type ReplayEventCallback = (event: 'frame' | 'end', data?: { time: number; duration: number }) => void;
 
 export class ReplayPlayer {
   private renderer: Renderer;
@@ -69,42 +69,8 @@ export class ReplayPlayer {
     const frame = this.data.frames[index];
     if (!frame) return;
 
-    // Convert snapshots to Unit objects for the renderer
-    const units: Unit[] = frame.units.map(s => ({
-      id: s.id,
-      type: s.type,
-      team: s.team,
-      pos: { x: s.x, y: s.y },
-      vel: { x: s.vx, y: s.vy },
-      gunAngle: s.gunAngle,
-      hp: s.hp,
-      maxHp: s.maxHp,
-      alive: s.alive,
-      radius: s.radius,
-      speed: 0,
-      damage: 0,
-      range: 0,
-      moveTarget: null,
-      waypoints: [],
-      attackTargetId: null,
-      fireCooldown: 0,
-      fireTimer: 0,
-      projectileSpeed: 0,
-      projectileRadius: 0,
-      turnSpeed: 0,
-    }));
-
-    const projectiles: Projectile[] = frame.projectiles.map(s => ({
-      pos: { x: s.x, y: s.y },
-      vel: { x: s.vx, y: s.vy },
-      target: { x: 0, y: 0 },
-      damage: s.damage,
-      radius: s.radius,
-      team: s.team,
-      maxRange: s.maxRange,
-      distanceTraveled: s.distanceTraveled,
-      trail: s.trail,
-    }));
+    const units = frame.units.map(snapshotToUnit);
+    const projectiles = frame.projectiles.map(snapshotToProjectile);
 
     const dt = 1 / this.fps;
 
@@ -139,25 +105,8 @@ export class ReplayPlayer {
   private triggerEvents(frameIndex: number): void {
     const fx = this.renderer.effects;
     if (!fx) return;
-
-    for (const event of this.data.events) {
-      if (event.frame !== frameIndex) continue;
-
-      if (event.type === 'fire') {
-        fx.addMuzzleFlash(event.pos, event.angle, 6);
-      } else if (event.type === 'hit') {
-        const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
-        const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
-        fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-        fx.addImpactBurst(event.pos, event.team);
-      } else if (event.type === 'kill') {
-        const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
-        const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
-        fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-        fx.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
-        fx.addKillText(event.pos, event.team);
-      }
-    }
+    const frameEvents = this.data.events.filter(e => e.frame === frameIndex);
+    fx.dispatchEvents(frameEvents);
   }
 
   pause(): void {

@@ -1,6 +1,7 @@
 import { Graphics, Container, Text } from 'pixi.js';
-import { Vec2, Team } from './types';
+import { Vec2, Team, ReplayEvent } from './types';
 import { Theme, NIGHT_THEME } from './theme';
+import { FLANK_DAMAGE_MULTIPLIER } from './constants';
 
 interface Effect {
   update(dt: number): boolean; // false = expired
@@ -459,8 +460,24 @@ export class EffectsManager {
     this.container.destroy();
     this.groundStains.destroy();
   }
-}
 
-export function createEffectsManager(stage: Container): EffectsManager {
-  return new EffectsManager(stage);
+  /** Dispatch visual effects for replay/online frame events. */
+  dispatchEvents(events: ReplayEvent[]): void {
+    for (const event of events) {
+      if (event.type === 'fire') {
+        this.addMuzzleFlash(event.pos, event.angle, 6);
+      } else if (event.type === 'hit') {
+        const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
+        const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
+        this.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
+        this.addImpactBurst(event.pos, event.team);
+      } else if (event.type === 'kill') {
+        const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
+        const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
+        this.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
+        this.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
+        this.addKillText(event.pos, event.team);
+      }
+    }
+  }
 }

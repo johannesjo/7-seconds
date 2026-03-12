@@ -1,6 +1,5 @@
 export type UnitType = 'soldier' | 'blade' | 'sniper' | 'zombie' | 'shielder' | 'bomber';
 export type Team = 'blue' | 'red';
-export type GamePhase = 'prompt' | 'battle' | 'result';
 export type TurnPhase = 'blue-planning' | 'cover' | 'red-planning' | 'playing';
 
 export interface Vec2 {
@@ -185,8 +184,6 @@ export interface HordeUpgrade {
   forType?: UnitType;
   apply: (units: Unit[], blocks?: Obstacle[]) => Unit[];
 }
-
-export type GameMode = 'pvp' | 'ai' | 'horde' | 'ctf';
 
 export interface CtfFlag {
   team: Team;

@@ -2,7 +2,7 @@ import { Unit, Vec2, Obstacle, ElevationZone, UnitType, CtfState } from './types
 import { ROUND_DURATION_S, MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH } from './constants';
 import { hasLineOfSight, getElevationLevel, flankScore } from './units';
 
-export interface ScoringContext {
+interface ScoringContext {
   candidate: Vec2;
   unit: Unit;
   enemies: Unit[];

@@ -11,7 +11,7 @@ import type {
 } from './online-types';
 import { isValidPlayerId } from './online-score';
 
-export interface OnlineGuestCallbacks {
+interface OnlineGuestCallbacks {
   onConnectionStateChange: (state: OnlineConnectionState) => void;
   onGameState: (state: OnlineGameState) => void;
   onPhaseChange: (phase: OnlinePhase) => void;

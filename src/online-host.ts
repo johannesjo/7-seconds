@@ -12,7 +12,7 @@ import type {
 } from './online-types';
 import { isValidPlayerId } from './online-score';
 
-export interface OnlineHostCallbacks {
+interface OnlineHostCallbacks {
   onConnectionStateChange: (state: OnlineConnectionState) => void;
   onShareUrl: (url: string) => void;
   onGuestPathsReceived: () => void;

@@ -1,7 +1,7 @@
 import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS } from './constants';
-import { createEffectsManager, EffectsManager } from './effects';
+import { EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
 
@@ -45,7 +45,7 @@ export class Renderer {
     canvas.style.width = `${MAP_WIDTH * scale}px`;
     canvas.style.height = `${MAP_HEIGHT * scale}px`;
     this.drawBackground();
-    this._effects = createEffectsManager(this.app.stage);
+    this._effects = new EffectsManager(this.app.stage);
   }
 
   private drawBackground(): void {
