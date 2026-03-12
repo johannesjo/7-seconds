@@ -24,6 +24,7 @@
   "dependencies": {
     "@capacitor/android": "^8.1.0",
     "@capacitor/core": "^8.1.0",
+    "@capacitor/local-notifications": "^8.0.2",
     "@mlc-ai/web-llm": "^0.2.81",
     "@supabase/supabase-js": "^2.98.0",
     "pixi.js": "^8.16.0"

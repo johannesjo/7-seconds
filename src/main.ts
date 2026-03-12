@@ -15,6 +15,7 @@ import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
 import { PathDrawer } from './path-drawer';
 import { recordWin, recordLoss, getScore, getOverallScore } from './online-score';
+import { requestNotificationPermission, notify } from './notify';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -742,6 +743,7 @@ function startOnlineHostGame(): void {
 async function startOnlineGuestMode(roomId: string): Promise<void> {
   onlineActive = true;
   onlineRole = 'guest';
+  requestNotificationPermission();
 
   await initRenderer();
   showScreen('battle');
@@ -847,6 +849,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 
     onPhaseChange(phase: OnlinePhase) {
       if (phase === 'blue-planning') {
+        notify('7 Seconds', "It's your turn to plan!");
         // Both players plan simultaneously — guest draws red paths right away
         guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
         guestPathDrawer.enable('red', guestUnits, guestElevationZones);
@@ -970,6 +973,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 onlineBtn.addEventListener('click', async () => {
   onlineActive = true;
   onlineRole = 'host';
+  requestNotificationPermission();
 
   await initRenderer();
 
@@ -981,6 +985,7 @@ onlineBtn.addEventListener('click', async () => {
   onlineHost = new OnlineHost({
     onConnectionStateChange(state: OnlineConnectionState) {
       if (state === 'connected') {
+        notify('7 Seconds', 'Your opponent has joined!');
         onlineLobby.style.display = 'none';
         startOnlineHostGame();
       } else if (state === 'disconnected') {
@@ -1038,6 +1043,7 @@ onlineBtn.addEventListener('click', async () => {
 // Online vs Random — client-side matchmaking via Supabase Realtime
 onlineRandomBtn.addEventListener('click', async () => {
   onlineActive = true;
+  requestNotificationPermission();
 
   await initRenderer();
 
@@ -1060,6 +1066,7 @@ onlineRandomBtn.addEventListener('click', async () => {
       onlineHost = new OnlineHost({
         onConnectionStateChange(state: OnlineConnectionState) {
           if (state === 'connected') {
+            notify('7 Seconds', 'Your opponent has joined!');
             onlineLobby.style.display = 'none';
             startOnlineHostGame();
           } else if (state === 'disconnected') {
