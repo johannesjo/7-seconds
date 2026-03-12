@@ -179,7 +179,7 @@ export async function createPeerConnection(
       }
       dlog('re-announcing offer');
       signal({ type: 'offer', sdp: offer.sdp!, peerId: localPeerId });
-    }, 10_000);
+    }, 3_000);
   }
 
   const send = (type: string, data: unknown) => {
