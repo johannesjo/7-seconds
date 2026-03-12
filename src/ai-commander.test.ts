@@ -6,7 +6,6 @@ vi.mock('@mlc-ai/web-llm', () => ({
 
 import { serializeState, parseAiResponse, fallbackOrders } from './ai-commander';
 import { createUnit } from './units';
-import { Obstacle } from './types';
 
 describe('serializeState', () => {
   it('serializes units and obstacles for a team', () => {
@@ -14,9 +13,7 @@ describe('serializeState', () => {
       createUnit('blue_soldier_0', 'soldier', 'blue', { x: 100, y: 200 }),
       createUnit('red_soldier_0', 'soldier', 'red', { x: 800, y: 300 }),
     ];
-    const obstacles: Obstacle[] = [{ x: 400, y: 200, w: 80, h: 120 }];
-
-    const result = serializeState(units, obstacles, 'blue');
+    const result = serializeState(units, 'blue');
     const parsed = JSON.parse(result);
 
     expect(parsed.my_units).toHaveLength(1);
@@ -33,7 +30,7 @@ describe('serializeState', () => {
     ];
     units[1].alive = false;
 
-    const result = serializeState(units, [], 'blue');
+    const result = serializeState(units, 'blue');
     const parsed = JSON.parse(result);
 
     expect(parsed.enemy_units).toHaveLength(0);

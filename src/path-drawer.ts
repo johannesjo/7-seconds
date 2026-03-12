@@ -5,7 +5,7 @@ import { getElevationLevel } from './units';
 import { Theme, NIGHT_THEME } from './theme';
 
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
-export function samplePath(raw: Vec2[], minDist: number): Vec2[] {
+function samplePath(raw: Vec2[], minDist: number): Vec2[] {
   if (raw.length === 0) return [];
   const result: Vec2[] = [raw[0]];
   for (let i = 1; i < raw.length; i++) {

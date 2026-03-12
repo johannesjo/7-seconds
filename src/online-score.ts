@@ -6,7 +6,7 @@ export function isValidPlayerId(id: string): boolean {
   return UUID_RE.test(id);
 }
 
-export interface PlayerScore {
+interface PlayerScore {
   wins: number;
   losses: number;
 }

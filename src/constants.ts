@@ -1,12 +1,12 @@
 import { UnitStats, UnitType } from './types';
 
-export const MIN_MAP_WIDTH = 360;
-export const MIN_MAP_HEIGHT = 620;
-export const MAX_MAP_WIDTH = 1000;
-export const MAX_MAP_HEIGHT = 1000;
+const MIN_MAP_WIDTH = 360;
+const MIN_MAP_HEIGHT = 620;
+const MAX_MAP_WIDTH = 1000;
+const MAX_MAP_HEIGHT = 1000;
 
-export let MAP_WIDTH = 1200;
-export let MAP_HEIGHT = 800;
+export let MAP_WIDTH = MAX_MAP_WIDTH;
+export let MAP_HEIGHT = MAX_MAP_HEIGHT;
 
 export function setMapSize(w: number, h: number): void {
   MAP_WIDTH = Math.max(MIN_MAP_WIDTH, Math.min(MAX_MAP_WIDTH, w));
@@ -27,9 +27,6 @@ export const ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
   { type: 'sniper', count: 1 },
 ];
 
-export const AI_POLL_INTERVAL_MS = 1500;
-export const UNIT_ATTACK_COOLDOWN_MS = 1000;
-
 export const ROUND_DURATION_S = 6;
 export const PATH_SAMPLE_DISTANCE = 18;
 export const UNIT_SELECT_RADIUS = 30;
@@ -39,9 +36,6 @@ export const FLANK_ANGLE_THRESHOLD = Math.PI / 3; // 60° half-cone = 120° fron
 export const FLANK_DAMAGE_MULTIPLIER = 1.5;
 export const SHIELD_MAX_HITS = 7;
 export const HORDE_MAX_WAVES = 15;
-export const HORDE_STARTING_ARMY: { type: UnitType; count: number }[] = [
-  { type: 'soldier', count: 2 },
-];
 
 /** Shrink factor for projectile-vs-unit hit detection (1 = full radius, 0.8 = 80%). */
 export const COLLISION_HITBOX_SCALE = 0.8;

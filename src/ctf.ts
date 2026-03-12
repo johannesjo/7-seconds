@@ -1,5 +1,5 @@
 import { CtfState, CtfFlag, Unit, Team, Vec2 } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH, CTF_FLAG_PICKUP_RADIUS, CTF_CARRIER_SPEED_MULTIPLIER } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH, CTF_FLAG_PICKUP_RADIUS } from './constants';
 
 export function createCtfState(): CtfState {
   const blueHome: Vec2 = { x: MAP_WIDTH / 2, y: MAP_HEIGHT - CTF_BASE_ZONE_WIDTH / 2 };
@@ -72,15 +72,3 @@ export function checkCtfCapture(state: CtfState): Team | null {
   return null;
 }
 
-/** Reduce unit speed when carrying the flag. */
-export function applyCarrierPenalty(unit: Unit, state: CtfState): number {
-  if (state.blueFlag.carrierId === unit.id || state.redFlag.carrierId === unit.id) {
-    return unit.speed * CTF_CARRIER_SPEED_MULTIPLIER;
-  }
-  return unit.speed;
-}
-
-/** Check if a unit is currently carrying a flag. */
-export function isCarrying(unitId: string, state: CtfState): boolean {
-  return state.blueFlag.carrierId === unitId || state.redFlag.carrierId === unitId;
-}

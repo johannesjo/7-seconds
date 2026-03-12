@@ -1,15 +1,15 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
-import { createArmy, createMissionArmy } from './units';
+import { createArmy, createMissionArmy, snapshotToUnit, snapshotToProjectile } from './units';
 import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
-import { BattleResult, TurnPhase, Unit, Projectile, Obstacle, ElevationZone, ReplayData, ReplayFrame, ReplayEvent, Team } from './types';
-import { ARMY_COMPOSITION, HORDE_MAX_WAVES, FLANK_DAMAGE_MULTIPLIER } from './constants';
+import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, ReplayFrame, ReplayEvent, Team } from './types';
+import { ARMY_COMPOSITION, HORDE_MAX_WAVES } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 import { OnlineHost } from './online-host';
 import { OnlineGuest } from './online-guest';
-import { getJoinRoomId, getLocalPlayerId, prefetchIceServers } from './online';
+import { getJoinRoomId, prefetchIceServers } from './online';
 import { findMatch } from './online-matchmaking';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
@@ -877,42 +877,8 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       }
       guestReplayFrameIndex++;
 
-      // Convert frame data to Unit/Projectile objects (same as ReplayPlayer)
-      const units: Unit[] = frame.units.map(s => ({
-        id: s.id,
-        type: s.type,
-        team: s.team,
-        pos: { x: s.x, y: s.y },
-        vel: { x: s.vx, y: s.vy },
-        gunAngle: s.gunAngle,
-        hp: s.hp,
-        maxHp: s.maxHp,
-        alive: s.alive,
-        radius: s.radius,
-        speed: 0,
-        damage: 0,
-        range: 0,
-        moveTarget: null,
-        waypoints: [],
-        attackTargetId: null,
-        fireCooldown: 0,
-        fireTimer: 0,
-        projectileSpeed: 0,
-        projectileRadius: 0,
-        turnSpeed: 0,
-      }));
-
-      const projectiles: Projectile[] = frame.projectiles.map(s => ({
-        pos: { x: s.x, y: s.y },
-        vel: { x: s.vx, y: s.vy },
-        target: { x: 0, y: 0 },
-        damage: s.damage,
-        radius: s.radius,
-        team: s.team,
-        maxRange: s.maxRange,
-        distanceTraveled: s.distanceTraveled,
-        trail: s.trail,
-      }));
+      const units = frame.units.map(snapshotToUnit);
+      const projectiles = frame.projectiles.map(snapshotToProjectile);
 
       renderer!.renderUnits(units, 1 / 60);
       renderer!.renderProjectiles(projectiles);
@@ -921,24 +887,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       renderer!.effects?.update(1 / 60);
 
       // Trigger effects for events (match host logic)
-      const fx = renderer!.effects;
-      if (fx) {
-        for (const event of frame.events) {
-          if (event.type === 'fire') {
-            fx.addMuzzleFlash(event.pos, event.angle, 6);
-          } else if (event.type === 'hit') {
-            const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
-            const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
-            fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-          } else if (event.type === 'kill') {
-            const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
-            const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
-            fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-            fx.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
-            fx.addKillText(event.pos, event.team);
-          }
-        }
-      }
+      renderer!.effects?.dispatchEvents(frame.events);
 
       // Update round timer
       const timeLeft = frame.timeLeft;
@@ -966,8 +915,8 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         else if (result.winner === 'blue') recordLoss(opponentPlayerId);
       }
 
-      const color = result.winner === 'blue' ? '#4a9eff' : result.winner === 'red' ? '#ff4a4a' : '#888';
-      const winnerLabel = result.winner === 'draw' ? 'Draw!' : `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
+      const color = result.winner === 'blue' ? '#4a9eff' : '#ff4a4a';
+      const winnerLabel = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
       winnerTextEl.innerHTML = `${winnerLabel}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
       winnerTextEl.style.color = color;
 

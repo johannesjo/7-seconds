@@ -1,6 +1,7 @@
-import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone } from './types';
+import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone, ReplayUnitSnapshot, ReplayProjectileSnapshot } from './types';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE, SHIELD_MAX_HITS } from './constants';
 
-export interface ProjectileHit {
+interface ProjectileHit {
   pos: Vec2;
   targetId: string;
   killed: boolean;
@@ -9,7 +10,6 @@ export interface ProjectileHit {
   damage: number;
   flanked: boolean;
 }
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE, SHIELD_MAX_HITS } from './constants';
 
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
@@ -191,22 +191,13 @@ export function nudgeOutOfBlocks(pos: Vec2, blocks: Obstacle[], padding = 4): Ve
   return pos;
 }
 
-/** Distance from a point to the nearest edge of a rect. */
-export function distToRect(pos: Vec2, rect: Obstacle): number {
-  const cx = Math.max(rect.x, Math.min(rect.x + rect.w, pos.x));
-  const cy = Math.max(rect.y, Math.min(rect.y + rect.h, pos.y));
-  const dx = pos.x - cx;
-  const dy = pos.y - cy;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
 /** Returns 0 (frontal approach) to 1 (perfect rear flank). */
 export function flankScore(attackerPos: Vec2, targetPos: Vec2, targetGunAngle: number): number {
   const approachAngle = Math.atan2(attackerPos.y - targetPos.y, attackerPos.x - targetPos.x);
   let diff = approachAngle - targetGunAngle;
   diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
   if (diff < -Math.PI) diff += 2 * Math.PI;
-  // 0 = directly behind target's facing (perfect flank), PI = directly in front
+  // 0 = directly in front of target's facing, 1 = directly behind (perfect flank)
   return Math.abs(diff) / Math.PI;
 }
 
@@ -808,7 +799,7 @@ export function applyDamage(unit: Unit, amount: number): void {
   }
 }
 
-export interface AoeHit {
+interface AoeHit {
   pos: Vec2;
   targetId: string;
   killed: boolean;
@@ -880,7 +871,7 @@ export function bladeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
   return hits;
 }
 
-export interface ExplosionHit {
+interface ExplosionHit {
   pos: Vec2;
   targetId: string;
   killed: boolean;
@@ -949,6 +940,9 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     predictedY = target.pos.y + target.vel.y * flightTime;
   }
 
+  // Blade uses AoE attack, bombers don't fire projectiles
+  if (unit.type === 'blade' || unit.type === 'bomber') return [];
+
   const pdx = predictedX - unit.pos.x;
   const pdy = predictedY - unit.pos.y;
   const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
@@ -956,10 +950,6 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
   if (pdist < 1) return [];
 
   const maxRange = unit.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(unit.pos, elevationZones)) + unit.radius + 40;
-  const baseAngle = Math.atan2(pdy, pdx);
-
-  // Blade uses AoE attack, not projectiles
-  if (unit.type === 'blade' || unit.type === 'bomber') return [];
 
   return [{
     pos: { x: unit.pos.x, y: unit.pos.y },
@@ -1069,4 +1059,46 @@ export function updateProjectiles(
   }
 
   return { alive, hits };
+}
+
+/** Convert a replay unit snapshot to a Unit object for rendering. */
+export function snapshotToUnit(s: ReplayUnitSnapshot): Unit {
+  return {
+    id: s.id,
+    type: s.type,
+    team: s.team,
+    pos: { x: s.x, y: s.y },
+    vel: { x: s.vx, y: s.vy },
+    gunAngle: s.gunAngle,
+    hp: s.hp,
+    maxHp: s.maxHp,
+    alive: s.alive,
+    radius: s.radius,
+    speed: 0,
+    damage: 0,
+    range: 0,
+    moveTarget: null,
+    waypoints: [],
+    attackTargetId: null,
+    fireCooldown: 0,
+    fireTimer: 0,
+    projectileSpeed: 0,
+    projectileRadius: 0,
+    turnSpeed: 0,
+  };
+}
+
+/** Convert a replay projectile snapshot to a Projectile object for rendering. */
+export function snapshotToProjectile(s: ReplayProjectileSnapshot): Projectile {
+  return {
+    pos: { x: s.x, y: s.y },
+    vel: { x: s.vx, y: s.vy },
+    target: { x: 0, y: 0 },
+    damage: s.damage,
+    radius: s.radius,
+    team: s.team,
+    maxRange: s.maxRange,
+    distanceTraveled: s.distanceTraveled,
+    trail: s.trail,
+  };
 }

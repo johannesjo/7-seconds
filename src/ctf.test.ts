@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 import { createUnit } from './units';
-import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH, CTF_FLAG_PICKUP_RADIUS } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH } from './constants';
 
 describe('createCtfState', () => {
   it('creates flags at base positions', () => {

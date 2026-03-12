@@ -1,5 +1,5 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
-import { ARMY_COMPOSITION, ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { OnlineFrameData, OnlineGameState } from './online-types';
 import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
@@ -8,7 +8,7 @@ import { PathDrawer } from './path-drawer';
 import { Renderer } from './renderer';
 import { scorePosition, generateCandidates } from './ai-scoring';
 
-export type GameEventCallback = (
+type GameEventCallback = (
   event: 'update' | 'end' | 'phase-change' | 'wave-clear',
   data?: BattleResult | { phase: TurnPhase; timeLeft?: number; round?: number },
 ) => void;
@@ -39,7 +39,6 @@ export class GameEngine {
   private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
   private ctfMode = false;
   private ctfState: CtfState | null = null;
-  private ctfHotseat = false;
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
   private onlineHostMode = false;
@@ -66,7 +65,6 @@ export class GameEngine {
     this.hordeRedArmy = opts?.hordeRedArmy ?? null;
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
-    this.ctfHotseat = opts?.ctfHotseat ?? false;
     this.onlineHostMode = opts?.onlineHost ?? false;
     this.onFrameCallback = opts?.onFrame;
     this.onPhaseChangeCallback = opts?.onPhaseChange;
@@ -206,8 +204,10 @@ export class GameEngine {
     const redUnits = this.units.filter(u => u.alive && u.team === 'red');
     const enemies = this.units.filter(u => u.alive && u.team === 'blue');
 
+    if (redUnits.length === 0) return;
+
     const candidates = generateCandidates(
-      redUnits[0] ?? { pos: { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 }, speed: 100, radius: 10 } as Unit,
+      redUnits[0],
       this.obstacles,
       this.elevationZones,
     );
@@ -294,12 +294,36 @@ export class GameEngine {
     this.elapsedTime += dt;
     this.roundTimer -= dt;
 
-    // Horde start delay — skip red movement for 2s so player can react
+    const redDelayed = this.updateHordeDelay(dt);
+    this.updateChaseAI();
+    this.updateMovement(dt, redDelayed);
+    this.updateCombat(dt);
+    const hits = this.updateProjectiles(dt);
+    this.dispatchHitEffects(hits);
+    this.handleBomberChainExplosions(hits);
+
+    // Record replay frame after all state updates
+    this.recordFrame();
+    this.broadcastOnlineFrame();
+
+    this.renderer.renderProjectiles(this.projectiles);
+    this.renderer.effects?.update(dt);
+    this.onEvent('update', { phase: 'playing', timeLeft: Math.max(0, this.roundTimer) });
+
+    if (this.checkCtfCapture()) return;
+    if (this.checkElimination()) return;
+    this.checkRoundEnd(dt);
+  };
+
+  /** Horde start delay -- skip red movement for 2s so player can react. */
+  private updateHordeDelay(dt: number): boolean {
     const redDelayed = this.hordeStartDelay > 0;
     if (redDelayed) this.hordeStartDelay -= dt;
+    return redDelayed;
+  }
 
-    // Zombies, shielders, and bombers on the red team always chase closest enemy
-    // Blue units of these types are player-controlled and follow drawn paths instead
+  /** Zombies, shielders, and bombers on the red team always chase closest enemy. */
+  private updateChaseAI(): void {
     for (const unit of this.units) {
       if (!unit.alive || unit.team !== 'red' || (unit.type !== 'zombie' && unit.type !== 'shielder' && unit.type !== 'bomber')) continue;
       const target = findTarget(unit, this.units, null, this.obstacles);
@@ -308,8 +332,10 @@ export class GameEngine {
         unit.moveTarget = { x: target.pos.x, y: target.pos.y };
       }
     }
+  }
 
-    // Advance waypoints and move
+  /** Advance waypoints and move all living units. */
+  private updateMovement(dt: number, redDelayed: boolean): void {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       if (redDelayed && unit.team === 'red') continue;
@@ -317,8 +343,10 @@ export class GameEngine {
       moveUnit(unit, dt, this.obstacles, this.units);
     }
     separateUnits(this.units, this.obstacles);
+  }
 
-    // Combat — auto-target nearest enemy, fire projectiles
+  /** Auto-target nearest enemy, fire projectiles, handle melee blades. */
+  private updateCombat(dt: number): void {
     for (const unit of this.units) {
       if (!unit.alive) continue;
 
@@ -381,11 +409,17 @@ export class GameEngine {
         }
       }
     }
+  }
 
+  /** Update projectile positions and resolve collisions. Returns hit results. */
+  private updateProjectiles(dt: number): ReturnType<typeof updateProjectiles>['hits'] {
     const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
     this.projectiles = aliveProjectiles;
+    return hits;
+  }
 
-    // Trigger effects for hits + record replay events
+  /** Trigger visual effects for projectile hits and record replay events. */
+  private dispatchHitEffects(hits: ReturnType<typeof updateProjectiles>['hits']): void {
     const fx = this.renderer.effects;
     for (const hit of hits) {
       const unitGfx = this.renderer.getUnitContainer(hit.targetId);
@@ -410,8 +444,11 @@ export class GameEngine {
         fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
       }
     }
+  }
 
-    // Bomber chain explosions
+  /** Handle bomber chain explosions when bombers are killed. */
+  private handleBomberChainExplosions(hits: ReturnType<typeof updateProjectiles>['hits']): void {
+    const fx = this.renderer.effects;
     for (const hit of hits) {
       if (hit.killed) {
         const deadUnit = this.units.find(u => u.id === hit.targetId);
@@ -440,45 +477,40 @@ export class GameEngine {
         }
       }
     }
+  }
 
-    // Record replay frame after all state updates
-    this.recordFrame();
+  /** Send current frame data to the online peer callback. */
+  private broadcastOnlineFrame(): void {
+    if (!this.onFrameCallback) return;
+    const lastFrame = this.replayFrames[this.replayFrames.length - 1];
+    const frameEvents = this.replayEvents.filter(e => e.frame === this.replayFrames.length - 1);
+    this.onFrameCallback({
+      units: lastFrame.units,
+      projectiles: lastFrame.projectiles,
+      events: frameEvents,
+      timeLeft: Math.max(0, this.roundTimer),
+    });
+  }
 
-    if (this.onFrameCallback) {
-      const lastFrame = this.replayFrames[this.replayFrames.length - 1];
-      const frameEvents = this.replayEvents.filter(e => e.frame === this.replayFrames.length - 1);
-      this.onFrameCallback({
-        units: lastFrame.units,
-        projectiles: lastFrame.projectiles,
-        events: frameEvents,
-        timeLeft: Math.max(0, this.roundTimer),
-      });
+  /** Check CTF capture win condition. Returns true if the round ended. */
+  private checkCtfCapture(): boolean {
+    if (!this.ctfMode || !this.ctfState) return false;
+    updateCtfFlags(this.ctfState, this.units);
+    const capturer = checkCtfCapture(this.ctfState);
+    if (capturer) {
+      this.ctfState.winner = capturer;
+      this.endingBattle = true;
+      this.endDelayTimer = 0.6;
+      this.pendingWinner = capturer;
+      this.projectiles = [];
+      this.renderer.renderProjectiles([]);
+      return true;
     }
+    return false;
+  }
 
-    this.renderer.renderProjectiles(this.projectiles);
-
-    // Update effects
-    this.renderer.effects?.update(dt);
-
-    // HUD update with time left
-    this.onEvent('update', { phase: 'playing', timeLeft: Math.max(0, this.roundTimer) });
-
-    // CTF: update flag positions, pickups, drops, and check capture
-    if (this.ctfMode && this.ctfState) {
-      updateCtfFlags(this.ctfState, this.units);
-      const capturer = checkCtfCapture(this.ctfState);
-      if (capturer) {
-        this.ctfState.winner = capturer;
-        this.endingBattle = true;
-        this.endDelayTimer = 0.6;
-        this.pendingWinner = capturer;
-        this.projectiles = [];
-        this.renderer.renderProjectiles([]);
-        return;
-      }
-    }
-
-    // Win condition — elimination
+  /** Check elimination win condition. Returns true if the round ended. */
+  private checkElimination(): boolean {
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
 
@@ -492,17 +524,20 @@ export class GameEngine {
         this.pathDrawer?.disable();
         this.pathDrawer?.clearGraphics();
         this.onEvent('wave-clear');
-        return;
+        return true;
       }
       this.endingBattle = true;
       this.endDelayTimer = 0.6;
       this.pendingWinner = blueAlive === 0 ? 'red' : 'blue';
       this.projectiles = [];
       this.renderer.renderProjectiles([]);
-      return;
+      return true;
     }
+    return false;
+  }
 
-    // Check if action is complete — no movement, no combat, no projectiles
+  /** Check if action is complete and transition back to planning phase. */
+  private checkRoundEnd(dt: number): void {
     const idle = this.projectiles.length === 0 && this.units.every(u => {
       if (!u.alive) return true;
       // Use actual velocity — moveTarget can be stuck on obstacles
@@ -598,8 +633,8 @@ export class GameEngine {
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
-    const blueTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
-    const redTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
+    const blueTotal = this.units.filter(u => u.team === 'blue').length;
+    const redTotal = this.units.filter(u => u.team === 'red').length;
 
     this.onEvent('end', {
       winner,

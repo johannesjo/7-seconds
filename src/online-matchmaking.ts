@@ -25,7 +25,7 @@ interface LeaveMessage {
 
 type LobbyMessage = SeekMessage | MatchMessage | LeaveMessage;
 
-export interface MatchResult {
+interface MatchResult {
   role: 'host' | 'guest';
   roomId: string;
 }

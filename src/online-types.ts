@@ -34,7 +34,7 @@ export interface OnlineFrameData {
 }
 
 export interface OnlineRoundResult {
-  winner: Team | 'draw';
+  winner: Team;
   blueAlive: number;
   redAlive: number;
   duration: number;

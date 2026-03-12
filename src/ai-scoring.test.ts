@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { scorePosition, generateCandidates } from './ai-scoring';
 import { createUnit } from './units';
-import { Obstacle, ElevationZone, CtfState } from './types';
+import { Obstacle, ElevationZone } from './types';
 import { createCtfState } from './ctf';
 
 describe('scorePosition', () => {

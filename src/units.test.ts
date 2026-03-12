@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, createArmy, createCtfArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, bladeAoeAttack, bomberExplode } from './units';
-import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH } from './constants';
+import { createUnit, createArmy, createCtfArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, isFlanked, bladeAoeAttack, bomberExplode } from './units';
+import { MAP_HEIGHT, CTF_BASE_ZONE_WIDTH } from './constants';
 
 
 describe('createUnit', () => {
