@@ -26,12 +26,15 @@ export class OnlineGuest {
   private connectionState: OnlineConnectionState = 'idle';
   private readonly callbacks: OnlineGuestCallbacks;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _hostWantsRematch = false;
   private hostPeerId: string | null = null;
   private stopPeerMonitor: (() => void) | null = null;
 
   // Single long timeout for peer discovery via Supabase signaling.
   private static readonly CONNECTION_TIMEOUT_MS = 120_000;
+  /** How long to wait for automatic reconnection before declaring disconnect. */
+  private static readonly RECONNECT_GRACE_MS = 20_000;
 
   constructor(callbacks: OnlineGuestCallbacks) {
     this.callbacks = callbacks;
@@ -55,11 +58,23 @@ export class OnlineGuest {
         (peerId) => {
           this.hostPeerId = peerId;
           this.clearTimeout();
+          this.clearReconnectTimer();
           this.setConnectionState('connected');
           this.sendIdentity();
         },
         (peerId) => {
-          if (peerId === this.hostPeerId) this.setConnectionState('disconnected');
+          // Don't clear hostPeerId — allow reconnection from same peer.
+          // Guard against flapping: don't restart the timer if already reconnecting.
+          if (peerId === this.hostPeerId && this.connectionState !== 'reconnecting') {
+            this.setConnectionState('reconnecting');
+            this.reconnectTimer = setTimeout(() => {
+              this.reconnectTimer = null;
+              if (this.connectionState === 'reconnecting') {
+                dlog('guest reconnect grace period expired');
+                this.setConnectionState('disconnected');
+              }
+            }, OnlineGuest.RECONNECT_GRACE_MS);
+          }
         },
       );
     } catch (e) {
@@ -137,6 +152,7 @@ export class OnlineGuest {
 
   destroy(): void {
     this.clearTimeout();
+    this.clearReconnectTimer();
     this.stopPeerMonitor?.();
     this.stopPeerMonitor = null;
     if (this.connection) {
@@ -152,6 +168,13 @@ export class OnlineGuest {
     if (this.timeoutTimer) {
       clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 

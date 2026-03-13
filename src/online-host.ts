@@ -28,10 +28,13 @@ export class OnlineHost {
   private guestPeerId: string | null = null;
   private _guestWantsRematch = false;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopPeerMonitor: (() => void) | null = null;
 
   // Single long timeout for peer discovery via Supabase signaling.
   private static readonly CONNECTION_TIMEOUT_MS = 120_000;
+  /** How long to wait for automatic reconnection before declaring disconnect. */
+  private static readonly RECONNECT_GRACE_MS = 20_000;
 
   constructor(callbacks: OnlineHostCallbacks) {
     this.callbacks = callbacks;
@@ -137,6 +140,7 @@ export class OnlineHost {
 
   destroy(): void {
     this.clearTimeout();
+    this.clearReconnectTimer();
     this.stopPeerMonitor?.();
     this.stopPeerMonitor = null;
     this.connection?.leave();
@@ -148,17 +152,38 @@ export class OnlineHost {
   }
 
   private handlePeerJoin(peerId: string): void {
-    if (this.guestPeerId) return;
+    // Accept reconnections from the same or new guest
+    if (this.guestPeerId && this.guestPeerId !== peerId) return;
     this.guestPeerId = peerId;
     this.clearTimeout();
+    this.clearReconnectTimer();
     this.setConnectionState('connected');
     this.sendIdentity();
   }
 
   private handlePeerLeave(peerId: string): void {
     if (peerId === this.guestPeerId) {
-      this.guestPeerId = null;
-      this.setConnectionState('disconnected');
+      // Don't clear guestPeerId — allow reconnection from same peer.
+      // Show 'reconnecting' first; the peer layer will attempt ICE restart
+      // and full reconnect automatically. Only show 'disconnected' if it
+      // doesn't recover within the grace period.
+      // Guard against flapping: don't restart the timer if already reconnecting.
+      if (this.connectionState === 'reconnecting') return;
+      this.setConnectionState('reconnecting');
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        if (this.connectionState === 'reconnecting') {
+          dlog('host reconnect grace period expired');
+          this.setConnectionState('disconnected');
+        }
+      }, OnlineHost.RECONNECT_GRACE_MS);
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 

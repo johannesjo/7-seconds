@@ -42,10 +42,10 @@ describe('OnlinePathData', () => {
 describe('OnlineConnectionState', () => {
   it('covers all expected connection states', () => {
     const states: OnlineConnectionState[] = [
-      'idle', 'waiting', 'connecting', 'connected', 'disconnected', 'error',
+      'idle', 'waiting', 'connecting', 'connected', 'reconnecting', 'disconnected', 'error',
     ];
 
-    expect(states).toHaveLength(6);
-    expect(new Set(states).size).toBe(6);
+    expect(states).toHaveLength(7);
+    expect(new Set(states).size).toBe(7);
   });
 });

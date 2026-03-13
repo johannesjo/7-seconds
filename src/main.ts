@@ -759,6 +759,9 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         setOnlineStatus('Connected! Waiting for game...', true);
       } else if (state === 'connecting') {
         setOnlineStatus('Connecting...', true);
+      } else if (state === 'reconnecting') {
+        // Show reconnecting status — don't kill the game yet
+        setOnlineStatus('Reconnecting...', true);
       } else if (state === 'disconnected') {
         // Show disconnect on result screen so player can go back
         planningOverlay.classList.remove('active');
@@ -985,9 +988,16 @@ onlineBtn.addEventListener('click', async () => {
   onlineHost = new OnlineHost({
     onConnectionStateChange(state: OnlineConnectionState) {
       if (state === 'connected') {
-        notify('7 Seconds', 'Your opponent has joined!');
-        onlineLobby.style.display = 'none';
-        startOnlineHostGame();
+        if (engine) {
+          // Reconnected mid-game — resume without reinitializing
+          notify('7 Seconds', 'Reconnected!');
+        } else {
+          notify('7 Seconds', 'Your opponent has joined!');
+          onlineLobby.style.display = 'none';
+          startOnlineHostGame();
+        }
+      } else if (state === 'reconnecting') {
+        setOnlineStatus('Reconnecting...', true);
       } else if (state === 'disconnected') {
         // Show disconnect on result screen so host can go back
         engine?.stop();
@@ -1066,9 +1076,15 @@ onlineRandomBtn.addEventListener('click', async () => {
       onlineHost = new OnlineHost({
         onConnectionStateChange(state: OnlineConnectionState) {
           if (state === 'connected') {
-            notify('7 Seconds', 'Your opponent has joined!');
-            onlineLobby.style.display = 'none';
-            startOnlineHostGame();
+            if (engine) {
+              notify('7 Seconds', 'Reconnected!');
+            } else {
+              notify('7 Seconds', 'Your opponent has joined!');
+              onlineLobby.style.display = 'none';
+              startOnlineHostGame();
+            }
+          } else if (state === 'reconnecting') {
+            setOnlineStatus('Reconnecting...', true);
           } else if (state === 'disconnected') {
             engine?.stop();
             planningOverlay.classList.remove('active');
