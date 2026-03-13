@@ -182,6 +182,8 @@ export interface HordeUpgrade {
   minWave?: number;
   /** If set, this upgrade only appears when the player owns at least one unit of this type. */
   forType?: UnitType;
+  /** If set, upgrade is hidden when this returns false (e.g. no eligible units). */
+  canApply?: (units: Unit[]) => boolean;
   apply: (units: Unit[], blocks?: Obstacle[]) => Unit[];
 }
 

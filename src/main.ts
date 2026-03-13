@@ -105,7 +105,7 @@ let ctfHotseat = false;
 let hordeWave = 0;
 let hordeUnits: Unit[] = [];
 let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
-let hordeAppliedUpgrades = new Set<string>();
+let hordeAppliedUpgrades = new Map<string, number>();
 
 // Online state
 let onlineHost: OnlineHost | null = null;
@@ -420,7 +420,7 @@ function stopReplay(): void {
 function startHorde(): void {
   hordeActive = true;
   hordeWave = 0;
-  hordeAppliedUpgrades = new Set();
+  hordeAppliedUpgrades = new Map();
   lastReplayData = null;
 
   // Generate map once for the whole run (before spawning so units avoid blocks)
@@ -478,7 +478,7 @@ function showUpgradeSelection(): void {
     `;
     card.addEventListener('click', () => {
       const allBlocks = hordeMap!.obstacles;
-      hordeAppliedUpgrades.add(upgrade.id);
+      hordeAppliedUpgrades.set(upgrade.id, (hordeAppliedUpgrades.get(upgrade.id) ?? 0) + 1);
       hordeUnits = upgrade.apply(hordeUnits, allBlocks);
       repositionBlueUnits(hordeUnits, allBlocks);
       showScreen('battle');
@@ -638,7 +638,7 @@ newBattleBtn.addEventListener('click', () => {
   hordeWave = 0;
   hordeUnits = [];
   hordeMap = null;
-  hordeAppliedUpgrades = new Set();
+  hordeAppliedUpgrades = new Map();
   waveCounterEl.style.display = 'none';
 
   ctfActive = false;
