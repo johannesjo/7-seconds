@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   root: '.',
-  base: '/7-seconds/',
+  base: './',
   build: {
     outDir: 'dist',
   },

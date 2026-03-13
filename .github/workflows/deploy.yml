@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy
 
 on:
   push:
@@ -37,3 +37,28 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-itch:
+    needs: build
+    runs-on: ubuntu-latest
+    if: vars.ITCH_DEPLOY_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: dist-archive
+      - name: Extract build artifact
+        run: tar -xf dist-archive/artifact.tar -C dist-archive && rm dist-archive/artifact.tar
+      - name: Install butler
+        run: |
+          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          unzip butler.zip
+          chmod +x butler
+      - name: Get version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Push to itch.io
+        run: ./butler push dist-archive/ johannesjo/7-seconds:html5 --userversion ${{ steps.version.outputs.version }}
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
