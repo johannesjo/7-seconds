@@ -26,10 +26,13 @@ const RECONNECT_DELAY_MS = 2_000;
 const MAX_RECONNECT_ATTEMPTS = 3;
 /** How long to wait for ICE restart to succeed before full reconnect. */
 const ICE_RESTART_TIMEOUT_MS = 10_000;
+/** How long to wait for a full reconnect attempt to succeed before retrying or giving up. */
+const RECONNECT_ATTEMPT_TIMEOUT_MS = 15_000;
 
 export interface PeerCallbacks {
   onOpen: (peerId: string) => void;
   onClose: (peerId: string) => void;
+  onReconnecting?: (peerId: string) => void;
   onMessage: (type: string, data: unknown, peerId: string) => void;
 }
 
@@ -60,6 +63,7 @@ export async function createPeerConnection(
   let lastPongTime = 0;
   let keepaliveCheckTimer: ReturnType<typeof setInterval> | null = null;
   let iceRestartTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttemptTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnecting = false;
   /** Set during intentional teardown to suppress dc.onclose triggering reconnect. */
   let tearingDown = false;
@@ -123,6 +127,11 @@ export async function createPeerConnection(
     reconnectAttempts++;
     dlog(`connection lost, attempting reconnect ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
 
+    // Notify higher layers so UI can show "Reconnecting..." immediately
+    if (reconnectAttempts === 1) {
+      callbacks.onReconnecting?.(remotePeerId);
+    }
+
     // Try ICE restart first (faster than full reconnect)
     if (pc && role === 'host') {
       attemptIceRestart();
@@ -168,6 +177,10 @@ export async function createPeerConnection(
     }, RECONNECT_DELAY_MS);
   };
 
+  const clearReconnectAttemptTimer = () => {
+    if (reconnectAttemptTimer) { clearTimeout(reconnectAttemptTimer); reconnectAttemptTimer = null; }
+  };
+
   const doFullReconnect = () => {
     if (destroyed) return;
     dlog('full reconnect: tearing down old PC');
@@ -178,6 +191,7 @@ export async function createPeerConnection(
     // Clean up old connection
     stopKeepalive();
     if (iceRestartTimer) { clearTimeout(iceRestartTimer); iceRestartTimer = null; }
+    clearReconnectAttemptTimer();
     clearAnnounceInterval();
     dc?.close();
     pc?.close();
@@ -186,6 +200,17 @@ export async function createPeerConnection(
     pendingCandidates = [];
 
     tearingDown = false;
+
+    // Set a timeout so this reconnect attempt doesn't hang forever.
+    // When it fires, reset reconnecting and let handleConnectionLost
+    // decide whether to retry or give up.
+    reconnectAttemptTimer = setTimeout(() => {
+      reconnectAttemptTimer = null;
+      if (destroyed || dc?.readyState === 'open') return;
+      dlog('reconnect attempt timed out');
+      reconnecting = false;
+      handleConnectionLost();
+    }, RECONNECT_ATTEMPT_TIMEOUT_MS);
 
     if (role === 'host') {
       // Host: create new PC and send fresh offer
@@ -208,6 +233,7 @@ export async function createPeerConnection(
         }, 3_000);
       }).catch((e) => {
         dlog(`reconnect offer error: ${e}`);
+        clearReconnectAttemptTimer();
         reconnecting = false;
         if (!destroyed) callbacks.onClose(remotePeerId);
       });
@@ -228,6 +254,7 @@ export async function createPeerConnection(
       tearingDown = false;
       reconnectAttempts = 0;
       clearAnnounceInterval();
+      clearReconnectAttemptTimer();
       startKeepalive();
       if (!destroyed) callbacks.onOpen(remotePeerId);
     };
@@ -423,6 +450,7 @@ export async function createPeerConnection(
     tearingDown = true;
     stopKeepalive();
     if (iceRestartTimer) { clearTimeout(iceRestartTimer); iceRestartTimer = null; }
+    clearReconnectAttemptTimer();
     clearAnnounceInterval();
     signal({ type: 'bye', peerId: localPeerId });
     dc?.close();
