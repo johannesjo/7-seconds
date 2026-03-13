@@ -41,7 +41,7 @@ export interface OnlineRoundResult {
   gameOver: boolean;
 }
 
-export type OnlineConnectionState = 'idle' | 'waiting' | 'connecting' | 'connected' | 'disconnected' | 'error';
+export type OnlineConnectionState = 'idle' | 'waiting' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error';
 
 /** Signals sent between players (rematch request, identity, etc.) */
 export interface OnlineSignal {
