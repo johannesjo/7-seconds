@@ -70,6 +70,10 @@ function makeUnitUpgrade(
   };
 }
 
+/** Returns true if the player owns at least one ranged (non-blade) blue unit. */
+const hasRangedUnits = (units: Unit[]): boolean =>
+  units.some(u => u.team === 'blue' && u.type !== 'blade');
+
 export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   makeStatUpgrade('hp_15', '+15 HP', 'All units gain +15 max HP', 'common', u => {
     u.maxHp += 15;
@@ -78,12 +82,12 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   makeStatUpgrade('dmg_10', '+10 Damage', 'All units deal +10 damage', 'common', u => {
     u.damage += 10;
   }),
-  makeStatUpgrade('range_20', '+20 Range', 'All units gain +20 range', 'common', u => {
+  { ...makeStatUpgrade('range_20', '+20 Range', 'All units gain +20 range', 'common', u => {
     if (u.type !== 'blade') u.range += 20;
-  }),
-  makeStatUpgrade('range_50', '+50 Range', 'All units gain +50 range', 'uncommon', u => {
+  }), canApply: hasRangedUnits },
+  { ...makeStatUpgrade('range_50', '+50 Range', 'All units gain +50 range', 'uncommon', u => {
     if (u.type !== 'blade') u.range += 50;
-  }),
+  }), canApply: hasRangedUnits },
   makeStatUpgrade('speed_15', '+15 Speed', 'All units gain +15 speed', 'common', u => {
     u.speed += 15;
   }),
@@ -92,7 +96,7 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   }),
   { ...makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', 'rare', u => {
     u.piercing = true;
-  }), once: true, minWave: 10 },
+  }), once: true, minWave: 10, canApply: hasRangedUnits },
   { ...makeStatUpgrade('double_fire', 'Double Time', 'All units fire twice as fast', 'epic', u => {
     u.fireCooldown *= 0.5;
   }), once: true, minWave: 10 },
@@ -156,11 +160,12 @@ function weightedEntries(upgrade: HordeUpgrade): HordeUpgrade[] {
 }
 
 /** Pick 3 random upgrades with constraints. */
-export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<string> = new Set()): HordeUpgrade[] {
+export function pickUpgrades(blueUnits: Unit[], wave: number, appliedCounts: Map<string, number> = new Map()): HordeUpgrade[] {
   const picks: HordeUpgrade[] = [];
   const usedIds = new Set<string>();
 
   // Exclude one-time upgrades that have already been applied
+  const appliedIds = new Set(appliedCounts.keys());
   const excludedIds = new Set([...appliedIds].filter(id => {
     const upgrade = ALL_STAT_UPGRADES.find(u => u.id === id);
     return upgrade?.once;
@@ -202,10 +207,15 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
   );
 
   // Fill remaining slots from mixed pool (excluding already-applied one-time upgrades and wave-gated ones)
+  // Skip upgrades that would have no effect on the current unit roster
   // Each upgrade is expanded by its rarity weight so rarer upgrades appear less often
   const allPool: HordeUpgrade[] = [
     ...ALL_STAT_UPGRADES
-      .filter(u => !excludedIds.has(u.id) && (!u.minWave || wave >= u.minWave))
+      .filter(u =>
+        !excludedIds.has(u.id) &&
+        (!u.minWave || wave >= u.minWave) &&
+        (!u.canApply || u.canApply(blueUnits)),
+      )
       .flatMap(weightedEntries),
     ...unitUpgradePool.flatMap(weightedEntries),
     ...recruitPool,
@@ -217,7 +227,13 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedIds: Set<st
   for (const upgrade of shuffled) {
     if (picks.length >= 3) break;
     if (usedIds.has(upgrade.id)) continue;
-    picks.push(upgrade);
+    // Annotate label with stack count when the upgrade has already been applied
+    const count = appliedCounts.get(upgrade.id) ?? 0;
+    if (count > 0) {
+      picks.push({ ...upgrade, label: `${upgrade.label} (×${count + 1})` });
+    } else {
+      picks.push(upgrade);
+    }
     usedIds.add(upgrade.id);
   }
 
