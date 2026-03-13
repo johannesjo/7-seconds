@@ -64,9 +64,8 @@ export class OnlineGuest {
         },
         (peerId) => {
           // Don't clear hostPeerId — allow reconnection from same peer.
-          // Show 'reconnecting' first; the peer layer will attempt ICE restart
-          // and full reconnect automatically.
-          if (peerId === this.hostPeerId) {
+          // Guard against flapping: don't restart the timer if already reconnecting.
+          if (peerId === this.hostPeerId && this.connectionState !== 'reconnecting') {
             this.setConnectionState('reconnecting');
             this.reconnectTimer = setTimeout(() => {
               this.reconnectTimer = null;

@@ -167,6 +167,8 @@ export class OnlineHost {
       // Show 'reconnecting' first; the peer layer will attempt ICE restart
       // and full reconnect automatically. Only show 'disconnected' if it
       // doesn't recover within the grace period.
+      // Guard against flapping: don't restart the timer if already reconnecting.
+      if (this.connectionState === 'reconnecting') return;
       this.setConnectionState('reconnecting');
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;

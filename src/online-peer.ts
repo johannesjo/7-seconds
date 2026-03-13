@@ -61,10 +61,20 @@ export async function createPeerConnection(
   let keepaliveCheckTimer: ReturnType<typeof setInterval> | null = null;
   let iceRestartTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnecting = false;
+  /** Set during intentional teardown to suppress dc.onclose triggering reconnect. */
+  let tearingDown = false;
   let announceInterval: ReturnType<typeof setInterval> | null = null;
 
+  const clearAnnounceInterval = () => {
+    if (announceInterval) { clearInterval(announceInterval); announceInterval = null; }
+  };
+
   const signal = (msg: SignalMessage) => {
-    channel.send({ type: 'broadcast', event: 'signal', payload: msg });
+    try {
+      channel.send({ type: 'broadcast', event: 'signal', payload: msg });
+    } catch (e) {
+      dlog(`signal send error: ${e}`);
+    }
   };
 
   // ── Keepalive ──────────────────────────────────────────────────────
@@ -85,7 +95,7 @@ export async function createPeerConnection(
       }
     }, KEEPALIVE_INTERVAL_MS);
 
-    // Check for pong timeout
+    // Check for pong timeout — run at half interval for faster detection
     keepaliveCheckTimer = setInterval(() => {
       if (dc?.readyState !== 'open') return;
       const elapsed = Date.now() - lastPongTime;
@@ -94,13 +104,13 @@ export async function createPeerConnection(
         stopKeepalive();
         handleConnectionLost();
       }
-    }, KEEPALIVE_INTERVAL_MS);
+    }, KEEPALIVE_INTERVAL_MS / 2);
   };
 
   // ── Connection loss & reconnection ─────────────────────────────────
 
   const handleConnectionLost = () => {
-    if (destroyed || reconnecting) return;
+    if (destroyed || reconnecting || tearingDown) return;
 
     // Only attempt reconnect if we were previously connected
     if (!wasConnected || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -117,7 +127,7 @@ export async function createPeerConnection(
     if (pc && role === 'host') {
       attemptIceRestart();
     } else {
-      // Guest waits for host to initiate ICE restart
+      // Guest waits for host to initiate ICE restart / new offer
       scheduleFullReconnect();
     }
   };
@@ -133,6 +143,7 @@ export async function createPeerConnection(
       signal({ type: 'offer', sdp: offer.sdp!, peerId: localPeerId });
 
       // Give ICE restart a chance to work, otherwise do full reconnect
+      if (iceRestartTimer) clearTimeout(iceRestartTimer);
       iceRestartTimer = setTimeout(() => {
         iceRestartTimer = null;
         if (destroyed) return;
@@ -161,14 +172,20 @@ export async function createPeerConnection(
     if (destroyed) return;
     dlog('full reconnect: tearing down old PC');
 
+    // Set tearingDown to prevent dc.onclose from re-triggering handleConnectionLost
+    tearingDown = true;
+
     // Clean up old connection
     stopKeepalive();
     if (iceRestartTimer) { clearTimeout(iceRestartTimer); iceRestartTimer = null; }
+    clearAnnounceInterval();
     dc?.close();
     pc?.close();
     dc = null;
     pc = null;
     pendingCandidates = [];
+
+    tearingDown = false;
 
     if (role === 'host') {
       // Host: create new PC and send fresh offer
@@ -180,10 +197,10 @@ export async function createPeerConnection(
         signal({ type: 'offer', sdp: offer.sdp!, peerId: localPeerId });
 
         // Re-announce until connected
-        if (announceInterval) clearInterval(announceInterval);
+        clearAnnounceInterval();
         announceInterval = setInterval(() => {
           if (destroyed || dc?.readyState === 'open') {
-            if (announceInterval) { clearInterval(announceInterval); announceInterval = null; }
+            clearAnnounceInterval();
             return;
           }
           dlog('reconnect: re-announcing offer');
@@ -197,7 +214,6 @@ export async function createPeerConnection(
     } else {
       // Guest: clear existing PC so next offer from host will be accepted
       dlog('reconnect: guest waiting for host offer');
-      // The guest's handleSignal will accept the next offer since pc is now null
     }
   };
 
@@ -209,14 +225,17 @@ export async function createPeerConnection(
       dlog(`dc open with ${remotePeerId.slice(0, 8)}`);
       wasConnected = true;
       reconnecting = false;
+      tearingDown = false;
       reconnectAttempts = 0;
+      clearAnnounceInterval();
       startKeepalive();
       if (!destroyed) callbacks.onOpen(remotePeerId);
     };
     chan.onclose = () => {
       dlog(`dc close with ${remotePeerId.slice(0, 8)}`);
       stopKeepalive();
-      handleConnectionLost();
+      // Don't trigger reconnect if we're intentionally tearing down
+      if (!tearingDown) handleConnectionLost();
     };
     chan.onmessage = (e) => {
       try {
@@ -257,18 +276,12 @@ export async function createPeerConnection(
         stopKeepalive();
         handleConnectionLost();
       } else if (conn.connectionState === 'closed') {
-        if (!destroyed && !reconnecting) callbacks.onClose(remotePeerId);
+        if (!destroyed && !reconnecting && !tearingDown) callbacks.onClose(remotePeerId);
       }
     };
 
     conn.oniceconnectionstatechange = () => {
       dlog(`iceState: ${conn.iceConnectionState}`);
-      // ICE disconnected means connectivity check failed — try to recover
-      if (conn.iceConnectionState === 'disconnected') {
-        dlog('ICE disconnected, monitoring for recovery...');
-        // Browser may auto-recover within a few seconds; if it goes to 'failed'
-        // the connectionstatechange handler above will trigger reconnect.
-      }
     };
 
     if (role === 'host') {
@@ -300,10 +313,8 @@ export async function createPeerConnection(
     if (msg.peerId === localPeerId) return;
 
     if (msg.type === 'offer' && role === 'guest') {
-      // Accept offers during reconnection (pc will be null after teardown)
-      // Also accept if this is a new ICE restart offer from the host
       if (pc && !reconnecting) {
-        // Check if this is an ICE restart offer (we already have a connection)
+        // Check if this is an ICE restart offer from the same peer
         if (remotePeerId === msg.peerId && pc.signalingState !== 'closed') {
           dlog(`ICE restart offer from ${msg.peerId.slice(0, 8)}`);
           try {
@@ -317,16 +328,18 @@ export async function createPeerConnection(
           }
           return;
         }
-        return; // already processing a different offer
+        return; // already connected to a different peer
       }
 
-      // New connection or reconnection
+      // During reconnection or new connection: accept the offer.
+      // Tear down old PC if any (reconnection case).
       if (pc) {
-        // Tear down old PC for reconnection
+        tearingDown = true;
         dc?.close();
         pc.close();
         dc = null;
         pc = null;
+        tearingDown = false;
       }
 
       remotePeerId = msg.peerId;
@@ -376,14 +389,6 @@ export async function createPeerConnection(
         dlog(`signaling subscribed (${role})`);
         resolve();
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        if (!destroyed) {
-          dlog(`signaling channel ${status}, attempting to resubscribe`);
-          // Attempt to resubscribe after a delay
-          setTimeout(() => {
-            if (destroyed) return;
-            channel.subscribe();
-          }, RECONNECT_DELAY_MS);
-        }
         reject(new Error(`Signaling channel failed: ${status}`));
       }
     });
@@ -399,7 +404,7 @@ export async function createPeerConnection(
 
     announceInterval = setInterval(() => {
       if (destroyed || dc?.readyState === 'open') {
-        if (announceInterval) { clearInterval(announceInterval); announceInterval = null; }
+        clearAnnounceInterval();
         return;
       }
       dlog('re-announcing offer');
@@ -415,9 +420,10 @@ export async function createPeerConnection(
 
   const leave = () => {
     destroyed = true;
+    tearingDown = true;
     stopKeepalive();
     if (iceRestartTimer) { clearTimeout(iceRestartTimer); iceRestartTimer = null; }
-    if (announceInterval) { clearInterval(announceInterval); announceInterval = null; }
+    clearAnnounceInterval();
     signal({ type: 'bye', peerId: localPeerId });
     dc?.close();
     pc?.close();
