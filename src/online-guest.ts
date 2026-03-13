@@ -63,18 +63,24 @@ export class OnlineGuest {
           this.sendIdentity();
         },
         (peerId) => {
-          // Don't clear hostPeerId — allow reconnection from same peer.
-          // Guard against flapping: don't restart the timer if already reconnecting.
-          if (peerId === this.hostPeerId && this.connectionState !== 'reconnecting') {
-            this.setConnectionState('reconnecting');
-            this.reconnectTimer = setTimeout(() => {
-              this.reconnectTimer = null;
-              if (this.connectionState === 'reconnecting') {
-                dlog('guest reconnect grace period expired');
-                this.setConnectionState('disconnected');
-              }
-            }, OnlineGuest.RECONNECT_GRACE_MS);
+          // Peer layer has exhausted all reconnection attempts — connection is gone.
+          if (peerId === this.hostPeerId) {
+            this.clearReconnectTimer();
+            this.setConnectionState('disconnected');
           }
+        },
+        (peerId) => {
+          // Peer layer is attempting reconnection — show UI and start grace timer.
+          if (peerId !== this.hostPeerId) return;
+          if (this.connectionState === 'reconnecting') return;
+          this.setConnectionState('reconnecting');
+          this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            if (this.connectionState === 'reconnecting') {
+              dlog('guest reconnect grace period expired');
+              this.setConnectionState('disconnected');
+            }
+          }, OnlineGuest.RECONNECT_GRACE_MS);
         },
       );
     } catch (e) {

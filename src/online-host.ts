@@ -64,6 +64,7 @@ export class OnlineHost {
         'host',
         (peerId) => this.handlePeerJoin(peerId),
         (peerId) => this.handlePeerLeave(peerId),
+        (peerId) => this.handlePeerReconnecting(peerId),
       );
     } catch (e) {
       dlog(`host createRoom failed: ${e}`);
@@ -163,21 +164,24 @@ export class OnlineHost {
 
   private handlePeerLeave(peerId: string): void {
     if (peerId === this.guestPeerId) {
-      // Don't clear guestPeerId — allow reconnection from same peer.
-      // Show 'reconnecting' first; the peer layer will attempt ICE restart
-      // and full reconnect automatically. Only show 'disconnected' if it
-      // doesn't recover within the grace period.
-      // Guard against flapping: don't restart the timer if already reconnecting.
-      if (this.connectionState === 'reconnecting') return;
-      this.setConnectionState('reconnecting');
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectTimer = null;
-        if (this.connectionState === 'reconnecting') {
-          dlog('host reconnect grace period expired');
-          this.setConnectionState('disconnected');
-        }
-      }, OnlineHost.RECONNECT_GRACE_MS);
+      // Peer layer has exhausted all reconnection attempts — connection is gone.
+      this.clearReconnectTimer();
+      this.setConnectionState('disconnected');
     }
+  }
+
+  private handlePeerReconnecting(peerId: string): void {
+    if (peerId !== this.guestPeerId) return;
+    // Don't restart the timer if already reconnecting (guard against flapping).
+    if (this.connectionState === 'reconnecting') return;
+    this.setConnectionState('reconnecting');
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.connectionState === 'reconnecting') {
+        dlog('host reconnect grace period expired');
+        this.setConnectionState('disconnected');
+      }
+    }, OnlineHost.RECONNECT_GRACE_MS);
   }
 
   private clearReconnectTimer(): void {

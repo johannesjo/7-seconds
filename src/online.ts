@@ -64,6 +64,7 @@ export async function createOnlineRoom(
   role: 'host' | 'guest',
   onPeerJoin: (peerId: string) => void,
   onPeerLeave: (peerId: string) => void,
+  onPeerReconnecting?: (peerId: string) => void,
 ): Promise<OnlineConnection> {
   dlog(`createRoom role=${role} room=${roomId}`);
 
@@ -72,6 +73,7 @@ export async function createOnlineRoom(
   const handle = await createPeerConnection(roomId, role, {
     onOpen: onPeerJoin,
     onClose: onPeerLeave,
+    onReconnecting: onPeerReconnecting,
     onMessage: (type, data, peerId) => {
       receivers.get(type)?.(data, peerId);
     },
