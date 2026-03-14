@@ -7,7 +7,7 @@
 <p align="center">A tactical micro-strategy game. Draw paths for your units, then watch them fight.</p>
 
 <p align="center">
-  <a href="screenshots/desktop-vid.webm">Desktop gameplay video</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="screenshots/mobile-vid.webm">Mobile gameplay video</a>
+  <a href="store-assets/desktop-vid.webm">Desktop gameplay video</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="store-assets/mobile-vid.webm">Mobile gameplay video</a>
 </p>
 
 ## How It Works
