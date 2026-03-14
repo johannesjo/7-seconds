@@ -9,11 +9,83 @@
     :root {
       --sat: env(safe-area-inset-top, 0px);
       --sab: env(safe-area-inset-bottom, 0px);
+
+      /* Base */
+      --color-bg: #111;
+      --color-text: #eee;
+      --color-text-muted: #eee;
+
+      /* Overlays */
+      --color-overlay: rgba(0,0,0,0.7);
+      --color-overlay-heavy: rgba(0,0,0,0.85);
+      --color-overlay-medium: rgba(0,0,0,0.75);
+      --color-overlay-light: rgba(0,0,0,0.6);
+      --color-overlay-age-gate: rgba(0,0,0,0.92);
+      --color-overlay-lobby: rgba(0,0,0,0.85);
+
+      /* Buttons */
+      --color-btn-bg: #2a2a4a;
+      --color-btn-hover-bg: #3a3a5a;
+      --color-btn-active-bg: #4a4a7a;
+      --color-btn-border: #555;
+      --color-btn-hover-border: #777;
+      --color-btn-green-bg: #2a4a2a;
+      --color-btn-green-text: #44ff88;
+      --color-btn-green-border: #228844;
+      --color-btn-horde-bg: #4a2a2a;
+      --color-btn-horde-text: #ff8844;
+      --color-btn-horde-border: #884422;
+
+      /* Controls */
+      --color-control-border: #444;
+      --color-control-active-border: #88f;
+
+      /* HUD / Team */
+      --color-hud-blue: #4a9eff;
+      --color-hud-red: #ff4a4a;
+      --color-hud-wave: #ff8844;
+      --color-hud-flag: #88ff88;
+      --color-hud-neutral: #888;
+      --color-timer-critical: #ff4444;
+      --color-timer-shadow: rgba(255,255,255,0.4);
+
+      /* Planning */
+      --color-planning-blue: #4a9eff;
+      --color-planning-red: #ff4a4a;
+
+      /* Rarity */
+      --color-rarity-common-border: #666;
+      --color-rarity-common-text: #aaa;
+      --color-rarity-uncommon: #4aad52;
+      --color-rarity-rare: #4a8fff;
+      --color-rarity-epic: #c060f0;
+      --color-rarity-epic-glow: rgba(192,96,240,0.35);
+
+      /* Online */
+      --color-online-title: #44ff88;
+      --color-online-status: #ccc;
+      --color-online-url-bg: #1a1a2a;
+      --color-online-border: rgba(255,255,255,0.1);
+      --color-online-border-subtle: rgba(255,255,255,0.06);
+      --color-online-spinner-bg: rgba(68,255,136,0.2);
+      --color-online-spinner: #44ff88;
+
+      /* Text shadows */
+      --color-text-shadow: rgba(0,0,0,0.8);
+
+      /* Upgrade */
+      --color-upgrade-heading: #ff8844;
+      --color-upgrade-card-hover-border: #ff8844;
+
+      /* Result */
+      --color-result-blue: #4a9eff;
+      --color-result-red: #ff4a4a;
+      --color-result-horde-win: #ff8844;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #111;
-      color: #eee;
+      background: var(--color-bg);
+      color: var(--color-text);
       font-family: 'Segoe UI', system-ui, sans-serif;
       overflow: hidden;
       width: 100vw;
@@ -31,7 +103,7 @@
       justify-content: safe center;
       gap: 24px;
       padding: calc(32px + var(--sat)) 32px calc(32px + var(--sab));
-      background: rgba(0,0,0,0.7);
+      background: var(--color-overlay);
       z-index: 15;
       overflow-y: auto;
     }
@@ -53,13 +125,13 @@
       font-weight: bold;
       text-transform: uppercase;
       letter-spacing: 3px;
-      background: #2a2a4a;
-      color: #eee;
-      border: 2px solid #555;
+      background: var(--color-btn-bg);
+      color: var(--color-text);
+      border: 2px solid var(--color-btn-border);
       border-radius: 4px;
       cursor: pointer;
     }
-    #battle-btn:hover, #ai-btn:hover, #online-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: #3a3a5a; border-color: #777; }
+    #battle-btn:hover, #ai-btn:hover, #online-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
     .beta-tag { font-size: 10px; vertical-align: super; opacity: 0.6; letter-spacing: 1px; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -92,7 +164,7 @@
       justify-content: space-between;
       align-items: center;
       padding: calc(8px + var(--sat)) 16px 8px;
-      background: rgba(0,0,0,0.6);
+      background: var(--color-overlay-light);
       z-index: 10;
       font-size: 14px;
     }
@@ -100,17 +172,17 @@
       font-size: 32px;
       font-weight: bold;
       font-variant-numeric: tabular-nums;
-      text-shadow: 0 0 10px rgba(255,255,255,0.4);
+      text-shadow: 0 0 10px var(--color-timer-shadow);
     }
     .speed-controls button {
-      background: #2a2a4a;
-      color: #eee;
-      border: 1px solid #444;
+      background: var(--color-btn-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-control-border);
       padding: 4px 12px;
       cursor: pointer;
       font-size: 12px;
     }
-    .speed-controls button.active { background: #4a4a7a; border-color: #88f; }
+    .speed-controls button.active { background: var(--color-btn-active-bg); border-color: var(--color-control-active-border); }
 
     /* Planning overlay */
     #planning-overlay {
@@ -131,13 +203,13 @@
       font-weight: bold;
       text-transform: uppercase;
       letter-spacing: 3px;
-      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      text-shadow: 0 2px 8px var(--color-text-shadow);
     }
     #planning-instructions {
       display: none;
       font-size: 13px;
       opacity: 0.7;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+      text-shadow: 0 1px 4px var(--color-text-shadow);
     }
     #confirm-btn {
       display: none;
@@ -151,16 +223,16 @@
       font-weight: bold;
       text-transform: uppercase;
       letter-spacing: 1px;
-      background: #2a2a4a;
-      color: #eee;
-      border: 1px solid #555;
+      background: var(--color-btn-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-btn-border);
       border-radius: 3px;
       cursor: pointer;
       z-index: 12;
       opacity: 0.7;
     }
     #confirm-btn.active { display: block; }
-    #confirm-btn:hover { background: #3a3a5a; border-color: #777; opacity: 1; }
+    #confirm-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); opacity: 1; }
 
     /* Cover screen */
     #cover-screen {
@@ -170,7 +242,7 @@
       align-items: center;
       justify-content: center;
       padding-top: var(--sat);
-      background: rgba(0,0,0,0.85);
+      background: var(--color-overlay-heavy);
       z-index: 16;
       font-size: 36px;
       font-weight: bold;
@@ -188,7 +260,7 @@
       justify-content: center;
       gap: 16px;
       padding-top: var(--sat);
-      background: rgba(0,0,0,0.75);
+      background: var(--color-overlay-medium);
       z-index: 20;
     }
     #result-screen h2 { font-size: 64px; letter-spacing: 4px; }
@@ -197,13 +269,13 @@
     #result-screen button {
       padding: 12px 32px;
       font-size: 16px;
-      background: #2a2a4a;
-      color: #eee;
-      border: 1px solid #555;
+      background: var(--color-btn-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-btn-border);
       border-radius: 4px;
       cursor: pointer;
     }
-    #result-screen button:hover { background: #3a3a5a; }
+    #result-screen button:hover { background: var(--color-btn-hover-bg); }
 
     /* Upgrade screen */
     #upgrade-screen {
@@ -215,22 +287,22 @@
       justify-content: center;
       gap: 24px;
       padding-top: var(--sat);
-      background: rgba(0,0,0,0.85);
+      background: var(--color-overlay-heavy);
       z-index: 18;
     }
 
     /* Upgrade cards */
     .upgrade-card {
       padding: 20px 24px;
-      background: #2a2a4a;
-      border: 2px solid #555;
+      background: var(--color-btn-bg);
+      border: 2px solid var(--color-btn-border);
       border-radius: 8px;
       cursor: pointer;
       text-align: center;
       width: 200px;
       transition: border-color 0.15s, background 0.15s;
     }
-    .upgrade-card:hover { background: #3a3a5a; border-color: #ff8844; }
+    .upgrade-card:hover { background: var(--color-btn-hover-bg); border-color: var(--color-upgrade-card-hover-border); }
     .upgrade-card .card-label { font-size: 18px; font-weight: bold; margin-bottom: 8px; }
     .upgrade-card .card-desc { font-size: 13px; opacity: 0.7; }
     .upgrade-card .card-rarity {
@@ -248,14 +320,14 @@
       opacity: 0.6;
     }
     /* Rarity border and label colors */
-    .upgrade-card.rarity-common  { border-color: #666; }
-    .upgrade-card.rarity-common .card-rarity  { color: #aaa; }
-    .upgrade-card.rarity-uncommon { border-color: #4aad52; }
-    .upgrade-card.rarity-uncommon .card-rarity { color: #4aad52; }
-    .upgrade-card.rarity-rare    { border-color: #4a8fff; }
-    .upgrade-card.rarity-rare .card-rarity    { color: #4a8fff; }
-    .upgrade-card.rarity-epic    { border-color: #c060f0; box-shadow: 0 0 10px rgba(192,96,240,0.35); }
-    .upgrade-card.rarity-epic .card-rarity    { color: #c060f0; }
+    .upgrade-card.rarity-common  { border-color: var(--color-rarity-common-border); }
+    .upgrade-card.rarity-common .card-rarity  { color: var(--color-rarity-common-text); }
+    .upgrade-card.rarity-uncommon { border-color: var(--color-rarity-uncommon); }
+    .upgrade-card.rarity-uncommon .card-rarity { color: var(--color-rarity-uncommon); }
+    .upgrade-card.rarity-rare    { border-color: var(--color-rarity-rare); }
+    .upgrade-card.rarity-rare .card-rarity    { color: var(--color-rarity-rare); }
+    .upgrade-card.rarity-epic    { border-color: var(--color-rarity-epic); box-shadow: 0 0 10px var(--color-rarity-epic-glow); }
+    .upgrade-card.rarity-epic .card-rarity    { color: var(--color-rarity-epic); }
 
     /* Replay overlay */
     #replay-overlay {
@@ -268,21 +340,21 @@
       align-items: center;
       gap: 12px;
       padding: 10px 16px;
-      background: rgba(0,0,0,0.7);
+      background: var(--color-overlay);
       z-index: 14;
     }
     #replay-overlay.active { display: flex; }
     #replay-overlay button {
-      background: #2a2a4a;
-      color: #eee;
-      border: 1px solid #555;
+      background: var(--color-btn-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-btn-border);
       padding: 6px 14px;
       cursor: pointer;
       font-size: 13px;
       border-radius: 3px;
     }
-    #replay-overlay button:hover { background: #3a3a5a; border-color: #777; }
-    #replay-overlay button.active { background: #4a4a7a; border-color: #88f; }
+    #replay-overlay button:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
+    #replay-overlay button.active { background: var(--color-btn-active-bg); border-color: var(--color-control-active-border); }
     #replay-progress {
       font-size: 13px;
       font-variant-numeric: tabular-nums;
@@ -319,50 +391,72 @@
       .upgrade-card .card-label { font-size: 15px; }
     }
 
+    .replay-btn-upgrade { background: transparent; color: inherit; border: 1px solid var(--color-btn-border); opacity: 0.6; }
+
     /* Day-mode paper aesthetic */
-    body.day-mode { color: #443322; }
-    body.day-mode #battle-hud { background: rgba(245,240,224,0.7); }
-    body.day-mode #blue-count { color: #2266aa; }
-    body.day-mode #red-count { color: #aa3333; }
-    body.day-mode #wave-counter { color: #886633; }
-    body.day-mode #confirm-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
-    body.day-mode #cover-screen { background: rgba(245,240,224,0.85); color: #443322; }
-    body.day-mode .speed-controls button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
-    body.day-mode .speed-controls button.active { background: #d8d0bc; border-color: #886633; }
-    body.day-mode #prompt-screen { background: rgba(245,240,224,0.7); }
-    body.day-mode #result-screen { background: rgba(245,240,224,0.75); }
-    body.day-mode #result-screen button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
-    .replay-btn-upgrade { background: transparent; color: inherit; border: 1px solid #555; opacity: 0.6; }
-    body.day-mode #upgrade-screen { background: rgba(245,240,224,0.85); color: #443322; }
-    body.day-mode .replay-btn-upgrade { background: #e8e0cc; color: #665544; border-color: #aa9977; opacity: 0.8; }
-    body.day-mode .upgrade-card { background: #e8e0cc; color: #443322; border-color: #aa9977; }
-    body.day-mode .upgrade-card:hover { border-color: #886633; background: #ded6c2; }
-    body.day-mode #replay-overlay { background: rgba(245,240,224,0.7); }
-    body.day-mode #replay-overlay button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
-    body.day-mode #battle-btn, body.day-mode #ai-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
-    body.day-mode #horde-btn { background: #e8dcc8; color: #886633; border-color: #aa8844; }
-    body.day-mode #age-gate { background: rgba(245,240,224,0.95) !important; color: #443322; }
-    body.day-mode #age-gate-yes { background: #cce8cc !important; color: #226633 !important; border-color: #44aa66 !important; }
-    body.day-mode #age-gate-no { background: #e8e0cc !important; color: #443322 !important; border-color: #aa9977 !important; }
-    body.day-mode #online-btn, body.day-mode #online-random-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
-    body.day-mode #exit-game-btn { color: #443322; }
-    body.day-mode #online-lobby { background: rgba(245,240,224,0.92) !important; color: #443322; --lobby-text: #665544 !important; }
-    body.day-mode #online-lobby-title { color: #226633; }
-    body.day-mode #online-status { color: #1a1008 !important; font-weight: bold; font-size: 18px; }
-    body.day-mode #online-spinner { border-color: rgba(34,102,51,0.2) !important; border-top-color: #226633 !important; }
-    body.day-mode #online-share-container { background: rgba(0,0,0,0.04) !important; border-color: #bb9 !important; }
-    body.day-mode #online-share-url { background: #fff; color: #443322; border-color: #aa9977; }
-    body.day-mode #online-copy-btn { background: #cce8cc; color: #226633; border-color: #44aa66; }
-    body.day-mode #online-cancel-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode {
+      --color-bg: transparent;
+      --color-text: #443322;
+      --color-text-muted: #665544;
+
+      --color-overlay: rgba(245,240,224,0.7);
+      --color-overlay-heavy: rgba(245,240,224,0.85);
+      --color-overlay-medium: rgba(245,240,224,0.75);
+      --color-overlay-light: rgba(245,240,224,0.7);
+      --color-overlay-age-gate: rgba(245,240,224,0.95);
+      --color-overlay-lobby: rgba(245,240,224,0.92);
+
+      --color-btn-bg: #e8e0cc;
+      --color-btn-hover-bg: #ded6c2;
+      --color-btn-active-bg: #d8d0bc;
+      --color-btn-border: #aa9977;
+      --color-btn-hover-border: #886633;
+      --color-btn-green-bg: #cce8cc;
+      --color-btn-green-text: #226633;
+      --color-btn-green-border: #44aa66;
+      --color-btn-horde-bg: #e8dcc8;
+      --color-btn-horde-text: #886633;
+      --color-btn-horde-border: #aa8844;
+
+      --color-control-border: #aa9977;
+      --color-control-active-border: #886633;
+
+      --color-hud-blue: #2266aa;
+      --color-hud-red: #aa3333;
+      --color-hud-wave: #886633;
+      --color-timer-critical: #aa3333;
+      --color-timer-shadow: transparent;
+
+      --color-planning-blue: #2266aa;
+      --color-planning-red: #aa3333;
+
+      --color-rarity-common-border: #aa9977;
+      --color-rarity-common-text: #886633;
+
+      --color-online-title: #226633;
+      --color-online-status: #1a1008;
+      --color-online-url-bg: #fff;
+      --color-online-border: #bb9;
+      --color-online-border-subtle: rgba(0,0,0,0.04);
+      --color-online-spinner-bg: rgba(34,102,51,0.2);
+      --color-online-spinner: #226633;
+
+      --color-text-shadow: transparent;
+
+      --color-upgrade-heading: #886633;
+      --color-upgrade-card-hover-border: #886633;
+    }
+    body.day-mode .replay-btn-upgrade { background: var(--color-btn-bg); color: var(--color-text-muted); border-color: var(--color-btn-border); opacity: 0.8; }
+    body.day-mode #online-status { font-weight: bold; font-size: 18px; }
   </style>
 </head>
 <body>
-  <div id="age-gate" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px;text-align:center">
+  <div id="age-gate" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--color-overlay-age-gate);z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px;text-align:center">
     <h2 style="font-size:24px;letter-spacing:2px;text-transform:uppercase">Age Verification</h2>
     <p style="font-size:15px;max-width:400px;line-height:1.5">This game contains combat and online multiplayer features. You must be at least 13 years old to play.</p>
     <div style="display:flex;gap:12px;margin-top:8px">
-      <button id="age-gate-yes" style="padding:10px 28px;font-size:15px;font-weight:bold;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">I'm 13 or older</button>
-      <button id="age-gate-no" style="padding:10px 28px;font-size:15px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer;opacity:0.7">I'm under 13</button>
+      <button id="age-gate-yes" style="padding:10px 28px;font-size:15px;font-weight:bold;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">I'm 13 or older</button>
+      <button id="age-gate-no" style="padding:10px 28px;font-size:15px;background:var(--color-btn-bg);color:var(--color-text);border:2px solid var(--color-btn-border);border-radius:4px;cursor:pointer;opacity:0.7">I'm under 13</button>
     </div>
     <div style="font-size:12px;opacity:0.6;margin-top:16px;display:flex;gap:12px">
       <a href="privacy-policy.html" rel="noopener" style="color:inherit;text-decoration:underline">Privacy Policy</a>
@@ -388,7 +482,7 @@
           }
         };
         document.getElementById('age-gate-no').onclick = function() {
-          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;text-align:center;padding:32px;color:#eee;font-family:system-ui"><p style="font-size:16px;opacity:0.8">Sorry, you must be at least 13 years old to play this game.</p></div>';
+          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;text-align:center;padding:32px;color:var(--color-text);font-family:system-ui"><p style="font-size:16px;opacity:0.8">Sorry, you must be at least 13 years old to play this game.</p></div>';
         };
       }
     })();
@@ -399,15 +493,15 @@
     <p>Draw paths for your units, then watch them fight. Blue plans first, then Red.</p>
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
       <button id="ai-btn">vs AI</button>
-      <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#4a2a2a;color:#ff8844;border:2px solid #884422;border-radius:4px;cursor:pointer">Horde</button>
-      <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">Online vs Random <span class="beta-tag">BETA</span></button>
-      <button id="online-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer">Online vs Friend</button>
+      <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-horde-bg);color:var(--color-btn-horde-text);border:2px solid var(--color-btn-horde-border);border-radius:4px;cursor:pointer">Horde</button>
+      <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Online vs Random <span class="beta-tag">BETA</span></button>
+      <button id="online-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Online vs Friend</button>
       <button id="battle-btn">Local PvP</button>
     </div>
     <!-- CTF buttons hidden for now -->
     <div class="btn-row" style="display:none;flex-direction:column;align-items:center;gap:12px">
-      <button id="ctf-ai-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">CTF vs AI</button>
-      <button id="ctf-pvp-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">CTF vs Player</button>
+      <button id="ctf-ai-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-bg);color:var(--color-text);border:2px solid var(--color-btn-border);border-radius:4px;cursor:pointer">CTF vs AI</button>
+      <button id="ctf-pvp-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-bg);color:var(--color-text);border:2px solid var(--color-btn-border);border-radius:4px;cursor:pointer">CTF vs Player</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
@@ -425,9 +519,9 @@
 
   <div id="battle-screen" class="screen">
     <div id="battle-hud">
-      <span id="blue-count" style="color:#4a9eff">Blue: 4</span>
-      <span id="wave-counter" style="color:#ff8844;display:none"></span>
-      <span id="flag-status" style="color:#88ff88;display:none;font-size:12px"></span>
+      <span id="blue-count" style="color:var(--color-hud-blue)">Blue: 4</span>
+      <span id="wave-counter" style="color:var(--color-hud-wave);display:none"></span>
+      <span id="flag-status" style="color:var(--color-hud-flag);display:none;font-size:12px"></span>
       <div style="display:flex;align-items:center;gap:12px">
         <span id="round-counter" style="opacity:0.7">Round 1</span>
         <span id="round-timer"></span>
@@ -435,8 +529,8 @@
           <button id="speed-toggle" data-speed="1">3x</button>
         </div>
       </div>
-      <span id="red-count" style="color:#ff4a4a">Red: 4</span>
-      <button id="exit-game-btn" title="Exit game" style="position:absolute;top:calc(4px + var(--sat));right:4px;background:none;border:none;color:#eee;font-size:18px;cursor:pointer;opacity:0.5;padding:4px 8px;z-index:11">&#x2715;</button>
+      <span id="red-count" style="color:var(--color-hud-red)">Red: 4</span>
+      <button id="exit-game-btn" title="Exit game" style="position:absolute;top:calc(4px + var(--sat));right:4px;background:none;border:none;color:var(--color-text);font-size:18px;cursor:pointer;opacity:0.5;padding:4px 8px;z-index:11">&#x2715;</button>
     </div>
     <div id="pixi-container"></div>
 
@@ -455,17 +549,17 @@
     </div>
   </div>
 
-  <div id="online-lobby" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:rgba(0,0,0,0.85);z-index:25;padding:32px;--lobby-text:#eee">
-    <h2 id="online-lobby-title" style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:#44ff88;margin:0">Online PvP</h2>
-    <div id="online-spinner" style="display:none;width:32px;height:32px;border:3px solid rgba(68,255,136,0.2);border-top-color:#44ff88;border-radius:50%;animation:spin 0.8s linear infinite"></div>
-    <p id="online-record" style="font-size:18px;color:var(--lobby-text);letter-spacing:2px;margin:0;display:none"></p>
-    <p id="online-status" style="font-size:16px;color:#ccc;margin:0">Creating room...</p>
-    <div id="online-share-container" style="display:none;flex-direction:column;align-items:center;gap:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:20px;max-width:400px;width:90vw">
+  <div id="online-lobby" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:var(--color-overlay-lobby);z-index:25;padding:32px">
+    <h2 id="online-lobby-title" style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:var(--color-online-title);margin:0">Online PvP</h2>
+    <div id="online-spinner" style="display:none;width:32px;height:32px;border:3px solid var(--color-online-spinner-bg);border-top-color:var(--color-online-spinner);border-radius:50%;animation:spin 0.8s linear infinite"></div>
+    <p id="online-record" style="font-size:18px;color:var(--color-text-muted);letter-spacing:2px;margin:0;display:none"></p>
+    <p id="online-status" style="font-size:16px;color:var(--color-online-status);margin:0">Creating room...</p>
+    <div id="online-share-container" style="display:none;flex-direction:column;align-items:center;gap:14px;background:var(--color-online-border-subtle);border:1px solid var(--color-online-border);border-radius:8px;padding:20px;max-width:400px;width:90vw">
       <p style="font-size:14px;opacity:0.7;margin:0">Share this link with your opponent:</p>
-      <input id="online-share-url" type="text" readonly style="width:100%;box-sizing:border-box;padding:10px;font-size:14px;background:#1a1a2a;color:#eee;border:1px solid #555;border-radius:4px;text-align:center" />
-      <button id="online-copy-btn" style="padding:10px 32px;font-size:15px;font-weight:bold;background:#2a4a2a;color:#44ff88;border:2px solid #228844;border-radius:4px;cursor:pointer;width:100%">Share Link</button>
+      <input id="online-share-url" type="text" readonly style="width:100%;box-sizing:border-box;padding:10px;font-size:14px;background:var(--color-online-url-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;text-align:center" />
+      <button id="online-copy-btn" style="padding:10px 32px;font-size:15px;font-weight:bold;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer;width:100%">Share Link</button>
     </div>
-    <button id="online-cancel-btn" style="padding:8px 24px;font-size:14px;background:#2a2a4a;color:#eee;border:1px solid #555;border-radius:4px;cursor:pointer;opacity:0.7;margin-top:8px">Cancel</button>
+    <button id="online-cancel-btn" style="padding:8px 24px;font-size:14px;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;opacity:0.7;margin-top:8px">Cancel</button>
   </div>
 
   <div id="cover-screen">
@@ -476,7 +570,7 @@
   </div>
 
   <div id="upgrade-screen">
-    <h2 style="font-size:32px;letter-spacing:3px;text-transform:uppercase;color:#ff8844">Wave Clear!</h2>
+    <h2 style="font-size:32px;letter-spacing:3px;text-transform:uppercase;color:var(--color-upgrade-heading)">Wave Clear!</h2>
     <p style="font-size:16px;opacity:0.7">Choose an upgrade</p>
     <div id="upgrade-cards" style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;max-width:700px"></div>
     <button id="upgrade-replay-btn" style="display:none;padding:8px 24px;font-size:13px;border-radius:4px;cursor:pointer" class="replay-btn-upgrade">Watch Replay</button>
@@ -488,7 +582,7 @@
     <div class="buttons" style="flex-direction:column;align-items:center">
       <button id="rematch-btn" style="font-weight:bold;letter-spacing:2px;text-transform:uppercase">Rematch</button>
       <button id="new-battle-btn" style="opacity:0.7">Back</button>
-      <button id="replay-btn" style="display:none;background:transparent;border:1px solid #555;color:inherit;padding:6px 20px;font-size:13px;border-radius:4px;cursor:pointer;opacity:0.5">Watch Replay</button>
+      <button id="replay-btn" style="display:none;background:transparent;border:1px solid var(--color-btn-border);color:inherit;padding:6px 20px;font-size:13px;border-radius:4px;cursor:pointer;opacity:0.5">Watch Replay</button>
     </div>
   </div>
 

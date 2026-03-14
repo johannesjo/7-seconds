@@ -168,10 +168,9 @@ function onPhaseChange(phase: TurnPhase): void {
   // Planning overlay
   if (planning) {
     const team = phase === 'blue-planning' ? 'Blue' : 'Red';
-    const isDayMode = dayModeCb.checked;
     const color = phase === 'blue-planning'
-      ? (isDayMode ? '#2266aa' : '#4a9eff')
-      : (isDayMode ? '#aa3333' : '#ff4a4a');
+      ? 'var(--color-planning-blue)'
+      : 'var(--color-planning-red)';
     planningLabel.textContent = `${team} Planning`;
     planningLabel.style.color = color;
     planningOverlay.classList.add('active');
@@ -231,7 +230,7 @@ function onGameEvent(
       roundTimerEl.textContent = `${Math.ceil(timeLeft)}s`;
 
       if (timeLeft <= 3) {
-        roundTimerEl.style.color = dayModeCb.checked ? '#aa3333' : '#ff4444';
+        roundTimerEl.style.color = 'var(--color-timer-critical)';
         const pulse = 1 + 0.1 * Math.sin(Date.now() / 150);
         roundTimerEl.style.transform = `scale(${pulse})`;
       } else {
@@ -284,7 +283,7 @@ function onGameEvent(
       const ctf = engine?.getCtfState();
       const isCaptureWin = ctf?.winner !== null;
       const winType = isCaptureWin ? 'Flag Captured!' : 'Elimination!';
-      const color = result.winner === 'blue' ? '#4a9eff' : '#ff4a4a';
+      const color = result.winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
       winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">${winType}</span>`;
       winnerTextEl.style.color = color;
 
@@ -302,7 +301,7 @@ function onGameEvent(
       return;
     }
 
-    const color = result.winner === 'blue' ? '#4a9eff' : '#ff4a4a';
+    const color = result.winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
     winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
     winnerTextEl.style.color = color;
 
@@ -504,10 +503,10 @@ function showHordeResult(victory: boolean): void {
 
   if (victory) {
     winnerTextEl.innerHTML = 'Horde Mode Complete!<br><span style="font-size:0.5em;opacity:0.7">All 10 waves cleared!</span>';
-    winnerTextEl.style.color = '#ff8844';
+    winnerTextEl.style.color = 'var(--color-result-horde-win)';
   } else {
     winnerTextEl.innerHTML = `Defeated!<br><span style="font-size:0.5em;opacity:0.7">Fallen on Wave ${hordeWave}</span>`;
-    winnerTextEl.style.color = '#ff4a4a';
+    winnerTextEl.style.color = 'var(--color-result-red)';
   }
 
   const survivors = hordeUnits.filter(u => u.alive).length;
@@ -846,7 +845,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         planningOverlay.classList.remove('active');
         confirmBtn.classList.remove('active');
         winnerTextEl.innerHTML = 'Opponent Disconnected';
-        winnerTextEl.style.color = '#888';
+        winnerTextEl.style.color = 'var(--color-hud-neutral)';
         resultStatsEl.innerHTML = '';
         rematchBtn.style.display = 'none';
         replayBtn.style.display = 'none';
@@ -912,7 +911,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
         guestPathDrawer.enable('red', guestUnits, guestElevationZones);
         planningLabel.textContent = 'Your Planning';
-        planningLabel.style.color = dayModeCb.checked ? '#aa3333' : '#ff4a4a';
+        planningLabel.style.color = 'var(--color-planning-red)';
         planningOverlay.classList.add('active');
         confirmBtn.classList.add('active');
         battleHud.style.display = 'none';
@@ -982,7 +981,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         else if (result.winner === 'blue') recordLoss(opponentPlayerId);
       }
 
-      const color = result.winner === 'blue' ? '#4a9eff' : '#ff4a4a';
+      const color = result.winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
       const winnerLabel = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
       winnerTextEl.innerHTML = `${winnerLabel}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
       winnerTextEl.style.color = color;
@@ -1047,7 +1046,7 @@ function createHostCallbacks(overrides: {
         planningOverlay.classList.remove('active');
         confirmBtn.classList.remove('active');
         winnerTextEl.innerHTML = 'Opponent Disconnected';
-        winnerTextEl.style.color = '#888';
+        winnerTextEl.style.color = 'var(--color-hud-neutral)';
         resultStatsEl.innerHTML = '';
         rematchBtn.style.display = 'none';
         replayBtn.style.display = 'none';
