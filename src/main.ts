@@ -5,7 +5,7 @@ import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
 import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team } from './types';
 import { ARMY_COMPOSITION, HORDE_MAX_WAVES } from './constants';
-import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
+import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 import { OnlineHost } from './online-host';
@@ -493,7 +493,11 @@ function showUpgradeSelection(): void {
     card.addEventListener('click', () => {
       const allBlocks = hordeMap!.obstacles;
       hordeAppliedUpgrades.set(upgrade.id, (hordeAppliedUpgrades.get(upgrade.id) ?? 0) + 1);
+      const prevCount = hordeUnits.length;
       hordeUnits = upgrade.apply(hordeUnits, allBlocks);
+      if (hordeUnits.length > prevCount) {
+        applyUpgradesToUnit(hordeUnits[hordeUnits.length - 1], hordeAppliedUpgrades);
+      }
       repositionBlueUnits(hordeUnits, allBlocks);
       showScreen('battle');
       startNextHordeWave();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, ALL_UNIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
+import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, ALL_UNIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { createUnit } from './units';
 import { MAP_HEIGHT, HORDE_MAX_WAVES } from './constants';
 import { Unit } from './types';
@@ -250,5 +250,60 @@ describe('recruit upgrade apply', () => {
     expect(result[1].type).toBe('soldier');
     expect(result[1].team).toBe('blue');
     expect(result[1].alive).toBe(true);
+  });
+});
+
+describe('applyUpgradesToUnit', () => {
+  it('applies previous stat upgrades to a recruited unit', () => {
+    const recruit = createUnit('blue_soldier_r1', 'soldier', 'blue', { x: 400, y: 600 });
+    const baseHp = recruit.maxHp;
+    const baseDmg = recruit.damage;
+    const applied = new Map([['hp_15', 1], ['dmg_10', 1]]);
+
+    applyUpgradesToUnit(recruit, applied);
+
+    expect(recruit.maxHp).toBe(baseHp + 15);
+    expect(recruit.hp).toBe(baseHp + 15);
+    expect(recruit.damage).toBe(baseDmg + 10);
+  });
+
+  it('applies stacked upgrades the correct number of times', () => {
+    const recruit = createUnit('blue_soldier_r1', 'soldier', 'blue', { x: 400, y: 600 });
+    const baseHp = recruit.maxHp;
+    const applied = new Map([['hp_15', 3]]);
+
+    applyUpgradesToUnit(recruit, applied);
+
+    expect(recruit.maxHp).toBe(baseHp + 45);
+  });
+
+  it('applies matching unit-type upgrades to a recruited unit', () => {
+    const recruit = createUnit('blue_soldier_r1', 'soldier', 'blue', { x: 400, y: 600 });
+    const baseDmg = recruit.damage;
+    const applied = new Map([['soldier_hollow', 1]]);
+
+    applyUpgradesToUnit(recruit, applied);
+
+    expect(recruit.damage).toBe(baseDmg + 20);
+  });
+
+  it('does not apply non-matching unit-type upgrades', () => {
+    const recruit = createUnit('blue_sniper_r1', 'sniper', 'blue', { x: 400, y: 600 });
+    const baseDmg = recruit.damage;
+    const applied = new Map([['soldier_hollow', 1]]);
+
+    applyUpgradesToUnit(recruit, applied);
+
+    expect(recruit.damage).toBe(baseDmg);
+  });
+
+  it('skips recruit upgrade IDs without error', () => {
+    const recruit = createUnit('blue_soldier_r1', 'soldier', 'blue', { x: 400, y: 600 });
+    const baseHp = recruit.maxHp;
+    const applied = new Map([['recruit_soldier', 1], ['hp_15', 1]]);
+
+    applyUpgradesToUnit(recruit, applied);
+
+    expect(recruit.maxHp).toBe(baseHp + 15);
   });
 });

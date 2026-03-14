@@ -252,6 +252,18 @@ export function randomHordeStartingArmy(): { type: UnitType; count: number }[] {
   return [{ type: a, count: 1 }, { type: b, count: 1 }];
 }
 
+/** Re-apply all previously chosen stat & unit upgrades to a single unit. */
+export function applyUpgradesToUnit(unit: Unit, appliedCounts: Map<string, number>): void {
+  const allUpgrades = [...ALL_STAT_UPGRADES, ...ALL_UNIT_UPGRADES];
+  for (const [id, count] of appliedCounts) {
+    const upgrade = allUpgrades.find(u => u.id === id);
+    if (!upgrade) continue;
+    for (let i = 0; i < count; i++) {
+      upgrade.apply([unit]);
+    }
+  }
+}
+
 /** Restore all blue units to max HP. */
 export function healAllBlue(units: Unit[]): void {
   for (const u of units) {
