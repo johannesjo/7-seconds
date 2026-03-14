@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal, OnlineWaypointData, OnlineSyncHash } from './online-types';
 import { dlog } from './online-debug';
-import { createPeerConnection, type PeerHandle } from './online-peer';
+import { createPeerConnection, type PeerHandle, type PeerCallbacks } from './online-peer';
 import { createRelayConnection } from './online-relay';
 
 export const SUPABASE_URL = 'https://puoxmqovckvfoqyihasl.supabase.co';
@@ -48,6 +48,8 @@ export function generateRoomId(): string {
 export function getShareUrl(roomId: string): string {
   const url = new URL(window.location.href);
   url.searchParams.set('join', roomId);
+  url.searchParams.delete('relay');
+  url.searchParams.delete('debug');
   return url.toString();
 }
 
@@ -82,7 +84,7 @@ const WEBRTC_TIMEOUT_MS = 15_000;
 async function connectTransport(
   roomId: string,
   role: 'host' | 'guest',
-  callbacks: { onOpen: (peerId: string) => void; onClose: (peerId: string) => void; onMessage: (type: string, data: unknown, peerId: string) => void },
+  callbacks: PeerCallbacks,
 ): Promise<PeerHandle> {
   if (forceRelay) {
     dlog('transport: forced relay via ?relay=1');
@@ -99,10 +101,12 @@ async function connectTransport(
     });
 
     // Wait for data channel to open within timeout
+    let timeoutId: ReturnType<typeof setTimeout>;
     const opened = await Promise.race([
       openPromise.then(() => true as const),
-      new Promise<false>((r) => setTimeout(() => r(false), WEBRTC_TIMEOUT_MS)),
+      new Promise<false>((r) => { timeoutId = setTimeout(() => r(false), WEBRTC_TIMEOUT_MS); }),
     ]);
+    clearTimeout(timeoutId!);
 
     if (opened) {
       dlog('transport: webrtc');
