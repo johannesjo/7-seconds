@@ -38,6 +38,8 @@ export class Renderer {
       height: MAP_HEIGHT,
       backgroundColor: this.theme.bg,
       antialias: true,
+      preserveDrawingBuffer: true,
+      preference: 'webgl',
     });
     container.appendChild(this.app.canvas);
     const scale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);

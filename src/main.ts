@@ -130,6 +130,12 @@ let replayPlayer: ReplayPlayer | null = null;
 let lastReplayData: ReplayData | null = null;
 let returnToScreen: 'result' | 'horde-upgrade' = 'result';
 
+// Recorder module — lazy-loaded only when ?record is in the URL
+let recorderMod: typeof import('./recorder') | null = null;
+if (new URLSearchParams(location.search).has('record')) {
+  import('./recorder').then(m => { recorderMod = m; m.init(); });
+}
+
 function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
   promptScreen.classList.toggle('active', screen === 'prompt');
   battleScreen.classList.add('active'); // always visible once initialized
@@ -255,6 +261,7 @@ function onGameEvent(
   }
 
   if (event === 'end' && data && 'winner' in data) {
+    recorderMod?.stopIfRecording();
     captureReplayData();
     const result = data as BattleResult;
 
@@ -410,6 +417,7 @@ function startReplay(data: ReplayData): void {
 }
 
 function stopReplay(): void {
+  recorderMod?.stopIfRecording();
   replayPlayer?.stop();
   replayPlayer = null;
   replayOverlay.classList.remove('active');
@@ -620,6 +628,7 @@ rematchBtn.addEventListener('click', async () => {
 });
 
 newBattleBtn.addEventListener('click', () => {
+  recorderMod?.cancelIfRecording();
   engine?.stop();
   engine = null;
   planningOverlay.classList.remove('active');
