@@ -80,7 +80,9 @@ const forceRelay = typeof window !== 'undefined'
 /** WebRTC connection timeout before falling back to relay (ms). */
 const WEBRTC_TIMEOUT_MS = 15_000;
 
-/** Try WebRTC first; if it fails to open within timeout, fall back to Supabase relay. */
+/** Try WebRTC first; if it fails to open within timeout, fall back to Supabase relay.
+ *  Returns immediately (non-blocking) with a proxy handle. The relay fallback
+ *  swaps the underlying transport transparently in the background. */
 async function connectTransport(
   roomId: string,
   role: 'host' | 'guest',
@@ -91,35 +93,50 @@ async function connectTransport(
     return createRelayConnection(roomId, role, callbacks);
   }
 
+  let activeHandle: PeerHandle;
+  let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  let webrtcConnected = false;
+  let destroyed = false;
+
   try {
-    let resolveOpen: () => void;
-    const openPromise = new Promise<void>((r) => { resolveOpen = r; });
-
-    const handle = await createPeerConnection(roomId, role, {
+    activeHandle = await createPeerConnection(roomId, role, {
       ...callbacks,
-      onOpen: (peerId) => { resolveOpen(); callbacks.onOpen(peerId); },
+      onOpen: (peerId) => {
+        if (destroyed) return;
+        webrtcConnected = true;
+        if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+        dlog('transport: webrtc connected');
+        callbacks.onOpen(peerId);
+      },
     });
-
-    // Wait for data channel to open within timeout
-    let timeoutId: ReturnType<typeof setTimeout>;
-    const opened = await Promise.race([
-      openPromise.then(() => true as const),
-      new Promise<false>((r) => { timeoutId = setTimeout(() => r(false), WEBRTC_TIMEOUT_MS); }),
-    ]);
-    clearTimeout(timeoutId!);
-
-    if (opened) {
-      dlog('transport: webrtc');
-      return handle;
-    }
-
-    dlog('transport: webrtc timeout, falling back to relay');
-    handle.leave();
   } catch (e) {
-    dlog(`transport: webrtc failed (${e}), falling back to relay`);
+    dlog(`transport: webrtc setup failed (${e}), using relay`);
+    return createRelayConnection(roomId, role, callbacks);
   }
 
-  return createRelayConnection(roomId, role, callbacks);
+  // Async relay fallback — does NOT block the caller
+  fallbackTimer = setTimeout(async () => {
+    fallbackTimer = null;
+    if (webrtcConnected || destroyed) return;
+    dlog('transport: webrtc timeout, switching to relay');
+    activeHandle.leave();
+    try {
+      activeHandle = await createRelayConnection(roomId, role, callbacks);
+    } catch (e) {
+      dlog(`transport: relay fallback failed: ${e}`);
+      callbacks.onClose('');
+    }
+  }, WEBRTC_TIMEOUT_MS);
+
+  return {
+    send: (type: string, data: unknown) => activeHandle.send(type, data),
+    leave: () => {
+      destroyed = true;
+      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+      activeHandle.leave();
+    },
+    getPeers: () => activeHandle.getPeers(),
+  };
 }
 
 /** Create a peer connection (WebRTC or relay fallback) and return typed action channels. */
