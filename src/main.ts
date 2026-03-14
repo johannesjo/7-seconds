@@ -123,7 +123,7 @@ let cancelMatchmaking: (() => void) | null = null;
 let guestEngine: GameEngine | null = null;
 let guestLastGameState: OnlineGameState | null = null;
 let guestEffectIndex = 0;
-let pendingSyncHash: OnlineSyncHash | null = null;
+let pendingSyncHashes: OnlineSyncHash[] = [];
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -791,13 +791,14 @@ function guestTickCallback(ticker: { deltaMS: number }): void {
   }
   renderer.effects?.update(dt);
 
-  // Check queued sync hash when guest reaches the target tick
-  if (pendingSyncHash && guestEngine.getSimulationTick() >= pendingSyncHash.tick) {
+  // Check all queued sync hashes the guest has reached
+  const currentTick = guestEngine.getSimulationTick();
+  while (pendingSyncHashes.length > 0 && currentTick >= pendingSyncHashes[0].tick) {
+    const expected = pendingSyncHashes.shift()!;
     const guestHash = hashGameState(guestEngine.getUnits());
-    if (guestHash !== pendingSyncHash.hash) {
-      console.warn(`[lockstep] desync at tick ${pendingSyncHash.tick}: host=${pendingSyncHash.hash.toString(16)} guest=${guestHash.toString(16)}`);
+    if (guestHash !== expected.hash) {
+      console.warn(`[lockstep] desync at tick ${expected.tick}: host=${expected.hash.toString(16)} guest=${guestHash.toString(16)}`);
     }
-    pendingSyncHash = null;
   }
 
   // Update HUD
@@ -815,7 +816,7 @@ function stopGuestEngine(): void {
   }
   renderer?.ticker.remove(guestTickCallback);
   renderer?.renderProjectiles([]);
-  pendingSyncHash = null;
+  pendingSyncHashes = [];
 }
 
 async function startOnlineGuestMode(roomId: string): Promise<void> {
@@ -960,7 +961,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 
     onSyncHash(data: OnlineSyncHash) {
       // Queue the hash — it will be checked in guestTickCallback when we reach that tick
-      pendingSyncHash = data;
+      pendingSyncHashes.push(data);
     },
 
     onFrame(_frame: OnlineFrameData) {
@@ -1020,6 +1021,66 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
   await onlineGuest.joinRoom(roomId);
 }
 
+/** Build OnlineHost callbacks. Customization points are passed as overrides. */
+function createHostCallbacks(overrides: {
+  onShareUrl: (url: string) => void;
+  waitingStatus: string;
+  errorStatus: string;
+}): ConstructorParameters<typeof OnlineHost>[0] {
+  return {
+    onConnectionStateChange(state: OnlineConnectionState) {
+      if (state === 'connected') {
+        if (engine) {
+          notify('7 Seconds', 'Reconnected!');
+        } else {
+          notify('7 Seconds', 'Your opponent has joined!');
+          onlineLobby.style.display = 'none';
+          startOnlineHostGame();
+        }
+      } else if (state === 'reconnecting') {
+        setOnlineStatus('Reconnecting...', true);
+      } else if (state === 'disconnected') {
+        engine?.stop();
+        planningOverlay.classList.remove('active');
+        confirmBtn.classList.remove('active');
+        winnerTextEl.innerHTML = 'Opponent Disconnected';
+        winnerTextEl.style.color = '#888';
+        resultStatsEl.innerHTML = '';
+        rematchBtn.style.display = 'none';
+        replayBtn.style.display = 'none';
+        newBattleBtn.textContent = 'Back';
+        showScreen('result');
+      } else if (state === 'waiting') {
+        setOnlineStatus(overrides.waitingStatus, true);
+      } else if (state === 'error') {
+        setOnlineStatus(overrides.errorStatus);
+      }
+    },
+    onShareUrl: overrides.onShareUrl,
+    onGuestPathsReceived() {
+      if (!engine || !onlineHost) return;
+      if (engine.phase === 'red-planning') {
+        const pathData = onlineHost.consumeGuestPaths();
+        if (pathData) {
+          engine.setRedPaths(pathData.paths);
+          engine.confirmPlan();
+          planningOverlay.classList.remove('active');
+        }
+      }
+    },
+    onGuestRematchRequested() {
+      if (localRematchRequested) {
+        startOnlineRematch();
+      } else {
+        rematchBtn.textContent = 'Rematch (opponent ready)';
+      }
+    },
+    onGuestIdentity(playerId: string) {
+      opponentPlayerId = playerId;
+    },
+  };
+}
+
 // Online PvP button (host flow)
 onlineBtn.addEventListener('click', async () => {
   onlineActive = true;
@@ -1033,67 +1094,14 @@ onlineBtn.addEventListener('click', async () => {
   showOnlineRecord();
   setOnlineStatus('Creating room...', true);
 
-  onlineHost = new OnlineHost({
-    onConnectionStateChange(state: OnlineConnectionState) {
-      if (state === 'connected') {
-        if (engine) {
-          // Reconnected mid-game — resume without reinitializing
-          notify('7 Seconds', 'Reconnected!');
-        } else {
-          notify('7 Seconds', 'Your opponent has joined!');
-          onlineLobby.style.display = 'none';
-          startOnlineHostGame();
-        }
-      } else if (state === 'reconnecting') {
-        setOnlineStatus('Reconnecting...', true);
-      } else if (state === 'disconnected') {
-        // Show disconnect on result screen so host can go back
-        engine?.stop();
-        planningOverlay.classList.remove('active');
-        confirmBtn.classList.remove('active');
-        winnerTextEl.innerHTML = 'Opponent Disconnected';
-        winnerTextEl.style.color = '#888';
-        resultStatsEl.innerHTML = '';
-        rematchBtn.style.display = 'none';
-        replayBtn.style.display = 'none';
-        newBattleBtn.textContent = 'Back';
-        showScreen('result');
-      } else if (state === 'waiting') {
-        setOnlineStatus('Waiting for opponent...', true);
-      } else if (state === 'error') {
-        setOnlineStatus('Timed out. No opponent joined. Try creating a new room.');
-      }
-    },
+  onlineHost = new OnlineHost(createHostCallbacks({
     onShareUrl(url: string) {
       onlineShareContainer.style.display = '';
       onlineShareUrl.value = url;
     },
-    onGuestPathsReceived() {
-      if (!engine || !onlineHost) return;
-      // If host already confirmed and engine is waiting in red-planning, start battle
-      if (engine.phase === 'red-planning') {
-        const pathData = onlineHost.consumeGuestPaths();
-        if (pathData) {
-          engine.setRedPaths(pathData.paths);
-          engine.confirmPlan();
-          planningOverlay.classList.remove('active');
-        }
-      }
-      // Otherwise paths are stored — will be consumed when host confirms
-    },
-    onGuestRematchRequested() {
-      if (localRematchRequested) {
-        // Both want rematch — start!
-        startOnlineRematch();
-      } else {
-        // Show that opponent wants rematch
-        rematchBtn.textContent = 'Rematch (opponent ready)';
-      }
-    },
-    onGuestIdentity(playerId: string) {
-      opponentPlayerId = playerId;
-    },
-  });
+    waitingStatus: 'Waiting for opponent...',
+    errorStatus: 'Timed out. No opponent joined. Try creating a new room.',
+  }));
 
   await onlineHost.createRoom();
 });
@@ -1120,59 +1128,11 @@ onlineRandomBtn.addEventListener('click', async () => {
     if (result.role === 'host') {
       onlineRole = 'host';
       setOnlineStatus('Opponent found! Setting up game...', true);
-      // Reuse the existing host flow but with the matched roomId
-      onlineHost = new OnlineHost({
-        onConnectionStateChange(state: OnlineConnectionState) {
-          if (state === 'connected') {
-            if (engine) {
-              notify('7 Seconds', 'Reconnected!');
-            } else {
-              notify('7 Seconds', 'Your opponent has joined!');
-              onlineLobby.style.display = 'none';
-              startOnlineHostGame();
-            }
-          } else if (state === 'reconnecting') {
-            setOnlineStatus('Reconnecting...', true);
-          } else if (state === 'disconnected') {
-            engine?.stop();
-            planningOverlay.classList.remove('active');
-            confirmBtn.classList.remove('active');
-            winnerTextEl.innerHTML = 'Opponent Disconnected';
-            winnerTextEl.style.color = '#888';
-            resultStatsEl.innerHTML = '';
-            rematchBtn.style.display = 'none';
-            replayBtn.style.display = 'none';
-            newBattleBtn.textContent = 'Back';
-            showScreen('result');
-          } else if (state === 'waiting') {
-            setOnlineStatus('Waiting for opponent to connect...', true);
-          } else if (state === 'error') {
-            setOnlineStatus('Connection failed. Try again.');
-          }
-        },
+      onlineHost = new OnlineHost(createHostCallbacks({
         onShareUrl() { /* no-op for random match */ },
-        onGuestPathsReceived() {
-          if (!engine || !onlineHost) return;
-          if (engine.phase === 'red-planning') {
-            const pathData = onlineHost.consumeGuestPaths();
-            if (pathData) {
-              engine.setRedPaths(pathData.paths);
-              engine.confirmPlan();
-              planningOverlay.classList.remove('active');
-            }
-          }
-        },
-        onGuestRematchRequested() {
-          if (localRematchRequested) {
-            startOnlineRematch();
-          } else {
-            rematchBtn.textContent = 'Rematch (opponent ready)';
-          }
-        },
-        onGuestIdentity(playerId: string) {
-          opponentPlayerId = playerId;
-        },
-      });
+        waitingStatus: 'Waiting for opponent to connect...',
+        errorStatus: 'Connection failed. Try again.',
+      }));
       await onlineHost.createRoomWithId(result.roomId);
     } else {
       // Guest flow — reuse existing startOnlineGuestMode

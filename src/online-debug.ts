@@ -87,10 +87,10 @@ export function startPeerMonitor(getPeers: () => Record<string, RTCPeerConnectio
 }
 
 /** Run a Supabase Realtime connectivity test. */
-export async function testSupabaseRealtime(appId: string, supabaseKey: string): Promise<void> {
+export async function testSupabaseRealtime(_appId: string, _supabaseKey: string): Promise<void> {
   if (typeof window === 'undefined') return;
-  const { createClient } = await import('@supabase/supabase-js');
-  const client = createClient(appId, supabaseKey);
+  const { getSupabaseClient } = await import('./online');
+  const client = getSupabaseClient();
   const testTopic = `_diag_${Date.now()}`;
   const chan = client.channel(testTopic);
 

@@ -23,7 +23,9 @@ function loadScores(): ScoreMap {
 }
 
 function saveScores(scores: ScoreMap): void {
-  localStorage.setItem(SCORE_KEY, JSON.stringify(scores));
+  try {
+    localStorage.setItem(SCORE_KEY, JSON.stringify(scores));
+  } catch { /* localStorage unavailable */ }
 }
 
 export function recordWin(opponentId: string): void {

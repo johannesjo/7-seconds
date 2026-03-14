@@ -23,12 +23,17 @@ const LOCAL_ID_KEY = '7s-player-id';
 
 /** Get or create a persistent local player ID. */
 export function getLocalPlayerId(): string {
-  let id = localStorage.getItem(LOCAL_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(LOCAL_ID_KEY, id);
+  try {
+    let id = localStorage.getItem(LOCAL_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(LOCAL_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    // localStorage unavailable (private browsing, cookies disabled)
+    return crypto.randomUUID();
   }
-  return id;
 }
 
 /** Characters excluding ambiguous ones (l, 1, o, 0, I, O). */
@@ -36,10 +41,16 @@ const ROOM_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';
 
 /** Generate a 6-character alphanumeric room ID without ambiguous characters. */
 export function generateRoomId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  // Rejection sampling avoids modulo bias (256 % 30 !== 0)
+  const limit = 256 - (256 % ROOM_CHARS.length); // 240 — largest multiple of 30 ≤ 256
   let id = '';
-  for (let i = 0; i < 6; i++) {
-    id += ROOM_CHARS[bytes[i] % ROOM_CHARS.length];
+  while (id.length < 6) {
+    const bytes = crypto.getRandomValues(new Uint8Array(6 - id.length));
+    for (const b of bytes) {
+      if (b < limit && id.length < 6) {
+        id += ROOM_CHARS[b % ROOM_CHARS.length];
+      }
+    }
   }
   return id;
 }

@@ -5,7 +5,6 @@ import type {
   OnlineGameState,
   OnlinePhase,
   OnlinePathData,
-  OnlineFrameData,
   OnlineRoundResult,
   OnlineConnectionState,
   OnlineSignal,
@@ -133,10 +132,6 @@ export class OnlineHost {
     this.connection?.phase[0](phase);
   }
 
-  sendFrame(frame: OnlineFrameData): void {
-    this.connection?.frame[0](frame);
-  }
-
   sendWaypoints(data: OnlineWaypointData): void {
     this.connection?.waypoints[0](data);
   }
@@ -163,8 +158,9 @@ export class OnlineHost {
   }
 
   private handlePeerJoin(peerId: string): void {
-    // Accept reconnections from the same or new guest
-    if (this.guestPeerId && this.guestPeerId !== peerId) return;
+    // Accept the same guest, or a new guest if disconnected/reconnecting
+    if (this.guestPeerId && this.guestPeerId !== peerId
+      && this.connectionState !== 'disconnected' && this.connectionState !== 'reconnecting') return;
     this.guestPeerId = peerId;
     this.clearTimeout();
     this.clearReconnectTimer();

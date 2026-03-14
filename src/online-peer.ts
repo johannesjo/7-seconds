@@ -266,7 +266,9 @@ export async function createPeerConnection(
     };
     chan.onmessage = (e) => {
       try {
-        const { t, d } = JSON.parse(e.data as string);
+        const msg = JSON.parse(e.data as string);
+        const t = msg?.t;
+        if (typeof t !== 'string') return;
         // Handle keepalive internally
         if (t === '_ping') {
           if (dc?.readyState === 'open') {
@@ -278,7 +280,7 @@ export async function createPeerConnection(
           lastPongTime = Date.now();
           return;
         }
-        callbacks.onMessage(t, d, remotePeerId);
+        callbacks.onMessage(t, msg.d, remotePeerId);
       } catch {
         dlog(`dc parse error`);
       }
