@@ -1,4 +1,4 @@
-import { Obstacle, ElevationZone, Vec2, ReplayUnitSnapshot, ReplayProjectileSnapshot, ReplayEvent, Team, UnitType } from './types';
+import { Obstacle, ElevationZone, Vec2, Team, UnitType } from './types';
 
 export interface OnlineGameState {
   units: {
@@ -24,13 +24,6 @@ export type OnlinePhase = 'blue-planning' | 'red-planning' | 'playing' | 'round-
 
 export interface OnlinePathData {
   paths: { unitId: string; waypoints: Vec2[] }[];
-}
-
-export interface OnlineFrameData {
-  units: ReplayUnitSnapshot[];
-  projectiles: ReplayProjectileSnapshot[];
-  events: ReplayEvent[];
-  timeLeft: number;
 }
 
 /** Host sends blue waypoints + PRNG seed so both peers can simulate identically. */

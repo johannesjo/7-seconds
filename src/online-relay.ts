@@ -1,17 +1,15 @@
-import { getSupabaseClient } from './online';
+import { getSupabaseClient, localPeerId } from './online';
 import { dlog } from './online-debug';
 import type { PeerCallbacks, PeerHandle } from './online-peer';
-
-/** Unique ID for this browser tab — used for relay identity. */
-const localPeerId = crypto.randomUUID();
-
-/** Message types that are silently dropped in relay mode (guest ignores frame data in lockstep). */
-const SUPPRESSED_TYPES = new Set(['frame']);
 
 /** Keepalive ping interval for relay connections (ms). */
 const RELAY_KEEPALIVE_INTERVAL_MS = 5_000;
 /** If no pong received within this time, consider relay peer dead (ms). */
 const RELAY_KEEPALIVE_TIMEOUT_MS = 15_000;
+/** Maximum number of reconnection attempts before giving up. */
+const MAX_RECONNECT_ATTEMPTS = 3;
+/** How long to wait for peer to respond during reconnection (ms). */
+const RECONNECT_TIMEOUT_MS = 15_000;
 
 /**
  * Create a relay connection via Supabase broadcast.
@@ -30,10 +28,22 @@ export async function createRelayConnection(
 
   let remotePeerId = '';
   let destroyed = false;
+  let wasConnected = false;
+  let reconnecting = false;
+  let reconnectAttempts = 0;
   let announceInterval: ReturnType<typeof setInterval> | null = null;
   let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   let keepaliveCheckTimer: ReturnType<typeof setInterval> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let lastPongTime = 0;
+
+  const clearAnnounceInterval = () => {
+    if (announceInterval) { clearInterval(announceInterval); announceInterval = null; }
+  };
+
+  const clearReconnectTimer = () => {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  };
 
   const announceJoin = () => {
     channel.send({ type: 'broadcast', event: 'join', payload: { peerId: localPeerId } });
@@ -63,17 +73,77 @@ export async function createRelayConnection(
       if (elapsed > RELAY_KEEPALIVE_TIMEOUT_MS) {
         dlog(`relay: keepalive timeout (${elapsed}ms since last pong)`);
         stopKeepalive();
-        callbacks.onClose(remotePeerId);
+        handleConnectionLost();
       }
     }, RELAY_KEEPALIVE_INTERVAL_MS / 2);
+  };
+
+  const handleConnectionLost = () => {
+    if (destroyed || reconnecting) return;
+
+    if (!wasConnected || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      dlog(`relay: connection lost, no reconnect (was=${wasConnected} attempts=${reconnectAttempts})`);
+      if (!destroyed) callbacks.onClose(remotePeerId);
+      return;
+    }
+
+    reconnecting = true;
+    reconnectAttempts++;
+    dlog(`relay: attempting reconnect ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+
+    if (reconnectAttempts === 1) {
+      callbacks.onReconnecting?.(remotePeerId);
+    }
+
+    // Re-announce to rediscover the peer on the existing channel
+    announceJoin();
+    clearAnnounceInterval();
+    announceInterval = setInterval(() => {
+      if (destroyed || !reconnecting) {
+        clearAnnounceInterval();
+        return;
+      }
+      announceJoin();
+    }, 2_000);
+
+    // Timeout for this reconnect attempt
+    clearReconnectTimer();
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (destroyed) return;
+      if (!reconnecting) return; // reconnected successfully
+      dlog('relay: reconnect attempt timed out');
+      reconnecting = false;
+      clearAnnounceInterval();
+      handleConnectionLost();
+    }, RECONNECT_TIMEOUT_MS);
+  };
+
+  const handlePeerRejoined = (peerId: string) => {
+    if (!reconnecting || peerId !== remotePeerId) return;
+    dlog(`relay: peer rejoined ${peerId.slice(0, 8)}`);
+    reconnecting = false;
+    reconnectAttempts = 0;
+    clearAnnounceInterval();
+    clearReconnectTimer();
+    startKeepalive();
+    callbacks.onOpen(peerId);
   };
 
   channel.on('broadcast', { event: 'join' }, ({ payload }) => {
     if (destroyed) return;
     const peerId = payload.peerId as string;
     if (peerId === localPeerId) return;
+
+    // During reconnection, accept rejoin from the same peer
+    if (reconnecting && peerId === remotePeerId) {
+      handlePeerRejoined(peerId);
+      return;
+    }
+
     if (remotePeerId) return; // already paired
     remotePeerId = peerId;
+    wasConnected = true;
     dlog(`relay: peer joined ${peerId.slice(0, 8)}`);
     // Acknowledge so the other peer discovers us too (fixes race condition)
     announceJoin();
@@ -86,6 +156,12 @@ export async function createRelayConnection(
     const msg = payload as Record<string, unknown>;
     if (typeof msg.t !== 'string' || typeof msg.from !== 'string') return;
     if (msg.from === localPeerId) return;
+
+    // If we receive data during reconnection, the peer is back
+    if (reconnecting && msg.from === remotePeerId) {
+      handlePeerRejoined(msg.from);
+    }
+
     try {
       callbacks.onMessage(msg.t, msg.d, msg.from);
     } catch (e) {
@@ -97,6 +173,12 @@ export async function createRelayConnection(
     if (destroyed) return;
     const peerId = payload.peerId as string;
     if (peerId === localPeerId || peerId !== remotePeerId) return;
+
+    // Receiving a ping during reconnection means the peer is alive
+    if (reconnecting) {
+      handlePeerRejoined(peerId);
+    }
+
     channel.send({
       type: 'broadcast',
       event: 'pong',
@@ -108,6 +190,12 @@ export async function createRelayConnection(
     if (destroyed) return;
     const peerId = payload.peerId as string;
     if (peerId === localPeerId || peerId !== remotePeerId) return;
+
+    // Receiving a pong during reconnection means the peer is alive
+    if (reconnecting) {
+      handlePeerRejoined(peerId);
+    }
+
     lastPongTime = Date.now();
   });
 
@@ -117,6 +205,9 @@ export async function createRelayConnection(
     if (peerId === remotePeerId) {
       dlog(`relay: peer left ${peerId.slice(0, 8)}`);
       stopKeepalive();
+      clearReconnectTimer();
+      clearAnnounceInterval();
+      reconnecting = false;
       callbacks.onClose(peerId);
     }
   });
@@ -144,7 +235,6 @@ export async function createRelayConnection(
 
   const send = (type: string, data: unknown) => {
     if (destroyed) return;
-    if (SUPPRESSED_TYPES.has(type)) return;
     channel.send({
       type: 'broadcast',
       event: 'data',
@@ -155,7 +245,8 @@ export async function createRelayConnection(
   const leave = () => {
     destroyed = true;
     stopKeepalive();
-    if (announceInterval) { clearInterval(announceInterval); announceInterval = null; }
+    clearReconnectTimer();
+    clearAnnounceInterval();
     channel.send({ type: 'broadcast', event: 'bye', payload: { peerId: localPeerId } });
     client.removeChannel(channel);
   };

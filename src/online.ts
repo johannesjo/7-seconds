@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal, OnlineWaypointData, OnlineSyncHash } from './online-types';
+import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineRoundResult, OnlineSignal, OnlineWaypointData, OnlineSyncHash } from './online-types';
 import { dlog } from './online-debug';
 import { createPeerConnection, type PeerHandle, type PeerCallbacks } from './online-peer';
 import { createRelayConnection } from './online-relay';
@@ -18,6 +18,10 @@ export function getSupabaseClient(): SupabaseClient {
   }
   return sharedClient;
 }
+
+/** Unique peer ID for this browser tab — shared across WebRTC and relay transports
+ *  so fallback doesn't present a different identity to the remote peer. */
+export const localPeerId = crypto.randomUUID();
 
 const LOCAL_ID_KEY = '7s-player-id';
 
@@ -76,7 +80,6 @@ export interface OnlineConnection {
   state: ActionPair<OnlineGameState>;
   phase: ActionPair<OnlinePhase>;
   paths: ActionPair<OnlinePathData>;
-  frame: ActionPair<OnlineFrameData>;
   result: ActionPair<OnlineRoundResult>;
   signal: ActionPair<OnlineSignal>;
   waypoints: ActionPair<OnlineWaypointData>;
@@ -174,7 +177,13 @@ export async function createOnlineRoom(
   function makeAction<T>(type: string): ActionPair<T> {
     const send = (data: T) => handle.send(type, data);
     const receive = (cb: (data: T, peerId: string) => void) => {
-      receivers.set(type, cb as (data: unknown, peerId: string) => void);
+      receivers.set(type, (data: unknown, peerId: string) => {
+        if (data == null) {
+          dlog(`dropped null ${type} message from ${peerId.slice(0, 8)}`);
+          return;
+        }
+        cb(data as T, peerId);
+      });
     };
     return [send, receive];
   }
@@ -183,7 +192,6 @@ export async function createOnlineRoom(
     state: makeAction<OnlineGameState>('state'),
     phase: makeAction<OnlinePhase>('phase'),
     paths: makeAction<OnlinePathData>('paths'),
-    frame: makeAction<OnlineFrameData>('frame'),
     result: makeAction<OnlineRoundResult>('result'),
     signal: makeAction<OnlineSignal>('signal'),
     waypoints: makeAction<OnlineWaypointData>('waypoints'),

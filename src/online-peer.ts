@@ -1,5 +1,5 @@
 import { RealtimeChannel } from '@supabase/supabase-js';
-import { getSupabaseClient } from './online';
+import { getSupabaseClient, localPeerId } from './online';
 import { dlog } from './online-debug';
 
 /** Messages sent over Supabase Realtime for WebRTC signaling. */
@@ -41,9 +41,6 @@ export interface PeerHandle {
   leave: () => void;
   getPeers: () => Record<string, RTCPeerConnection>;
 }
-
-/** Unique ID for this browser tab — used for signaling identity. */
-const localPeerId = crypto.randomUUID();
 
 export async function createPeerConnection(
   roomId: string,

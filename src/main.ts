@@ -13,7 +13,7 @@ import { OnlineGuest } from './online-guest';
 import { getJoinRoomId } from './online';
 import { findMatch } from './online-matchmaking';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
-import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash } from './online-types';
+import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash } from './online-types';
 import { PathDrawer } from './path-drawer';
 import { recordWin, recordLoss, getScore, getOverallScore } from './online-score';
 import { requestNotificationPermission, notify } from './notify';
@@ -964,10 +964,6 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
     onSyncHash(data: OnlineSyncHash) {
       // Queue the hash — it will be checked in guestTickCallback when we reach that tick
       pendingSyncHashes.push(data);
-    },
-
-    onFrame(_frame: OnlineFrameData) {
-      // No-op in lockstep mode — guest simulates locally
     },
 
     onResult(result: OnlineRoundResult) {

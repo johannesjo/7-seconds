@@ -4,7 +4,6 @@ import type {
   OnlineConnectionState,
   OnlineGameState,
   OnlinePhase,
-  OnlineFrameData,
   OnlinePathData,
   OnlineRoundResult,
   OnlineSignal,
@@ -17,7 +16,6 @@ interface OnlineGuestCallbacks {
   onConnectionStateChange: (state: OnlineConnectionState) => void;
   onGameState: (state: OnlineGameState) => void;
   onPhaseChange: (phase: OnlinePhase) => void;
-  onFrame: (frame: OnlineFrameData) => void;
   onWaypoints: (data: OnlineWaypointData) => void;
   onSyncHash: (data: OnlineSyncHash) => void;
   onResult: (result: OnlineRoundResult) => void;
@@ -99,7 +97,6 @@ export class OnlineGuest {
 
     const [, receiveState] = this.connection.state;
     const [, receivePhase] = this.connection.phase;
-    const [, receiveFrame] = this.connection.frame;
     const [, receiveResult] = this.connection.result;
     const [, receiveWaypoints] = this.connection.waypoints;
     const [, receiveSync] = this.connection.sync;
@@ -111,10 +108,6 @@ export class OnlineGuest {
     receivePhase((phase, peerId) => {
       if (peerId !== this.hostPeerId) return;
       this.callbacks.onPhaseChange(phase);
-    });
-    receiveFrame((frame, peerId) => {
-      if (peerId !== this.hostPeerId) return;
-      this.callbacks.onFrame(frame);
     });
     receiveWaypoints((data, peerId) => {
       if (peerId !== this.hostPeerId) return;

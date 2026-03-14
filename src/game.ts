@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
 import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { OnlineFrameData, OnlineGameState } from './online-types';
+import { OnlineGameState } from './online-types';
 import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
@@ -45,7 +45,6 @@ export class GameEngine {
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
   private onlineHostMode = false;
-  private onFrameCallback?: (frame: OnlineFrameData) => void;
   private onPhaseChangeCallback?: (phase: TurnPhase) => void;
   private accumulator = 0;
   private simulationTick = 0;
@@ -62,7 +61,6 @@ export class GameEngine {
     ctfMode?: boolean;
     ctfHotseat?: boolean;
     onlineHost?: boolean;
-    onFrame?: (frame: OnlineFrameData) => void;
     onPhaseChange?: (phase: TurnPhase) => void;
     seed?: number;
   }) {
@@ -76,7 +74,7 @@ export class GameEngine {
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.onlineHostMode = opts?.onlineHost ?? false;
-    this.onFrameCallback = opts?.onFrame;
+
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
 
@@ -338,7 +336,6 @@ export class GameEngine {
 
     // Record replay frame after all state updates
     this.recordFrame();
-    this.broadcastOnlineFrame();
 
     if (this.checkCtfCapture()) return;
     if (this.checkElimination()) return;
@@ -507,19 +504,6 @@ export class GameEngine {
         }
       }
     }
-  }
-
-  /** Send current frame data to the online peer callback. */
-  private broadcastOnlineFrame(): void {
-    if (!this.onFrameCallback) return;
-    const lastFrame = this.replayFrames[this.replayFrames.length - 1];
-    const frameEvents = this.replayEvents.filter(e => e.frame === this.replayFrames.length - 1);
-    this.onFrameCallback({
-      units: lastFrame.units,
-      projectiles: lastFrame.projectiles,
-      events: frameEvents,
-      timeLeft: Math.max(0, this.roundTimer),
-    });
   }
 
   /** Check CTF capture win condition. Returns true if the round ended. */

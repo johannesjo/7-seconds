@@ -93,7 +93,7 @@ export class OnlineHost {
       }
     });
 
-    // Single timeout — host re-announces offer every 10s automatically
+    // Single timeout — host re-announces offer every 3s automatically
     this.timeoutTimer = setTimeout(() => {
       this.timeoutTimer = null;
       if (this.connectionState === 'waiting') {
