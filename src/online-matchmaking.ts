@@ -1,116 +1,89 @@
 import { getSupabaseClient, generateRoomId } from './online';
 import { dlog } from './online-debug';
 
-const SEEK_STALE_MS = 10_000;
 const MATCH_TIMEOUT_MS = 60_000;
-
-interface SeekMessage {
-  type: 'seek';
-  playerId: string;
-  ts: number;
-}
-
-interface MatchMessage {
-  type: 'match';
-  hostId: string;
-  guestId: string;
-  roomId: string;
-}
-
-interface LeaveMessage {
-  type: 'leave';
-  playerId: string;
-}
-
-type LobbyMessage = SeekMessage | MatchMessage | LeaveMessage;
+/** Keep matchmaking channel alive after host resolves so guest receives presence update. */
+const HOST_LINGER_MS = 5_000;
 
 interface MatchResult {
   role: 'host' | 'guest';
   roomId: string;
 }
 
-/** Search for a random opponent via Supabase Realtime broadcast.
+/** Search for a random opponent via Supabase Realtime Presence.
+ *  Uses Presence (server-tracked state sync) instead of broadcast for reliable
+ *  peer discovery — broadcast alone can fail on some mobile networks.
  *  Returns the role and roomId once matched. Throws on cancel or timeout. */
 export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void } {
-  // Use a per-session random ID, not the persistent localStorage player ID.
-  // localStorage is shared across tabs, so two tabs on the same device would
-  // have identical IDs and silently filter each other's seek messages.
+  // Per-session random ID — not the persistent localStorage player ID,
+  // which is shared across tabs on the same device.
   const seekerId = crypto.randomUUID();
   const client = getSupabaseClient();
-  const channel = client.channel('matchmaking-lobby', { config: { broadcast: { self: false } } });
+  const channel = client.channel('matchmaking-lobby', {
+    config: {
+      presence: { key: seekerId },
+    },
+  });
 
   let resolved = false;
-  let seekInterval: ReturnType<typeof setInterval> | null = null;
   let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   let rejectPromise: ((reason: Error) => void) | null = null;
 
   const cleanup = () => {
-    resolved = true;
-    if (seekInterval) { clearInterval(seekInterval); seekInterval = null; }
     if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
-    channel.send({ type: 'broadcast', event: 'lobby', payload: { type: 'leave', playerId: seekerId } as LeaveMessage });
     client.removeChannel(channel);
   };
 
   const promise = new Promise<MatchResult>((resolve, reject) => {
     rejectPromise = reject;
-    const activeSeekers = new Map<string, number>(); // playerId → timestamp
 
-    const tryMatch = (opponentId: string) => {
+    const processPresence = () => {
       if (resolved) return;
-      // Deterministic: lower playerId is host
-      const iAmHost = seekerId < opponentId;
-      if (iAmHost) {
-        const roomId = generateRoomId();
-        dlog(`matchmaking: I am host, matched with ${opponentId.slice(0, 8)}`);
-        channel.send({
-          type: 'broadcast',
-          event: 'lobby',
-          payload: { type: 'match', hostId: seekerId, guestId: opponentId, roomId } as MatchMessage,
-        });
-        cleanup();
-        resolve({ role: 'host', roomId });
+      const state = channel.presenceState();
+
+      for (const presences of Object.values(state)) {
+        if (resolved) return;
+        const p = presences[0] as Record<string, unknown>;
+        const peerId = p.seekerId as string;
+        if (!peerId || peerId === seekerId) continue;
+
+        // Check if a hosting peer has selected us as guest
+        if (p.status === 'hosting' && p.guestId === seekerId) {
+          resolved = true;
+          dlog(`matchmaking: matched as guest, room=${p.roomId}`);
+          cleanup();
+          resolve({ role: 'guest', roomId: p.roomId as string });
+          return;
+        }
+
+        // Try to match with a seeking peer — deterministic: lower ID = host
+        if (p.status === 'seeking' && seekerId < peerId) {
+          resolved = true;
+          const roomId = generateRoomId();
+          dlog(`matchmaking: I am host, matched with ${peerId.slice(0, 8)}`);
+          // Update presence so guest discovers the match
+          channel.track({ seekerId, status: 'hosting', roomId, guestId: peerId });
+          // Keep channel alive so guest receives the presence update
+          setTimeout(cleanup, HOST_LINGER_MS);
+          resolve({ role: 'host', roomId });
+          return;
+        }
       }
-      // If opponent has lower ID, they will send the match message — we wait
     };
 
-    channel.on('broadcast', { event: 'lobby' }, ({ payload }) => {
-      if (resolved) return;
-      const msg = payload as LobbyMessage;
-
-      if (msg.type === 'seek') {
-        if (msg.playerId === seekerId) return;
-        if (Date.now() - msg.ts > SEEK_STALE_MS) return;
-        activeSeekers.set(msg.playerId, msg.ts);
-        dlog(`matchmaking: saw seeker ${msg.playerId.slice(0, 8)}`);
-        tryMatch(msg.playerId);
-      } else if (msg.type === 'match') {
-        if (msg.guestId === seekerId) {
-          dlog(`matchmaking: matched as guest, room=${msg.roomId}`);
-          cleanup();
-          resolve({ role: 'guest', roomId: msg.roomId });
-        }
-      } else if (msg.type === 'leave') {
-        activeSeekers.delete(msg.playerId);
-      }
+    channel.on('presence', { event: 'sync' }, () => {
+      const count = Object.keys(channel.presenceState()).length;
+      dlog(`matchmaking: presence sync (${count} peers)`);
+      processPresence();
     });
 
-    channel.subscribe((status) => {
+    channel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         dlog('matchmaking: joined lobby');
-        // Broadcast seek immediately and then every 3s
-        const sendSeek = () => {
-          if (resolved) return;
-          channel.send({
-            type: 'broadcast',
-            event: 'lobby',
-            payload: { type: 'seek', playerId: seekerId, ts: Date.now() } as SeekMessage,
-          });
-        };
-        sendSeek();
-        seekInterval = setInterval(sendSeek, 3_000);
+        await channel.track({ seekerId, status: 'seeking', ts: Date.now() });
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         if (!resolved) {
+          resolved = true;
           cleanup();
           reject(new Error(`Matchmaking channel failed: ${status}`));
         }
@@ -120,6 +93,7 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
     timeoutTimer = setTimeout(() => {
       timeoutTimer = null;
       if (!resolved) {
+        resolved = true;
         cleanup();
         reject(new Error('No opponent found'));
       }
@@ -128,6 +102,7 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
 
   const cancel = () => {
     if (!resolved) {
+      resolved = true;
       cleanup();
       rejectPromise?.(new Error('Matchmaking cancelled'));
     }
