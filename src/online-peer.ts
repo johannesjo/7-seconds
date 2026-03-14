@@ -1,5 +1,5 @@
-import { createClient, RealtimeChannel } from '@supabase/supabase-js';
-import { SUPABASE_URL, SUPABASE_KEY } from './online';
+import { RealtimeChannel } from '@supabase/supabase-js';
+import { getSupabaseClient } from './online';
 import { dlog } from './online-debug';
 
 /** Messages sent over Supabase Realtime for WebRTC signaling. */
@@ -50,7 +50,7 @@ export async function createPeerConnection(
   role: 'host' | 'guest',
   callbacks: PeerCallbacks,
 ): Promise<PeerHandle> {
-  const client = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const client = getSupabaseClient();
   let channel: RealtimeChannel;
 
   let pc: RTCPeerConnection | null = null;
@@ -457,7 +457,7 @@ export async function createPeerConnection(
     pc?.close();
     pc = null;
     dc = null;
-    client.removeAllChannels();
+    client.removeChannel(channel);
   };
 
   const getPeers = (): Record<string, RTCPeerConnection> => {

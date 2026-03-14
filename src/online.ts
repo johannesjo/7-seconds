@@ -1,11 +1,23 @@
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal, OnlineWaypointData, OnlineSyncHash } from './online-types';
 import { dlog } from './online-debug';
-import { createPeerConnection } from './online-peer';
+import { createPeerConnection, type PeerHandle } from './online-peer';
+import { createRelayConnection } from './online-relay';
 
 export const SUPABASE_URL = 'https://puoxmqovckvfoqyihasl.supabase.co';
 // Full JWT form required — the short `sb_publishable_*` format causes
 // Supabase Realtime subscription failures. Do not replace with short key.
 export const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4';
+
+let sharedClient: SupabaseClient | null = null;
+
+/** Shared Supabase client — avoids duplicate WebSocket connections. */
+export function getSupabaseClient(): SupabaseClient {
+  if (!sharedClient) {
+    sharedClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
+  return sharedClient;
+}
 
 const LOCAL_ID_KEY = '7s-player-id';
 
@@ -60,7 +72,53 @@ export interface OnlineConnection {
   leave: () => void;
 }
 
-/** Create a WebRTC peer connection and return typed action channels. */
+const forceRelay = typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).has('relay');
+
+/** WebRTC connection timeout before falling back to relay (ms). */
+const WEBRTC_TIMEOUT_MS = 15_000;
+
+/** Try WebRTC first; if it fails to open within timeout, fall back to Supabase relay. */
+async function connectTransport(
+  roomId: string,
+  role: 'host' | 'guest',
+  callbacks: { onOpen: (peerId: string) => void; onClose: (peerId: string) => void; onMessage: (type: string, data: unknown, peerId: string) => void },
+): Promise<PeerHandle> {
+  if (forceRelay) {
+    dlog('transport: forced relay via ?relay=1');
+    return createRelayConnection(roomId, role, callbacks);
+  }
+
+  try {
+    let resolveOpen: () => void;
+    const openPromise = new Promise<void>((r) => { resolveOpen = r; });
+
+    const handle = await createPeerConnection(roomId, role, {
+      ...callbacks,
+      onOpen: (peerId) => { resolveOpen(); callbacks.onOpen(peerId); },
+    });
+
+    // Wait for data channel to open within timeout
+    const opened = await Promise.race([
+      openPromise.then(() => true as const),
+      new Promise<false>((r) => setTimeout(() => r(false), WEBRTC_TIMEOUT_MS)),
+    ]);
+
+    if (opened) {
+      dlog('transport: webrtc');
+      return handle;
+    }
+
+    dlog('transport: webrtc timeout, falling back to relay');
+    handle.leave();
+  } catch (e) {
+    dlog(`transport: webrtc failed (${e}), falling back to relay`);
+  }
+
+  return createRelayConnection(roomId, role, callbacks);
+}
+
+/** Create a peer connection (WebRTC or relay fallback) and return typed action channels. */
 export async function createOnlineRoom(
   roomId: string,
   role: 'host' | 'guest',
@@ -72,7 +130,7 @@ export async function createOnlineRoom(
 
   const receivers = new Map<string, (data: unknown, peerId: string) => void>();
 
-  const handle = await createPeerConnection(roomId, role, {
+  const handle = await connectTransport(roomId, role, {
     onOpen: onPeerJoin,
     onClose: onPeerLeave,
     onReconnecting: onPeerReconnecting,

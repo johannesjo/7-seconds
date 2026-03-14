@@ -1,5 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-import { SUPABASE_URL, SUPABASE_KEY, generateRoomId } from './online';
+import { getSupabaseClient, generateRoomId } from './online';
 import { dlog } from './online-debug';
 
 const SEEK_STALE_MS = 10_000;
@@ -37,7 +36,7 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
   // localStorage is shared across tabs, so two tabs on the same device would
   // have identical IDs and silently filter each other's seek messages.
   const seekerId = crypto.randomUUID();
-  const client = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const client = getSupabaseClient();
   const channel = client.channel('matchmaking-lobby', { config: { broadcast: { self: false } } });
 
   let resolved = false;
@@ -50,7 +49,7 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
     if (seekInterval) { clearInterval(seekInterval); seekInterval = null; }
     if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
     channel.send({ type: 'broadcast', event: 'lobby', payload: { type: 'leave', playerId: seekerId } as LeaveMessage });
-    client.removeAllChannels();
+    client.removeChannel(channel);
   };
 
   const promise = new Promise<MatchResult>((resolve, reject) => {
