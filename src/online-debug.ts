@@ -112,7 +112,6 @@ export async function testSupabaseRealtime(_appId: string, _supabaseKey: string)
 
   dlog(`supabase: realtime test = ${result}`);
   client.removeChannel(chan);
-  client.removeAllChannels();
 }
 
 /** Parse a Phoenix/Supabase WS message and return a loggable summary. */

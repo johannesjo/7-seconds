@@ -936,6 +936,9 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       // Stop any previous guest engine
       stopGuestEngine();
 
+      // Clear stale sync hashes from previous round
+      pendingSyncHashes = [];
+
       // Create headless engine with no-op event handler (host is authoritative)
       guestEngine = new GameEngine(null, () => {}, {
         seed: data.seed,
