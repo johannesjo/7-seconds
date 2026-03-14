@@ -1,8 +1,9 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
-import { createArmy, createMissionArmy, snapshotToUnit, snapshotToProjectile } from './units';
+import { hashGameState } from './online-sync';
+import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
-import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, ReplayFrame, ReplayEvent, Team } from './types';
+import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team } from './types';
 import { ARMY_COMPOSITION, HORDE_MAX_WAVES } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy } from './horde';
 import { ReplayPlayer } from './replay';
@@ -12,7 +13,7 @@ import { OnlineGuest } from './online-guest';
 import { getJoinRoomId } from './online';
 import { findMatch } from './online-matchmaking';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
-import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData } from './online-types';
+import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineFrameData, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash } from './online-types';
 import { PathDrawer } from './path-drawer';
 import { recordWin, recordLoss, getScore, getOverallScore } from './online-score';
 import { requestNotificationPermission, notify } from './notify';
@@ -116,12 +117,13 @@ let guestPathDrawer: PathDrawer | null = null;
 let guestUnits: Unit[] = [];
 let guestElevationZones: ElevationZone[] = [];
 let guestObstacles: Obstacle[] = [];
-let guestReplayFrames: ReplayFrame[] = [];
-let guestReplayEvents: ReplayEvent[] = [];
-let guestReplayFrameIndex = 0;
 let opponentPlayerId: string | null = null;
 let localRematchRequested = false;
 let cancelMatchmaking: (() => void) | null = null;
+let guestEngine: GameEngine | null = null;
+let guestLastGameState: OnlineGameState | null = null;
+let guestEffectIndex = 0;
+let pendingSyncHash: OnlineSyncHash | null = null;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -201,6 +203,11 @@ function onGameEvent(
   }
 
   if (event === 'update' && engine) {
+    // Host: periodically send sync hash to guest
+    if (onlineActive && onlineRole === 'host') {
+      hostSendSyncHash();
+    }
+
     const counts = engine.getAliveCount();
     blueCountEl.textContent = `Blue: ${counts.blue}`;
     redCountEl.textContent = `Red: ${counts.red}`;
@@ -627,6 +634,8 @@ newBattleBtn.addEventListener('click', () => {
   onlineHost = null;
   onlineGuest?.destroy();
   onlineGuest = null;
+  stopGuestEngine();
+  guestLastGameState = null;
   onlineActive = false;
   onlineRole = null;
   opponentPlayerId = null;
@@ -702,6 +711,10 @@ function startOnlineRematch(): void {
   startOnlineHostGame();
 }
 
+/** Track the last hash tick sent so we send once per sync interval. */
+let hostLastHashTick = -1;
+const SYNC_INTERVAL = 60; // send hash every 60 simulation ticks (1 second)
+
 function startOnlineHostGame(): void {
   lastReplayData = null;
   engine?.stop();
@@ -709,12 +722,10 @@ function startOnlineHostGame(): void {
   renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
   renderer!.effects?.clear();
   renderer!.clearDyingUnits();
+  hostLastHashTick = -1;
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: false,
     onlineHost: true,
-    onFrame(frame: OnlineFrameData) {
-      onlineHost?.sendFrame(frame);
-    },
     onPhaseChange(phase: TurnPhase) {
       let onlinePhase: OnlinePhase;
       if (phase === 'cover' || phase === 'red-planning') {
@@ -725,6 +736,14 @@ function startOnlineHostGame(): void {
         if (engine) onlineHost?.sendGameState(engine.getOnlineGameState());
       } else if (phase === 'playing') {
         onlinePhase = 'playing';
+        // Send blue waypoints + seed to guest for lockstep simulation
+        if (engine && onlineHost) {
+          const blueUnits = engine.getUnits().filter(u => u.team === 'blue');
+          onlineHost.sendWaypoints({
+            bluePaths: blueUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] })),
+            seed: engine.getSeed(),
+          });
+        }
       } else {
         onlinePhase = 'round-end';
       }
@@ -737,7 +756,66 @@ function startOnlineHostGame(): void {
   speedToggle.textContent = '3x';
   roundCounterEl.textContent = 'Round 1';
   engine.startBattle();
-  onlineHost?.sendGameState(engine.getOnlineGameState());
+  // Game state is already sent by the onPhaseChange('blue-planning') callback
+  // inside startBattle(). Do NOT send it again here — a duplicate would replace
+  // guestUnits on the guest side after PathDrawer already references them,
+  // causing drawn waypoints to be lost.
+}
+
+/** Called from host's game update loop to periodically send sync hashes. */
+function hostSendSyncHash(): void {
+  if (!engine || !onlineHost) return;
+  const tick = engine.getSimulationTick();
+  if (tick > 0 && tick % SYNC_INTERVAL === 0 && tick !== hostLastHashTick) {
+    hostLastHashTick = tick;
+    const hash = hashGameState(engine.getUnits());
+    onlineHost.sendSyncHash({ tick, hash });
+  }
+}
+
+/** Guest ticker callback — drives headless engine and renders its state. */
+function guestTickCallback(ticker: { deltaMS: number }): void {
+  if (!guestEngine || !renderer) return;
+  guestEngine.externalTick(ticker.deltaMS);
+
+  const units = guestEngine.getUnits();
+  const dt = ticker.deltaMS / 1000;
+  renderer.renderUnits(units, dt, undefined, guestEngine.phase === 'playing');
+  renderer.renderProjectiles(guestEngine.getProjectiles());
+
+  // Dispatch visual effects from engine replay events
+  const { events, nextIndex } = guestEngine.getReplayEventsSince(guestEffectIndex);
+  if (events.length > 0) {
+    renderer.effects?.dispatchEvents(events);
+    guestEffectIndex = nextIndex;
+  }
+  renderer.effects?.update(dt);
+
+  // Check queued sync hash when guest reaches the target tick
+  if (pendingSyncHash && guestEngine.getSimulationTick() >= pendingSyncHash.tick) {
+    const guestHash = hashGameState(guestEngine.getUnits());
+    if (guestHash !== pendingSyncHash.hash) {
+      console.warn(`[lockstep] desync at tick ${pendingSyncHash.tick}: host=${pendingSyncHash.hash.toString(16)} guest=${guestHash.toString(16)}`);
+    }
+    pendingSyncHash = null;
+  }
+
+  // Update HUD
+  if (guestEngine.phase === 'playing') {
+    const counts = guestEngine.getAliveCount();
+    blueCountEl.textContent = `Blue: ${counts.blue}`;
+    redCountEl.textContent = `Red: ${counts.red}`;
+  }
+}
+
+function stopGuestEngine(): void {
+  if (guestEngine) {
+    guestEngine.stop();
+    guestEngine = null;
+  }
+  renderer?.ticker.remove(guestTickCallback);
+  renderer?.renderProjectiles([]);
+  pendingSyncHash = null;
 }
 
 async function startOnlineGuestMode(roomId: string): Promise<void> {
@@ -763,7 +841,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         // Show reconnecting status — don't kill the game yet
         setOnlineStatus('Reconnecting...', true);
       } else if (state === 'disconnected') {
-        // Show disconnect on result screen so player can go back
+        stopGuestEngine();
         planningOverlay.classList.remove('active');
         confirmBtn.classList.remove('active');
         winnerTextEl.innerHTML = 'Opponent Disconnected';
@@ -782,50 +860,24 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
       onlineLobby.style.display = 'none';
       document.body.classList.toggle('day-mode', dayModeCb.checked);
       renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
-      // Adapt to host's map size — scales stage, adds black letterbox bars
-      // Called after setTheme so background grid uses correct theme colors
       renderer!.adaptToRemoteMap(state.mapWidth, state.mapHeight);
 
-      // Update units in-place to preserve PathDrawer references.
-      // If PathDrawer holds refs to guestUnits objects and we replace the
-      // array, drawn waypoints go to stale objects and get lost.
-      // On rematch/new game, unit IDs change — detect and recreate.
+      // Store state for headless engine initialization
+      guestLastGameState = state;
       guestElevationZones = state.elevationZones;
       guestObstacles = state.obstacles;
+
+      // Update units in-place to preserve PathDrawer references.
+      // On rematch/new game, unit IDs change — detect and recreate.
       const idsMatch = guestUnits.length === state.units.length
         && state.units.every(su => guestUnits.some(gu => gu.id === su.id));
       if (guestUnits.length === 0 || !idsMatch) {
-        // New game — reset replay buffer and clear effects
-        guestReplayFrames = [];
-        guestReplayEvents = [];
-        guestReplayFrameIndex = 0;
-        renderer!.effects?.clear();
         // First state or new game — create unit objects
-        guestUnits = state.units.map(u => ({
-          id: u.id,
-          type: u.type,
-          team: u.team,
-          pos: { x: u.x, y: u.y },
-          vel: { x: 0, y: 0 },
-          gunAngle: u.gunAngle,
-          hp: u.hp,
-          maxHp: u.maxHp,
-          alive: true,
-          radius: u.radius,
-          speed: u.speed,
-          damage: 0,
-          range: u.range,
-          moveTarget: null,
-          waypoints: [],
-          attackTargetId: null,
-          fireCooldown: 0,
-          fireTimer: 0,
-          projectileSpeed: 0,
-          projectileRadius: 0,
-          turnSpeed: 0,
-        } as Unit));
+        renderer!.effects?.clear();
+        renderer!.clearDyingUnits();
+        guestUnits = state.units.map(u => createUnitFromState(u));
       } else {
-        // Subsequent states — update existing objects in-place
+        // Same game, updated positions — update in-place to keep PathDrawer refs
         for (const su of state.units) {
           const existing = guestUnits.find(u => u.id === su.id);
           if (existing) {
@@ -842,7 +894,6 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         }
       }
 
-      renderer!.clearDyingUnits();
       renderer!.renderElevationZones(state.elevationZones);
       renderer!.renderObstacles(state.obstacles);
       renderer!.renderUnits(guestUnits);
@@ -852,8 +903,11 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
 
     onPhaseChange(phase: OnlinePhase) {
       if (phase === 'blue-planning') {
+        // Stop previous round's engine so its stale unit positions
+        // don't overwrite the fresh guestUnits from onGameState
+        stopGuestEngine();
+
         notify('7 Seconds', "It's your turn to plan!");
-        // Both players plan simultaneously — guest draws red paths right away
         guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
         guestPathDrawer.enable('red', guestUnits, guestElevationZones);
         planningLabel.textContent = 'Your Planning';
@@ -863,9 +917,7 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         battleHud.style.display = 'none';
       } else if (phase === 'red-planning') {
         // Host confirmed but guest may still be planning — no change needed
-        // (guest is already drawing, or already submitted)
       } else if (phase === 'playing') {
-        // Clean up any remaining path drawer if guest was slow
         if (guestPathDrawer) {
           guestPathDrawer.destroy();
           guestPathDrawer = null;
@@ -873,49 +925,53 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         planningOverlay.classList.remove('active');
         confirmBtn.classList.remove('active');
         battleHud.style.display = '';
+        // Simulation start is triggered by onWaypoints, not by phase change
       }
     },
 
-    onFrame(frame: OnlineFrameData) {
-      // Buffer frame for replay
-      guestReplayFrames.push({ units: frame.units, projectiles: frame.projectiles });
-      for (const event of frame.events) {
-        guestReplayEvents.push({ ...event, frame: guestReplayFrameIndex });
-      }
-      guestReplayFrameIndex++;
+    onWaypoints(data: OnlineWaypointData) {
+      if (!guestLastGameState) return;
 
-      const units = frame.units.map(snapshotToUnit);
-      const projectiles = frame.projectiles.map(snapshotToProjectile);
+      // Stop any previous guest engine
+      stopGuestEngine();
 
-      renderer!.renderUnits(units, 1 / 60);
-      renderer!.renderProjectiles(projectiles);
+      // Create headless engine with no-op event handler (host is authoritative)
+      guestEngine = new GameEngine(null, () => {}, {
+        seed: data.seed,
+      });
 
-      // Tick effects so particles animate (blood, muzzle flash, kill text)
-      renderer!.effects?.update(1 / 60);
+      // Load the game state and apply waypoints from both sides
+      guestEngine.loadOnlineGameState(guestLastGameState);
+      guestEngine.setBluePaths(data.bluePaths);
 
-      // Trigger effects for events (match host logic)
-      renderer!.effects?.dispatchEvents(frame.events);
+      // Apply guest's red paths (from guestUnits which had paths drawn on them)
+      const redPaths = guestUnits
+        .filter(u => u.team === 'red')
+        .map(u => ({ unitId: u.id, waypoints: [...u.waypoints] }));
+      guestEngine.setRedPaths(redPaths);
 
-      // Update round timer
-      const timeLeft = frame.timeLeft;
-      roundTimerEl.textContent = `${Math.ceil(timeLeft)}s`;
-      if (timeLeft <= 3) {
-        roundTimerEl.style.color = dayModeCb.checked ? '#aa3333' : '#ff4444';
-        const pulse = 1 + 0.1 * Math.sin(Date.now() / 150);
-        roundTimerEl.style.transform = `scale(${pulse})`;
-      } else {
-        roundTimerEl.style.color = '';
-        roundTimerEl.style.transform = '';
-      }
+      // Start simulation directly — bypasses planning phase machinery
+      guestEngine.startPlaying();
+      guestEffectIndex = 0;
 
-      // Update HUD counts
-      const blueAlive = units.filter(u => u.team === 'blue' && u.alive).length;
-      const redAlive = units.filter(u => u.team === 'red' && u.alive).length;
-      blueCountEl.textContent = `Blue: ${blueAlive}`;
-      redCountEl.textContent = `Red: ${redAlive}`;
+      // Drive the headless engine from the renderer's ticker
+      renderer!.ticker.add(guestTickCallback);
+    },
+
+    onSyncHash(data: OnlineSyncHash) {
+      // Queue the hash — it will be checked in guestTickCallback when we reach that tick
+      pendingSyncHash = data;
+    },
+
+    onFrame(_frame: OnlineFrameData) {
+      // No-op in lockstep mode — guest simulates locally
     },
 
     onResult(result: OnlineRoundResult) {
+      // Capture replay data before stopping the engine
+      lastReplayData = guestEngine?.getReplayData() ?? null;
+      stopGuestEngine();
+
       // Record score — guest is red (skip draws)
       if (opponentPlayerId) {
         if (result.winner === 'red') recordWin(opponentPlayerId);
@@ -937,14 +993,6 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         statsLines.push(`Score: ${score.wins} - ${score.losses}`);
       }
       resultStatsEl.innerHTML = statsLines.join('<br>');
-
-      // Build replay data from buffered frames
-      lastReplayData = {
-        frames: guestReplayFrames,
-        events: guestReplayEvents,
-        obstacles: guestObstacles,
-        elevationZones: guestElevationZones,
-      };
 
       localRematchRequested = false;
       rematchBtn.textContent = 'Rematch';

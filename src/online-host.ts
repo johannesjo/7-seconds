@@ -9,6 +9,8 @@ import type {
   OnlineRoundResult,
   OnlineConnectionState,
   OnlineSignal,
+  OnlineWaypointData,
+  OnlineSyncHash,
 } from './online-types';
 import { isValidPlayerId } from './online-score';
 
@@ -133,6 +135,14 @@ export class OnlineHost {
 
   sendFrame(frame: OnlineFrameData): void {
     this.connection?.frame[0](frame);
+  }
+
+  sendWaypoints(data: OnlineWaypointData): void {
+    this.connection?.waypoints[0](data);
+  }
+
+  sendSyncHash(data: OnlineSyncHash): void {
+    this.connection?.sync[0](data);
   }
 
   sendResult(result: OnlineRoundResult): void {

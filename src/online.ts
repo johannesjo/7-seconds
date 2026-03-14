@@ -1,4 +1,4 @@
-import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal } from './online-types';
+import type { OnlineGameState, OnlinePhase, OnlinePathData, OnlineFrameData, OnlineRoundResult, OnlineSignal, OnlineWaypointData, OnlineSyncHash } from './online-types';
 import { dlog } from './online-debug';
 import { createPeerConnection } from './online-peer';
 
@@ -54,6 +54,8 @@ export interface OnlineConnection {
   frame: ActionPair<OnlineFrameData>;
   result: ActionPair<OnlineRoundResult>;
   signal: ActionPair<OnlineSignal>;
+  waypoints: ActionPair<OnlineWaypointData>;
+  sync: ActionPair<OnlineSyncHash>;
   getPeers: () => Record<string, RTCPeerConnection>;
   leave: () => void;
 }
@@ -94,6 +96,8 @@ export async function createOnlineRoom(
     frame: makeAction<OnlineFrameData>('frame'),
     result: makeAction<OnlineRoundResult>('result'),
     signal: makeAction<OnlineSignal>('signal'),
+    waypoints: makeAction<OnlineWaypointData>('waypoints'),
+    sync: makeAction<OnlineSyncHash>('sync'),
     getPeers: () => handle.getPeers(),
     leave: () => handle.leave(),
   };

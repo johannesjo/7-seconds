@@ -8,6 +8,8 @@ import type {
   OnlinePathData,
   OnlineRoundResult,
   OnlineSignal,
+  OnlineWaypointData,
+  OnlineSyncHash,
 } from './online-types';
 import { isValidPlayerId } from './online-score';
 
@@ -16,6 +18,8 @@ interface OnlineGuestCallbacks {
   onGameState: (state: OnlineGameState) => void;
   onPhaseChange: (phase: OnlinePhase) => void;
   onFrame: (frame: OnlineFrameData) => void;
+  onWaypoints: (data: OnlineWaypointData) => void;
+  onSyncHash: (data: OnlineSyncHash) => void;
   onResult: (result: OnlineRoundResult) => void;
   onHostRematchRequested: () => void;
   onHostIdentity: (playerId: string) => void;
@@ -97,6 +101,8 @@ export class OnlineGuest {
     const [, receivePhase] = this.connection.phase;
     const [, receiveFrame] = this.connection.frame;
     const [, receiveResult] = this.connection.result;
+    const [, receiveWaypoints] = this.connection.waypoints;
+    const [, receiveSync] = this.connection.sync;
 
     receiveState((state, peerId) => {
       if (peerId !== this.hostPeerId) return;
@@ -109,6 +115,14 @@ export class OnlineGuest {
     receiveFrame((frame, peerId) => {
       if (peerId !== this.hostPeerId) return;
       this.callbacks.onFrame(frame);
+    });
+    receiveWaypoints((data, peerId) => {
+      if (peerId !== this.hostPeerId) return;
+      this.callbacks.onWaypoints(data);
+    });
+    receiveSync((data, peerId) => {
+      if (peerId !== this.hostPeerId) return;
+      this.callbacks.onSyncHash(data);
     });
     receiveResult((result, peerId) => {
       if (peerId !== this.hostPeerId) return;

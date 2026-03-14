@@ -168,6 +168,18 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
   };
 }
 
+/** Create a Unit from an online game state snapshot (shared by engine + guest). */
+export function createUnitFromState(s: { id: string; type: UnitType; team: Team; x: number; y: number; hp: number; maxHp: number; radius: number; speed: number; range: number; gunAngle: number }): Unit {
+  const unit = createUnit(s.id, s.type, s.team, { x: s.x, y: s.y });
+  unit.hp = s.hp;
+  unit.maxHp = s.maxHp;
+  unit.gunAngle = s.gunAngle;
+  unit.alive = s.hp > 0;
+  unit.speed = s.speed;
+  unit.range = s.range;
+  return unit;
+}
+
 /** If pos is inside any block, nudge it to the nearest edge + padding. */
 export function nudgeOutOfBlocks(pos: Vec2, blocks: Obstacle[], padding = 4): Vec2 {
   for (const b of blocks) {
@@ -441,7 +453,7 @@ function pushOutOfObstacles(pos: Vec2, radius: number, obstacles: Obstacle[]): v
   }
 }
 
-export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits: Unit[] = []): void {
+export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits: Unit[] = [], rng?: () => number): void {
   // Apply knockback velocity (decays via friction)
   if (unit.knockbackVel) {
     const kbSpeed = Math.sqrt(unit.knockbackVel.x ** 2 + unit.knockbackVel.y ** 2);
@@ -558,7 +570,7 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
 
   // Zombie shamble: random perpendicular wobble
   if (unit.type === 'zombie') {
-    const wobble = (Math.random() - 0.5) * 1.4;
+    const wobble = ((rng ?? Math.random)() - 0.5) * 1.4;
     dirX += -dirY * wobble;
     dirY += dirX * wobble;
     const len = Math.sqrt(dirX * dirX + dirY * dirY);

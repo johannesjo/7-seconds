@@ -33,6 +33,18 @@ export interface OnlineFrameData {
   timeLeft: number;
 }
 
+/** Host sends blue waypoints + PRNG seed so both peers can simulate identically. */
+export interface OnlineWaypointData {
+  bluePaths: { unitId: string; waypoints: Vec2[] }[];
+  seed: number;
+}
+
+/** Periodic state hash for desync detection (sent every 60 simulation ticks). */
+export interface OnlineSyncHash {
+  tick: number;
+  hash: number;
+}
+
 export interface OnlineRoundResult {
   winner: Team;
   blueAlive: number;
