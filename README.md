@@ -6,9 +6,16 @@
 
 <p align="center">A tactical micro-strategy game. Draw paths for your units, then watch them fight.</p>
 
-<p align="center">
-  <a href="store-assets/desktop-vid.webm">Desktop gameplay video</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="store-assets/mobile-vid.webm">Mobile gameplay video</a>
-</p>
+<table>
+<tr>
+<td align="center"><strong>Desktop</strong></td>
+<td align="center"><strong>Mobile</strong></td>
+</tr>
+<tr>
+<td><video src="store-assets/desktop-vid.webm" autoplay loop muted playsinline></video></td>
+<td><video src="store-assets/mobile-vid.webm" autoplay loop muted playsinline></video></td>
+</tr>
+</table>
 
 ## How It Works
 
@@ -40,14 +47,14 @@ Terrain matters: elevation grants range bonuses, obstacles block movement and li
 
 | Menu | Planning | Battle | Result |
 |------|----------|--------|--------|
-| ![Menu](screenshots/01-menu.png) | ![Planning](screenshots/02-planning.png) | ![Battle](screenshots/03-battle.png) | ![Result](screenshots/04-result.png) |
+| ![Menu](store-assets/01-menu.png) | ![Planning](store-assets/02-planning.png) | ![Battle](store-assets/03-battle.png) | ![Result](store-assets/04-result.png) |
 
 <details>
 <summary>Night mode</summary>
 
 | Planning | Battle |
 |----------|--------|
-| ![Night planning](screenshots/06-battle-night.png) | ![Night battle](screenshots/07-battle-night.png) |
+| ![Night planning](store-assets/06-battle-night.png) | ![Night battle](store-assets/07-battle-night.png) |
 
 </details>
 
