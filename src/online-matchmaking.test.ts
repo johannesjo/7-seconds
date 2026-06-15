@@ -210,6 +210,53 @@ describe('findMatch', () => {
     );
   });
 
+  it('with 3 seekers, the lowest hosts its immediate neighbor (not the highest)', async () => {
+    crypto.randomUUID = () => 'aaaa-0000' as `${string}-${string}-${string}-${string}-${string}`;
+
+    const { promise } = findMatch();
+    onSubscribe?.('SUBSCRIBED');
+    await flushMicrotasks();
+
+    mockPresenceState.mockReturnValue({
+      'bbbb-1111': [{ seekerId: 'bbbb-1111', status: 'seeking' }],
+      'cccc-2222': [{ seekerId: 'cccc-2222', status: 'seeking' }],
+    });
+    onPresenceSync?.();
+
+    const result = await promise;
+    expect(result.role).toBe('host');
+    // Must pair with the adjacent seeker, not skip to the highest id
+    expect(mockTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'hosting', guestId: 'bbbb-1111' }),
+    );
+  });
+
+  it('a middle seeker does not host (avoids double-pairing in a 3-way race)', async () => {
+    crypto.randomUUID = () => 'bbbb-1111' as `${string}-${string}-${string}-${string}-${string}`;
+
+    const { promise, cancel } = findMatch();
+    onSubscribe?.('SUBSCRIBED');
+    await flushMicrotasks();
+
+    // Both a lower and a higher seeker are present. The lower one (aaaa) should
+    // host us; we must NOT grab cccc as a guest (the old "lower id hosts" bug).
+    mockPresenceState.mockReturnValue({
+      'aaaa-0000': [{ seekerId: 'aaaa-0000', status: 'seeking' }],
+      'cccc-2222': [{ seekerId: 'cccc-2222', status: 'seeking' }],
+    });
+    onPresenceSync?.();
+
+    const pending = Symbol('pending');
+    const raceResult = await Promise.race([
+      promise.then(() => 'resolved' as const).catch(() => 'rejected' as const),
+      Promise.resolve(pending),
+    ]);
+    expect(raceResult).toBe(pending);
+
+    cancel();
+    promise.catch(() => {});
+  });
+
   it('does not match with a hosting peer meant for someone else', async () => {
     crypto.randomUUID = () => 'bbbb-1111' as `${string}-${string}-${string}-${string}-${string}`;
 
