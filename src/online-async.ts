@@ -223,10 +223,17 @@ export async function revealTurn(
 }
 
 /** Persist the result of resolving a round: advance the snapshot/round, and
- *  set the match seed on round 1 and the final status when the game is over. */
+ *  set the match seed on round 1 and the final status when the game is over.
+ *
+ *  `expectedRound` applies optimistic concurrency — the update only lands while
+ *  the row is still on that round, so a late or duplicate writer (both players
+ *  resolve independently) can't clobber progress already made. */
 export async function persistRoundResult(
   id: string,
-  update: { latestState: OnlineGameState; currentRound: number; seed?: number; status?: MatchStatus },
+  update: {
+    latestState: OnlineGameState; currentRound: number;
+    seed?: number; status?: MatchStatus; expectedRound?: number;
+  },
 ): Promise<boolean> {
   const client = getSupabaseClient();
   const patch: Record<string, unknown> = {
@@ -236,7 +243,10 @@ export async function persistRoundResult(
   if (update.seed != null) patch.seed = update.seed;
   if (update.status) patch.status = update.status;
 
-  const { error } = await client.from('matches').update(patch).eq('id', id);
+  let query = client.from('matches').update(patch).eq('id', id);
+  if (update.expectedRound != null) query = query.eq('current_round', update.expectedRound);
+
+  const { error } = await query;
   if (error) {
     dlog(`async: persistRoundResult ${id} failed: ${error.message}`);
     return false;

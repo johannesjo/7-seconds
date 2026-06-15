@@ -70,6 +70,20 @@ as $$
   );
 $$;
 
+-- Which team a player controls in a match: host=blue, guest=red, else null.
+create or replace function public.team_for_player(m_id text, p uuid)
+returns text
+language sql
+security definer
+set search_path = public
+as $$
+  select case
+    when (select host_player  from public.matches where id = m_id) = p then 'blue'
+    when (select guest_player from public.matches where id = m_id) = p then 'red'
+    else null
+  end;
+$$;
+
 -- matches ----------------------------------------------------------------
 
 -- Read: participants, plus open matches waiting for a guest (so a friend can
@@ -100,10 +114,11 @@ create policy matches_update on public.matches
 create policy turns_select on public.turns
   for select using (public.is_match_participant(match_id));
 
--- Commit: insert your own row for a match you participate in.
+-- Commit: insert your own row, and only for the team you actually control —
+-- prevents squatting the opponent's (match_id, round, team) slot.
 create policy turns_insert on public.turns
   for insert with check (
-    player = auth.uid() and public.is_match_participant(match_id)
+    player = auth.uid() and team = public.team_for_player(match_id, auth.uid())
   );
 
 -- Reveal: update only your own row.
@@ -126,3 +141,37 @@ $$;
 drop trigger if exists matches_touch on public.matches;
 create trigger matches_touch before update on public.matches
   for each row execute function public.touch_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Immutability guard
+--
+-- RLS is row-level, so matches_update can't restrict *which* columns change.
+-- This makes the cheap-to-protect fields tamper-proof: identity is fixed, the
+-- starting board can't be rewritten, and the seed is write-once (so a client
+-- can't grind/replace the RNG). status / latest_state / current_round remain
+-- client-writable — that's the documented friends-only trust model (no server
+-- referee re-simulates the match).
+-- ---------------------------------------------------------------------------
+
+create or replace function public.matches_guard()
+returns trigger language plpgsql as $$
+begin
+  if NEW.host_player is distinct from OLD.host_player then
+    raise exception 'host_player is immutable';
+  end if;
+  if OLD.guest_player is not null and NEW.guest_player is distinct from OLD.guest_player then
+    raise exception 'guest_player is set-once';
+  end if;
+  if NEW.initial_state is distinct from OLD.initial_state then
+    raise exception 'initial_state is immutable';
+  end if;
+  if OLD.seed is not null and NEW.seed is distinct from OLD.seed then
+    raise exception 'seed is write-once';
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists matches_guard on public.matches;
+create trigger matches_guard before update on public.matches
+  for each row execute function public.matches_guard();

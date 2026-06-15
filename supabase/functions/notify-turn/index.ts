@@ -42,8 +42,30 @@ async function sendEmail(to: string, link: string): Promise<void> {
   });
 }
 
-async function sendPush(subscription: unknown, link: string): Promise<void> {
+// Only deliver to well-known push services — the endpoint comes from a
+// user-controlled `players.web_push` row, so an unconstrained fetch would be an
+// SSRF vector from the service-role context.
+const PUSH_HOST_ALLOWLIST = [
+  'fcm.googleapis.com',
+  'push.services.mozilla.com',
+  'notify.windows.com',
+  'push.apple.com',
+];
+
+function isAllowedPushEndpoint(endpoint: unknown): boolean {
+  if (typeof endpoint !== 'string') return false;
+  try {
+    const u = new URL(endpoint);
+    if (u.protocol !== 'https:') return false;
+    return PUSH_HOST_ALLOWLIST.some((h) => u.hostname === h || u.hostname.endsWith('.' + h));
+  } catch {
+    return false;
+  }
+}
+
+async function sendPush(subscription: { endpoint?: string } | null, link: string): Promise<void> {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return;
+  if (!subscription || !isAllowedPushEndpoint(subscription.endpoint)) return;
   await webpush.sendNotification(
     subscription as webpush.PushSubscription,
     JSON.stringify({ title: '7 Seconds', body: "It's your turn to plan!", url: link }),
@@ -76,7 +98,7 @@ Deno.serve(async (req) => {
       .eq('id', opponent).maybeSingle();
     if (!contact) return new Response('no contact', { status: 200 });
 
-    const link = `${APP_URL}?amatch=${match_id}`;
+    const link = `${APP_URL}?amatch=${encodeURIComponent(match_id)}`;
     const jobs: Promise<unknown>[] = [];
     if (contact.notify_email && contact.email) jobs.push(sendEmail(contact.email, link).catch(() => {}));
     if (contact.notify_push && contact.web_push) jobs.push(sendPush(contact.web_push, link).catch(() => {}));

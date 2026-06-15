@@ -779,6 +779,34 @@ export class GameEngine {
     return state;
   }
 
+  /** Deterministically resolve one async round to its authoritative end state.
+   *  Runs the fixed-timestep simulation in a tight loop — stopping when a side
+   *  is eliminated or `maxTicks` is reached — so the result is independent of
+   *  frame pacing and identical on every client. The animated playback shown to
+   *  the player is purely cosmetic; THIS is what gets persisted. */
+  static resolveRound(
+    startState: OnlineGameState,
+    bluePaths: { unitId: string; waypoints: Vec2[] }[],
+    redPaths: { unitId: string; waypoints: Vec2[] }[],
+    seed: number,
+    maxTicks: number,
+  ): { endState: OnlineGameState; gameOver: boolean } {
+    const e = new GameEngine(null, () => {}, { seed });
+    e.loadOnlineGameState(startState);
+    e.setBluePaths(bluePaths);
+    e.setRedPaths(redPaths);
+    e.startPlaying();
+    while (e.simulationTick < maxTicks) {
+      e.simulationStep(FIXED_DT);
+      const blueAlive = e.units.some(u => u.alive && u.team === 'blue');
+      const redAlive = e.units.some(u => u.alive && u.team === 'red');
+      if (!blueAlive || !redAlive) break;
+    }
+    const blueAlive = e.units.some(u => u.alive && u.team === 'blue');
+    const redAlive = e.units.some(u => u.alive && u.team === 'red');
+    return { endState: e.getOnlineGameState(), gameOver: !blueAlive || !redAlive };
+  }
+
   stop(): void {
     this.running = false;
     this.renderer?.ticker.remove(this.tick, this);

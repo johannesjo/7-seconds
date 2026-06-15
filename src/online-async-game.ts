@@ -63,7 +63,7 @@ export interface AsyncIO {
   fetchTurns(id: string): Promise<RoundTurn[]>;
   commit(id: string, round: number, team: AsyncTeam, paths: PathList): Promise<boolean>;
   reveal(id: string, round: number, team: AsyncTeam, paths: PathList): Promise<boolean>;
-  persist(id: string, update: { latestState: OnlineGameState; currentRound: number; seed?: number; status?: MatchStatus }): Promise<boolean>;
+  persist(id: string, update: { latestState: OnlineGameState; currentRound: number; seed?: number; status?: MatchStatus; expectedRound?: number }): Promise<boolean>;
   subscribe(id: string, onChange: () => void): () => void;
 }
 
@@ -100,6 +100,9 @@ export class AsyncGameController {
   private dirty = false;
   /** Round currently handed to the UI for playback, so we animate it once. */
   private playingRound: number | null = null;
+  /** Seed used to resolve the round currently being played (persisted atomically
+   *  with the round-1 advance so later rounds reuse it). */
+  private playingSeed: number | null = null;
   private destroyed = false;
 
   constructor(id: string, hooks: AsyncGameHooks, opts: AsyncGameOptions = {}) {
@@ -169,10 +172,15 @@ export class AsyncGameController {
     const status: MatchStatus | undefined = gameOver
       ? this.winnerStatus(endState)
       : undefined;
+    // Persist the derived seed once (round 1), atomically with the advance, and
+    // guard on the current round so a late/duplicate writer can't clobber.
+    const seed = this.match.seed == null ? (this.playingSeed ?? undefined) : undefined;
     await this.io.persist(this.id, {
       latestState: endState,
       currentRound: round + 1,
+      seed,
       status,
+      expectedRound: round,
     });
     this.stash.clear(this.stashKey(round));
     await this.refresh();
@@ -259,13 +267,12 @@ export class AsyncGameController {
       return;
     }
 
+    // Round 1 derives the seed from both blind commits (anti-grind); later
+    // rounds reuse the stored match seed. The seed is persisted atomically with
+    // the round-1 advance in onRoundPlayed — not here — to avoid a write race.
     const seed = match.seed ?? deriveMatchSeed(this.id, hashPaths(blue.paths), hashPaths(red.paths));
-    // Persist the derived seed once (round 1) so later rounds reuse it.
-    if (match.seed == null) {
-      void this.io.persist(this.id, { latestState: match.latestState, currentRound: round, seed });
-    }
-
     this.playingRound = round;
+    this.playingSeed = seed;
     this.hooks.onPlayRound({
       round,
       startState: match.latestState,

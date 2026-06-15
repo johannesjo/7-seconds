@@ -141,6 +141,9 @@ let asyncCurrentRound = 1;
 let asyncMatchEnded = false;
 /** Guards the per-round playback finish so it runs exactly once. */
 let asyncRoundFinished = false;
+/** Deterministic authoritative round result, computed up front (frame-rate
+ *  independent). The animated playback is cosmetic; this is what we persist. */
+let asyncResult: { endState: OnlineGameState; gameOver: boolean } | null = null;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -590,7 +593,7 @@ ctfPvpBtn.addEventListener('click', async () => {
 });
 
 confirmBtn.addEventListener('click', () => {
-  if (asyncController && guestPathDrawer) {
+  if (asyncController && !onlineActive && guestPathDrawer) {
     const myUnits = guestUnits.filter(u => u.team === asyncMyTeam);
     const paths: PathList = myUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] }));
     guestPathDrawer.destroy();
@@ -855,6 +858,7 @@ function stopGuestEngine(): void {
     guestEngine = null;
   }
   renderer?.ticker.remove(guestTickCallback);
+  renderer?.ticker.remove(asyncTickCallback);
   renderer?.renderProjectiles([]);
   pendingSyncHashes = [];
 }
@@ -1158,25 +1162,33 @@ function asyncTickCallback(ticker: { deltaMS: number }): void {
 
   if (asyncRoundFinished) return;
   const tick = guestEngine.getSimulationTick();
+  // The animation's end timing is cosmetic; the persisted result is the
+  // deterministic one computed in startAsyncRoundPlayback (frame-independent).
   if (asyncMatchEnded || tick >= ASYNC_ROUND_END_TICK) {
     asyncRoundFinished = true;
     renderer.ticker.remove(asyncTickCallback);
     lastReplayData = guestEngine.getReplayData() ?? lastReplayData;
-    const endState = guestEngine.getOnlineGameState();
-    const gameOver = asyncMatchEnded || counts.blue === 0 || counts.red === 0;
     const round = asyncCurrentRound;
+    const result = asyncResult;
     stopGuestEngine();
-    void asyncController?.onRoundPlayed(round, endState, gameOver);
+    if (result) void asyncController?.onRoundPlayed(round, result.endState, result.gameOver);
   }
 }
 
-/** Run a resolved round through the headless engine for both players to watch. */
+/** Run a resolved round: compute the authoritative outcome deterministically,
+ *  then animate the same round for the player to watch. */
 function startAsyncRoundPlayback(input: PlayRoundInput): void {
   stopGuestEngine();
   pendingSyncHashes = [];
   asyncMatchEnded = false;
   asyncRoundFinished = false;
 
+  // Authoritative, frame-rate-independent result — identical on every client.
+  asyncResult = GameEngine.resolveRound(
+    input.startState, input.bluePaths, input.redPaths, input.seed, ASYNC_ROUND_END_TICK,
+  );
+
+  // Cosmetic animated playback (its sampled end state is NOT persisted).
   guestEngine = new GameEngine(null, (type) => {
     if (type === 'end') asyncMatchEnded = true;
   }, { seed: input.seed });
