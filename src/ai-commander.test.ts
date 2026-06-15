@@ -71,6 +71,18 @@ describe('parseAiResponse', () => {
     expect(result).not.toBeNull();
     expect(result!.orders).toHaveLength(1);
   });
+
+  it('rejects non-finite move coordinates (NaN / Infinity)', () => {
+    const json = '{"orders": [{"id": "soldier_1", "move_to": [null, null]}]}';
+    // null serializes fine but is not a finite number
+    expect(parseAiResponse(json)).toBeNull();
+
+    // NaN/Infinity can't be expressed in JSON, so build the object directly
+    // and stringify to confirm the validation path rejects them.
+    const withNaN = { orders: [{ id: 's', move_to: [NaN, 5], attack: null }] };
+    // JSON.stringify turns NaN into null, which the validator rejects.
+    expect(parseAiResponse(JSON.stringify(withNaN))).toBeNull();
+  });
 });
 
 describe('fallbackOrders', () => {

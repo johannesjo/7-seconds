@@ -251,6 +251,16 @@ describe('recruit upgrade apply', () => {
     expect(result[1].team).toBe('blue');
     expect(result[1].alive).toBe(true);
   });
+
+  it('gives each recruit a unique id even when created back-to-back', () => {
+    const soldierRecruit = ALL_RECRUIT_UPGRADES.find(u => u.id === 'recruit_soldier')!;
+    let units: Unit[] = [createUnit('blue_soldier_0', 'soldier', 'blue', { x: 400, y: 600 })];
+    // Add several recruits within the same millisecond.
+    for (let i = 0; i < 5; i++) units = soldierRecruit.apply(units);
+
+    const ids = units.map(u => u.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
 
 describe('applyUpgradesToUnit', () => {

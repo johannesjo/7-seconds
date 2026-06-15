@@ -46,7 +46,9 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
       // can pair deterministically below.
       const seeking = new Set<string>([seekerId]);
       for (const presences of Object.values(state)) {
-        const p = presences[0] as Record<string, unknown>;
+        // Presence lists can be transiently empty during sync; skip those.
+        const p = presences[0] as Record<string, unknown> | undefined;
+        if (!p) continue;
         const peerId = p.seekerId as string;
         if (!peerId) continue;
 
@@ -73,7 +75,8 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
         const roomId = generateRoomId();
         dlog(`matchmaking: I am host, matched with ${guestId.slice(0, 8)}`);
         // Update presence so guest discovers the match
-        channel.track({ seekerId, status: 'hosting', roomId, guestId });
+        Promise.resolve(channel.track({ seekerId, status: 'hosting', roomId, guestId }))
+          .catch((e) => dlog(`matchmaking: track(hosting) failed: ${e}`));
         // Keep channel alive so guest receives the presence update
         setTimeout(cleanup, HOST_LINGER_MS);
         resolve({ role: 'host', roomId });

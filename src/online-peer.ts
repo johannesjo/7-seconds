@@ -383,6 +383,14 @@ export async function createPeerConnection(
       signal({ type: 'answer', sdp: lastAnswerSdp, peerId: localPeerId });
 
     } else if (msg.type === 'answer' && role === 'host' && pc) {
+      // Bind to the first guest that answers. Once paired, ignore answers from
+      // other peers (a second guest or a duplicate/late answer) so they can't
+      // hijack remotePeerId. During reconnection the same peer re-answers, so
+      // matching peerIds are still accepted.
+      if (remotePeerId && remotePeerId !== msg.peerId && !reconnecting) {
+        dlog(`ignoring answer from unexpected peer ${msg.peerId.slice(0, 8)}`);
+        return;
+      }
       remotePeerId = msg.peerId;
       try {
         await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
