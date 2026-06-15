@@ -157,19 +157,39 @@ changes — Postgres rows + Realtime instead of the WebRTC channel.
 | `src/online-auth.ts`          | anonymous auth (`ensureAuth`, `getAuthUserId`)            |
 | `src/online-async-core.ts`    | **pure** logic: path hashing, seed derivation, round state machine, verification (unit-tested) |
 | `src/online-async.ts`         | Supabase IO: create/join/load, commit, reveal, subscribe  |
-| `supabase/migrations/0001_*`  | schema + RLS                                              |
+| `src/online-async-game.ts`    | orchestration controller (commit→reveal→resolve→persist) |
+| `src/online-push.ts`          | client notification registration (email + Web Push)       |
+| `supabase/migrations/0001_*`  | matches/turns schema + RLS                                |
+| `supabase/migrations/0002_*`  | players table + RLS (notification contacts)               |
+| `supabase/functions/notify-turn` | Edge Function: "your turn" email + Web Push            |
 
 ## Phasing
 
 - **Phase 1 (this work):** anon auth, schema + RLS, `online-async` transport
   with commit–reveal, snapshot resume. Friend matches can span hours via
   in-app Realtime + manual resume. *No push notifications yet.*
-- **Phase 2:** server-initiated notifications to reach **absent** players —
-  net-new infra (FCM via `@capacitor/push-notifications` + `google-services.json`,
-  and/or email via a Supabase Edge Function). The existing `src/notify.ts` is
-  **local-only** and cannot wake a closed app, so this is genuinely new work.
+- **Phase 2 (implemented, pending deployment):** server-initiated "your turn"
+  notifications to reach **absent** players. A `players` table
+  (`supabase/migrations/0002_*`) stores an optional email and/or Web Push
+  subscription; the `notify-turn` Edge Function (`supabase/functions/notify-turn`)
+  fires on each commit via a Database Webhook and nudges the opponent if they
+  have not yet submitted the round. Client registration lives in
+  `src/online-push.ts`; `public/sw-notify.js` handles the `push` event. Email
+  works out of the box (Resend); Web Push needs a VAPID keypair
+  (`VAPID_PUBLIC_KEY` in `online-push.ts` + function secrets). Native Android
+  FCM is scaffolded in the schema (`players.fcm_token`) but still requires a
+  Firebase project + `@capacitor/push-notifications` — deferred.
 - **Phase 3:** a "your games" lobby for concurrent matches, turn expiry /
   auto-forfeit, and optional hardening of the reveal step.
+
+### Phase 2 deployment checklist
+
+1. Apply `supabase/migrations/0002_players_and_notifications.sql`.
+2. `supabase functions deploy notify-turn` and set its secrets (see the
+   migration header: `RESEND_API_KEY`, `NOTIFY_FROM_EMAIL`, and optionally
+   `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`).
+3. Add a Database Webhook on `public.turns` INSERT → the `notify-turn` function.
+4. For Web Push, set `VAPID_PUBLIC_KEY` in `src/online-push.ts` to the public key.
 
 ## Notes / non-goals
 

@@ -15,6 +15,7 @@ import { findMatch } from './online-matchmaking';
 import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
 import type { PathList } from './online-async-core';
 import { createAsyncMatch, getAsyncJoinId } from './online-async';
+import { registerTurnNotifications } from './online-push';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash } from './online-types';
 import { PathDrawer } from './path-drawer';
@@ -73,6 +74,9 @@ const exitGameBtn = document.getElementById('exit-game-btn')!;
 // Online lobby elements
 const onlineBtn = document.getElementById('online-btn')!;
 const onlineAsyncBtn = document.getElementById('online-async-btn')!;
+const asyncNotify = document.getElementById('async-notify')!;
+const asyncEmail = document.getElementById('async-email') as HTMLInputElement;
+const asyncNotifyBtn = document.getElementById('async-notify-btn')!;
 const onlineRandomBtn = document.getElementById('online-random-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
 const onlineStatus = document.getElementById('online-status')!;
@@ -1126,6 +1130,7 @@ function destroyAsync(): void {
   asyncController = null;
   renderer?.ticker.remove(asyncTickCallback);
   stopGuestEngine();
+  asyncNotify.style.display = 'none';
 }
 
 /** Ticker callback that animates a resolved async round headlessly and, once
@@ -1275,6 +1280,8 @@ async function startAsyncGame(roomId: string | null): Promise<void> {
   onlineShareContainer.style.display = 'none';
   onlineStatus.style.display = '';
   document.getElementById('online-record')!.style.display = 'none';
+  asyncNotify.style.display = 'flex';
+  void registerTurnNotifications();
 
   let id = roomId;
   if (!id) {
@@ -1327,6 +1334,15 @@ onlineBtn.addEventListener('click', async () => {
 onlineAsyncBtn.addEventListener('click', () => {
   requestNotificationPermission();
   void startAsyncGame(null);
+});
+
+// Async notification opt-in (email + web push)
+asyncNotifyBtn.addEventListener('click', async () => {
+  requestNotificationPermission();
+  asyncNotifyBtn.textContent = 'Saving...';
+  const ok = await registerTurnNotifications({ email: asyncEmail.value });
+  asyncNotifyBtn.textContent = ok ? "You'll be notified ✓" : 'Notifications unavailable';
+  setTimeout(() => { asyncNotifyBtn.textContent = 'Notify me'; }, 3000);
 });
 
 // Online vs Random — client-side matchmaking via Supabase Realtime
