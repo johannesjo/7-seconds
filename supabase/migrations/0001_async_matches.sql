@@ -43,8 +43,13 @@ create index if not exists matches_players_idx
   on public.matches(host_player, guest_player);
 
 -- Realtime: clients subscribe to Postgres changes on both tables.
-alter publication supabase_realtime add table public.matches;
-alter publication supabase_realtime add table public.turns;
+-- Guarded so re-running the migration doesn't error on "already a member".
+do $$ begin
+  alter publication supabase_realtime add table public.matches;
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.turns;
+exception when duplicate_object then null; end $$;
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security
@@ -88,6 +93,7 @@ $$;
 
 -- Read: participants, plus open matches waiting for a guest (so a friend can
 -- discover/join via the share link).
+drop policy if exists matches_select on public.matches;
 create policy matches_select on public.matches
   for select using (
     auth.uid() in (host_player, guest_player)
@@ -95,11 +101,13 @@ create policy matches_select on public.matches
   );
 
 -- Create: only as yourself, as the host.
+drop policy if exists matches_insert on public.matches;
 create policy matches_insert on public.matches
   for insert with check (host_player = auth.uid());
 
 -- Update: participants only. A guest may claim an open match; either
 -- participant may advance the match (snapshot / round / status).
+drop policy if exists matches_update on public.matches;
 create policy matches_update on public.matches
   for update using (
     auth.uid() in (host_player, guest_player)
@@ -111,17 +119,20 @@ create policy matches_update on public.matches
 -- turns ------------------------------------------------------------------
 
 -- Read: any participant of the match (paths are NULL pre-reveal regardless).
+drop policy if exists turns_select on public.turns;
 create policy turns_select on public.turns
   for select using (public.is_match_participant(match_id));
 
 -- Commit: insert your own row, and only for the team you actually control —
 -- prevents squatting the opponent's (match_id, round, team) slot.
+drop policy if exists turns_insert on public.turns;
 create policy turns_insert on public.turns
   for insert with check (
     player = auth.uid() and team = public.team_for_player(match_id, auth.uid())
   );
 
 -- Reveal: update only your own row.
+drop policy if exists turns_update on public.turns;
 create policy turns_update on public.turns
   for update using (player = auth.uid())
   with check (player = auth.uid());

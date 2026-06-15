@@ -162,7 +162,9 @@ export async function joinAsyncMatch(id: string): Promise<MatchRecord | null> {
   return mapMatch(data as MatchRow);
 }
 
-export async function fetchTurns(id: string): Promise<RoundTurn[]> {
+/** Returns the match's turns, or null on a transient load failure (callers
+ *  must treat null as "unknown", NOT as "no turns"). */
+export async function fetchTurns(id: string): Promise<RoundTurn[] | null> {
   const client = getSupabaseClient();
   const { data, error } = await client
     .from('turns')
@@ -171,7 +173,7 @@ export async function fetchTurns(id: string): Promise<RoundTurn[]> {
     .order('round', { ascending: true });
   if (error || !data) {
     dlog(`async: fetchTurns ${id} failed: ${error?.message}`);
-    return [];
+    return null;
   }
   return (data as TurnRow[]).map(mapTurn);
 }

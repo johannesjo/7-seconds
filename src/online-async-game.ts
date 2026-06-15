@@ -60,7 +60,7 @@ export interface AsyncIO {
   getUserId(): Promise<string | null>;
   loadMatch(id: string): Promise<MatchRecord | null>;
   joinMatch(id: string): Promise<MatchRecord | null>;
-  fetchTurns(id: string): Promise<RoundTurn[]>;
+  fetchTurns(id: string): Promise<RoundTurn[] | null>;
   commit(id: string, round: number, team: AsyncTeam, paths: PathList): Promise<boolean>;
   reveal(id: string, round: number, team: AsyncTeam, paths: PathList): Promise<boolean>;
   persist(id: string, update: { latestState: OnlineGameState; currentRound: number; seed?: number; status?: MatchStatus; expectedRound?: number }): Promise<boolean>;
@@ -152,7 +152,7 @@ export class AsyncGameController {
 
   /** Local player finished drawing paths for the current round. */
   async submitPlan(paths: PathList): Promise<void> {
-    if (!this.match) return;
+    if (this.destroyed || !this.match) return;
     const round = this.match.currentRound;
     this.stash.save(this.stashKey(round), paths);
     const ok = await this.io.commit(this.id, round, this.myTeam, paths);
@@ -165,8 +165,13 @@ export class AsyncGameController {
 
   /** UI reports the animated battle finished with this authoritative end state. */
   async onRoundPlayed(round: number, endState: OnlineGameState, gameOver: boolean): Promise<void> {
-    if (!this.match) return;
-    // Only the round we handed out for playback advances the match.
+    if (this.destroyed || !this.match) return;
+    // Only the controller that actually resolved+played this round advances it.
+    // resolve() sets playingRound and playingSeed together, so this guarantees
+    // playingSeed is present — the write-once seed is never dropped on the
+    // round-1 advance. A controller that never played this round (e.g. recreated
+    // mid-playback) ignores the call and resolves the round itself.
+    if (round !== this.playingRound) return;
     if (round !== this.match.currentRound) return;
 
     const status: MatchStatus | undefined = gameOver
@@ -175,6 +180,11 @@ export class AsyncGameController {
     // Persist the derived seed once (round 1), atomically with the advance, and
     // guard on the current round so a late/duplicate writer can't clobber.
     const seed = this.match.seed == null ? (this.playingSeed ?? undefined) : undefined;
+    if (this.match.seed == null && seed == null) {
+      // Defensive: never advance round 1 without persisting the write-once seed.
+      this.hooks.onError('Could not resolve the round; please retry.');
+      return;
+    }
     await this.io.persist(this.id, {
       latestState: endState,
       currentRound: round + 1,
@@ -223,7 +233,12 @@ export class AsyncGameController {
     }
 
     const round = match.currentRound;
-    const turns = turnsForRound(await this.io.fetchTurns(this.id), round);
+    const allTurns = await this.io.fetchTurns(this.id);
+    // null = transient load failure: do nothing rather than act on a phantom
+    // empty list (which would wrongly re-prompt a committed player to redraw).
+    // A later realtime event or reopen re-drives evaluate().
+    if (allTurns == null) return;
+    const turns = turnsForRound(allTurns, round);
     const action = nextRoundAction(turns, this.myTeam);
 
     switch (action) {

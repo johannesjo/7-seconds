@@ -356,5 +356,60 @@ describe('AsyncGameController', () => {
     expect(spy.plays.length).toBe(0);
     host.destroy();
   });
+
+  it('persists and reuses the seed even when a client loses the round-1 write race', async () => {
+    const be = new FakeBackend('m11', 'host-uid');
+    const hostSpy = makeHooks();
+    const guestSpy = makeHooks();
+    const host = new AsyncGameController('m11', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    const guest = new AsyncGameController('m11', guestSpy.hooks, { io: be.ioFor('guest-uid'), stash: memStash() });
+
+    await host.start();
+    await guest.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await guest.submitPlan(redPlan);
+    await flush();
+
+    const seed1 = hostSpy.plays[0].seed;
+    expect(guestSpy.plays[0].seed).toBe(seed1);
+
+    // Both clients finish playback and persist round 1; only one write lands.
+    const endState1 = makeState(80, 60);
+    await host.onRoundPlayed(1, endState1, false);
+    await guest.onRoundPlayed(1, endState1, false);
+    await flush();
+    expect(be.match.seed).toBe(seed1);
+    expect(be.match.currentRound).toBe(2);
+
+    // Round 2 with different paths: BOTH must reuse seed1, not re-derive.
+    const bluePlan2: PathList = [{ unitId: 'b1', waypoints: [{ x: 7, y: 7 }] }];
+    const redPlan2: PathList = [{ unitId: 'r1', waypoints: [{ x: 8, y: 8 }] }];
+    await host.submitPlan(bluePlan2);
+    await guest.submitPlan(redPlan2);
+    await flush();
+
+    expect(hostSpy.plays[1].seed).toBe(seed1);
+    expect(guestSpy.plays[1].seed).toBe(seed1);
+    host.destroy();
+    guest.destroy();
+  });
+
+  it('ignores onRoundPlayed for a round this controller did not play', async () => {
+    const be = new FakeBackend('m12', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
+    const spy = makeHooks();
+    const host = new AsyncGameController('m12', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    await host.start();
+    await flush();
+
+    // A stray/late onRoundPlayed for a round this controller never resolved must
+    // not advance the match (which would drop the write-once seed).
+    await host.onRoundPlayed(1, makeState(0, 50), true);
+    await flush();
+    expect(be.match.currentRound).toBe(1);
+    expect(be.match.status).toBe('active');
+    host.destroy();
+  });
 });
 

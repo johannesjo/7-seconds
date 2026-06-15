@@ -65,6 +65,7 @@ export function getShareUrl(roomId: string): string {
   url.searchParams.set('join', roomId);
   url.searchParams.delete('relay');
   url.searchParams.delete('debug');
+  url.searchParams.delete('amatch');
   return url.toString();
 }
 

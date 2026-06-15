@@ -19,10 +19,13 @@ create table if not exists public.players (
 alter table public.players enable row level security;
 
 -- A player can see and edit only their own contact row.
+drop policy if exists players_select on public.players;
 create policy players_select on public.players
   for select using (id = auth.uid());
+drop policy if exists players_upsert on public.players;
 create policy players_upsert on public.players
   for insert with check (id = auth.uid());
+drop policy if exists players_update on public.players;
 create policy players_update on public.players
   for update using (id = auth.uid()) with check (id = auth.uid());
 

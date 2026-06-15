@@ -47,10 +47,14 @@ export async function registerTurnNotifications(opts: { email?: string } = {}): 
   const uid = await ensureAuth();
   if (!uid) return false;
 
-  const row: Record<string, unknown> = { id: uid, notify_push: true };
+  // The silent auto-register path (no opts) must not clobber a player's saved
+  // preferences — only ensure the row exists. notify_push defaults to true at
+  // the DB on first insert; we only (re)assert it on an explicit opt-in.
+  const row: Record<string, unknown> = { id: uid };
   if (opts.email !== undefined) {
     row.email = opts.email.trim() || null;
     row.notify_email = !!opts.email.trim();
+    row.notify_push = true;
   }
   const webPush = await getWebPushSubscription();
   if (webPush) row.web_push = webPush;

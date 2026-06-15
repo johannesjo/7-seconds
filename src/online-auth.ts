@@ -12,30 +12,31 @@ let authPromise: Promise<string | null> | null = null;
  *  across reloads. Returns the user id, or null if auth is unavailable
  *  (e.g. anonymous sign-ins disabled, or offline). */
 export function ensureAuth(): Promise<string | null> {
-  if (authPromise) return authPromise;
+  if (!authPromise) authPromise = signIn();
+  return authPromise;
+}
 
-  authPromise = (async () => {
-    const client = getSupabaseClient();
-    try {
-      const { data: { session } } = await client.auth.getSession();
-      if (session?.user) {
-        dlog(`auth: existing session ${session.user.id.slice(0, 8)}`);
-        return session.user.id;
-      }
-      const { data, error } = await client.auth.signInAnonymously();
-      if (error || !data.user) {
-        dlog(`auth: anonymous sign-in failed: ${error?.message ?? 'no user'}`);
-        return null;
-      }
-      dlog(`auth: signed in anonymously ${data.user.id.slice(0, 8)}`);
-      return data.user.id;
-    } catch (e) {
-      dlog(`auth: sign-in threw: ${e}`);
+async function signIn(): Promise<string | null> {
+  const client = getSupabaseClient();
+  try {
+    const { data: { session } } = await client.auth.getSession();
+    if (session?.user) {
+      dlog(`auth: existing session ${session.user.id.slice(0, 8)}`);
+      return session.user.id;
+    }
+    const { data, error } = await client.auth.signInAnonymously();
+    if (error || !data.user) {
+      dlog(`auth: anonymous sign-in failed: ${error?.message ?? 'no user'}`);
+      authPromise = null; // don't cache a failure — allow a later retry
       return null;
     }
-  })();
-
-  return authPromise;
+    dlog(`auth: signed in anonymously ${data.user.id.slice(0, 8)}`);
+    return data.user.id;
+  } catch (e) {
+    dlog(`auth: sign-in threw: ${e}`);
+    authPromise = null; // don't cache a failure — allow a later retry
+    return null;
+  }
 }
 
 /** Current authenticated user id, or null if not signed in yet. Synchronous —

@@ -796,6 +796,10 @@ export class GameEngine {
     e.setBluePaths(bluePaths);
     e.setRedPaths(redPaths);
     e.startPlaying();
+    // Runs the full maxTicks unless a side is eliminated — deliberately ignoring
+    // the live engine's idle-early-end, so the cutoff is a pure, deterministic
+    // function of tick count (identical on every client). Async rounds therefore
+    // always play the full duration; live rounds may end early when combat idles.
     while (e.simulationTick < maxTicks) {
       e.simulationStep(FIXED_DT);
       const blueAlive = e.units.some(u => u.alive && u.team === 'blue');
