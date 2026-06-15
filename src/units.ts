@@ -571,8 +571,12 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
   // Zombie shamble: random perpendicular wobble
   if (unit.type === 'zombie') {
     const wobble = ((rng ?? Math.random)() - 0.5) * 1.4;
-    dirX += -dirY * wobble;
-    dirY += dirX * wobble;
+    // Snapshot the original direction so the perpendicular wobble applied to
+    // dirY doesn't reuse the already-mutated dirX (which skewed the rotation).
+    const ox = dirX;
+    const oy = dirY;
+    dirX += -oy * wobble;
+    dirY += ox * wobble;
     const len = Math.sqrt(dirX * dirX + dirY * dirY);
     if (len > 0.01) { dirX /= len; dirY /= len; }
   }

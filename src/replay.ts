@@ -34,6 +34,10 @@ export class ReplayPlayer {
     this.paused = false;
     this.running = true;
     this.renderFrame(0);
+    // Events emitted during the first simulation step are tagged frame 0
+    // (recorded before that step's frame was pushed), so dispatch them here —
+    // the tick loop only triggers events for frames >= 1.
+    this.triggerEvents(0);
     this.renderer.ticker.add(this.tickBound);
   }
 

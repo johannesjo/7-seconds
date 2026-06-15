@@ -119,6 +119,10 @@ export const ALL_UNIT_UPGRADES: HordeUpgrade[] = [
   }, true, 10),
 ];
 
+// Monotonic counter for recruit IDs — guarantees uniqueness even when several
+// recruits are added within the same millisecond (Date.now() could collide).
+let recruitCounter = 0;
+
 function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
   const label = type.charAt(0).toUpperCase() + type.slice(1);
   return {
@@ -128,7 +132,7 @@ function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
     category: 'recruit',
     rarity: 'common',
     apply(units: Unit[], blocks?: Obstacle[]): Unit[] {
-      const tag = Date.now() % 100000;
+      const tag = recruitCounter++;
       let pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.92 };
       if (blocks) pos = nudgeOutOfBlocks(pos, blocks);
       const newUnit = createUnit(`blue_${type}_r${tag}`, type, 'blue', pos);

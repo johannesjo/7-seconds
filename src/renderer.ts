@@ -430,6 +430,7 @@ export class Renderer {
       dying.container.scale.set(1 - 0.5 * t);
       if (t >= 1) {
         this.app.stage.removeChild(dying.container);
+        dying.container.destroy({ children: true });
         this.dyingUnits.delete(id);
       }
     }
@@ -438,6 +439,7 @@ export class Renderer {
     for (const [id, container] of this.unitGraphics) {
       if (!activeIds.has(id)) {
         this.app.stage.removeChild(container);
+        container.destroy({ children: true });
         this.unitGraphics.delete(id);
       }
     }
@@ -544,6 +546,7 @@ export class Renderer {
   renderProjectiles(projectiles: Projectile[]): void {
     if (this.projectileGraphics) {
       this.app.stage.removeChild(this.projectileGraphics);
+      this.projectileGraphics.destroy();
     }
     this.projectileGraphics = new Graphics();
 
@@ -576,6 +579,7 @@ export class Renderer {
   clearDyingUnits(): void {
     for (const [, dying] of this.dyingUnits) {
       this.app.stage.removeChild(dying.container);
+      dying.container.destroy({ children: true });
     }
     this.dyingUnits.clear();
   }
@@ -594,9 +598,13 @@ export class Renderer {
     // Rebuild unit graphics with new colors
     for (const [, container] of this.unitGraphics) {
       this.app.stage.removeChild(container);
+      container.destroy({ children: true });
     }
     this.unitGraphics.clear();
     this.bladeSpinAngles.clear();
+    // Dying-unit sprites were built with the old theme; drop them so they
+    // don't keep animating in stale colors over the rebuilt units.
+    this.clearDyingUnits();
     // Update effects theme
     this._effects?.setTheme(theme);
   }

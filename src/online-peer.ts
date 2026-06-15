@@ -156,6 +156,11 @@ export async function createPeerConnection(
         if (dc?.readyState === 'open') {
           dlog('ICE restart succeeded');
           reconnecting = false;
+          // Reset the retry budget: the channel is reused on ICE restart so
+          // dc.onopen (which normally resets this) never re-fires. Without
+          // this, repeated successful reconnects exhaust the budget and a
+          // later disconnect gives up immediately.
+          reconnectAttempts = 0;
           return;
         }
         dlog('ICE restart failed, doing full reconnect');
@@ -378,6 +383,14 @@ export async function createPeerConnection(
       signal({ type: 'answer', sdp: answer.sdp!, peerId: localPeerId });
 
     } else if (msg.type === 'answer' && role === 'host' && pc) {
+      // Bind to the first guest that answers. Once paired, ignore answers from
+      // other peers (a second guest or a duplicate/late answer) so they can't
+      // hijack remotePeerId. During reconnection the same peer re-answers, so
+      // matching peerIds are still accepted.
+      if (remotePeerId && remotePeerId !== msg.peerId && !reconnecting) {
+        dlog(`ignoring answer from unexpected peer ${msg.peerId.slice(0, 8)}`);
+        return;
+      }
       remotePeerId = msg.peerId;
       try {
         await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });

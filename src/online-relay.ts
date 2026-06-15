@@ -37,6 +37,12 @@ export async function createRelayConnection(
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let lastPongTime = 0;
 
+  // supabase-js channel.send() returns a promise that rejects on transient
+  // channel failures; swallow those so they don't become unhandled rejections.
+  const safeSend = (args: Parameters<typeof channel.send>[0]) => {
+    Promise.resolve(channel.send(args)).catch((e) => dlog(`relay: send failed: ${e}`));
+  };
+
   const clearAnnounceInterval = () => {
     if (announceInterval) { clearInterval(announceInterval); announceInterval = null; }
   };
@@ -46,7 +52,7 @@ export async function createRelayConnection(
   };
 
   const announceJoin = () => {
-    channel.send({ type: 'broadcast', event: 'join', payload: { peerId: localPeerId } });
+    safeSend({ type: 'broadcast', event: 'join', payload: { peerId: localPeerId } });
   };
 
   const stopKeepalive = () => {
@@ -60,7 +66,7 @@ export async function createRelayConnection(
 
     keepaliveTimer = setInterval(() => {
       if (destroyed || !remotePeerId) return;
-      channel.send({
+      safeSend({
         type: 'broadcast',
         event: 'ping',
         payload: { peerId: localPeerId },
@@ -179,7 +185,7 @@ export async function createRelayConnection(
       handlePeerRejoined(peerId);
     }
 
-    channel.send({
+    safeSend({
       type: 'broadcast',
       event: 'pong',
       payload: { peerId: localPeerId },
@@ -235,7 +241,7 @@ export async function createRelayConnection(
 
   const send = (type: string, data: unknown) => {
     if (destroyed) return;
-    channel.send({
+    safeSend({
       type: 'broadcast',
       event: 'data',
       payload: { t: type, d: data, from: localPeerId },
@@ -247,7 +253,7 @@ export async function createRelayConnection(
     stopKeepalive();
     clearReconnectTimer();
     clearAnnounceInterval();
-    channel.send({ type: 'broadcast', event: 'bye', payload: { peerId: localPeerId } });
+    safeSend({ type: 'broadcast', event: 'bye', payload: { peerId: localPeerId } });
     client.removeChannel(channel);
   };
 

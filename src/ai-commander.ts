@@ -65,8 +65,8 @@ export function parseAiResponse(raw: string): AiResponse | null {
         typeof o.id === 'string' &&
         Array.isArray(o.move_to) &&
         o.move_to.length === 2 &&
-        typeof o.move_to[0] === 'number' &&
-        typeof o.move_to[1] === 'number',
+        Number.isFinite(o.move_to[0]) &&
+        Number.isFinite(o.move_to[1]),
     ).map((o: Record<string, unknown>) => ({
       id: o.id as string,
       move_to: o.move_to as [number, number],
@@ -169,10 +169,12 @@ class AiCommander {
       max_tokens: 512,
     });
 
-    const raw = response.choices[0].message.content ?? '';
+    const raw = response.choices?.[0]?.message?.content ?? '';
     const parsed = parseAiResponse(raw);
     if (!parsed) {
-      return { orders: [] };
+      // Model emitted unparseable output — fall back to default orders so
+      // units keep acting instead of idling for the whole tick.
+      return fallbackOrders(units, this.team);
     }
 
     return backfillOrders(parsed, units, this.team);
