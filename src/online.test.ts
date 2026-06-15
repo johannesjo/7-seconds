@@ -1,5 +1,37 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { generateRoomId, getShareUrl } from './online';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { generateRoomId, getShareUrl, safeUUID } from './online';
+
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+describe('safeUUID', () => {
+  const realRandomUUID = crypto.randomUUID;
+
+  afterEach(() => {
+    crypto.randomUUID = realRandomUUID;
+  });
+
+  it('returns a valid v4 UUID using crypto.randomUUID when available', () => {
+    expect(safeUUID()).toMatch(UUID_V4_RE);
+  });
+
+  it('falls back to a valid v4 UUID when crypto.randomUUID throws (insecure context)', () => {
+    // Simulate plain-HTTP where randomUUID is unavailable/throws.
+    crypto.randomUUID = (() => { throw new Error('not a secure context'); }) as typeof crypto.randomUUID;
+    const id = safeUUID();
+    expect(id).toMatch(UUID_V4_RE);
+  });
+
+  it('falls back to a valid v4 UUID when crypto.randomUUID is undefined', () => {
+    // The real insecure-context shape: the method simply isn't there.
+    crypto.randomUUID = undefined as unknown as typeof crypto.randomUUID;
+    expect(safeUUID()).toMatch(UUID_V4_RE);
+  });
+
+  it('produces unique values', () => {
+    const ids = new Set(Array.from({ length: 100 }, () => safeUUID()));
+    expect(ids.size).toBe(100);
+  });
+});
 
 describe('generateRoomId', () => {
   it('returns a 6-character string', () => {
