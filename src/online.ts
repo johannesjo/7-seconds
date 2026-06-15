@@ -117,65 +117,155 @@ export interface OnlineConnection {
 const forceRelay = typeof window !== 'undefined'
   && new URLSearchParams(window.location.search).has('relay');
 
-/** WebRTC connection timeout before falling back to relay (ms). */
-const WEBRTC_TIMEOUT_MS = 15_000;
+/** How long to let WebRTC (lower latency) connect on its own before the
+ *  Supabase relay starts racing it. The relay still wins the moment it opens
+ *  if WebRTC hasn't — nobody waits the full period. Short, because the peers
+ *  that can't do direct WebRTC (symmetric NAT / CGNAT) need the relay fast. */
+const RELAY_HEADSTART_MS = 4_000;
 
-/** Try WebRTC first; if it fails to open within timeout, fall back to Supabase relay.
- *  Returns immediately (non-blocking) with a proxy handle. The relay fallback
- *  swaps the underlying transport transparently in the background. */
-async function connectTransport(
+type TransportKind = 'webrtc' | 'relay';
+
+/** Race WebRTC against the Supabase relay, preferring WebRTC when it connects
+ *  quickly. Returns immediately (non-blocking) with a stable proxy handle whose
+ *  underlying transport is swapped in transparently.
+ *
+ *  - Initial connect: start WebRTC, then start the relay after a short head
+ *    start (or immediately if WebRTC fails first). Whichever opens first wins;
+ *    the loser is torn down.
+ *  - Mid-session: if the committed WebRTC link dies, fail over to the relay
+ *    (the reliable transport). If the relay itself gives up, the connection is
+ *    over. The app sees this as a normal reconnecting → connected/disconnected
+ *    cycle. */
+export function connectTransport(
   roomId: string,
   role: 'host' | 'guest',
   callbacks: PeerCallbacks,
-): Promise<PeerHandle> {
+): PeerHandle {
   if (forceRelay) {
     dlog('transport: forced relay via ?relay=1');
-    return createRelayConnection(roomId, role, callbacks);
+    let relayOnly: PeerHandle | null = null;
+    let pendingLeave = false;
+    createRelayConnection(roomId, role, callbacks)
+      .then((h) => { if (pendingLeave) h.leave(); else relayOnly = h; })
+      .catch((e) => { dlog(`transport: forced relay failed: ${e}`); callbacks.onClose(''); });
+    return {
+      send: (type, data) => relayOnly?.send(type, data),
+      leave: () => { pendingLeave = true; relayOnly?.leave(); relayOnly = null; },
+      getPeers: () => relayOnly?.getPeers() ?? {},
+    };
   }
 
-  let activeHandle: PeerHandle;
-  let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-  let webrtcConnected = false;
+  let webrtc: PeerHandle | null = null;
+  let relay: PeerHandle | null = null;
+  let committed: TransportKind | null = null;
   let destroyed = false;
+  let headstartTimer: ReturnType<typeof setTimeout> | null = null;
 
-  try {
-    activeHandle = await createPeerConnection(roomId, role, {
-      ...callbacks,
-      onOpen: (peerId) => {
-        if (destroyed) return;
-        webrtcConnected = true;
-        if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
-        dlog('transport: webrtc connected');
-        callbacks.onOpen(peerId);
+  const active = (): PeerHandle | null =>
+    committed === 'webrtc' ? webrtc : committed === 'relay' ? relay : null;
+
+  const clearHeadstartTimer = () => {
+    if (headstartTimer) { clearTimeout(headstartTimer); headstartTimer = null; }
+  };
+
+  const startTransport = (kind: TransportKind) => {
+    if (destroyed) return;
+    const cbs: PeerCallbacks = {
+      onOpen: (peerId) => onTransportOpen(kind, peerId),
+      onClose: (peerId) => onTransportClose(kind, peerId),
+      onReconnecting: (peerId) => {
+        if (!destroyed && committed === kind) callbacks.onReconnecting?.(peerId);
       },
-    });
-  } catch (e) {
-    dlog(`transport: webrtc setup failed (${e}), using relay`);
-    return createRelayConnection(roomId, role, callbacks);
-  }
+      onMessage: (type, data, peerId) => {
+        if (!destroyed && committed === kind) callbacks.onMessage(type, data, peerId);
+      },
+    };
+    const create = kind === 'webrtc' ? createPeerConnection : createRelayConnection;
+    create(roomId, role, cbs)
+      .then((h) => {
+        // If we were torn down or the other transport already won the race
+        // while this one was still setting up, discard this handle.
+        if (destroyed || (committed !== null && committed !== kind)) { h.leave(); return; }
+        if (kind === 'webrtc') webrtc = h; else relay = h;
+      })
+      .catch((e) => {
+        dlog(`transport: ${kind} setup failed: ${e}`);
+        onTransportClose(kind, '');
+      });
+  };
 
-  // Async relay fallback — does NOT block the caller
-  fallbackTimer = setTimeout(async () => {
-    fallbackTimer = null;
-    if (webrtcConnected || destroyed) return;
-    dlog('transport: webrtc timeout, switching to relay');
-    activeHandle.leave();
-    try {
-      activeHandle = await createRelayConnection(roomId, role, callbacks);
-    } catch (e) {
-      dlog(`transport: relay fallback failed: ${e}`);
-      callbacks.onClose('');
+  const onTransportOpen = (kind: TransportKind, peerId: string) => {
+    if (destroyed) return;
+    // Reconnect within the already-committed transport — just forward.
+    if (committed === kind) { callbacks.onOpen(peerId); return; }
+    // The other transport already won the race — ignore the late opener.
+    if (committed !== null) return;
+
+    committed = kind;
+    clearHeadstartTimer();
+    dlog(`transport: committed to ${kind}`);
+    // Tear down the loser.
+    if (kind === 'webrtc' && relay) { relay.leave(); relay = null; }
+    if (kind === 'relay' && webrtc) { webrtc.leave(); webrtc = null; }
+    callbacks.onOpen(peerId);
+  };
+
+  const onTransportClose = (kind: TransportKind, peerId: string) => {
+    if (destroyed) return;
+    // The loser of a race tearing down — ignore.
+    if (committed !== null && committed !== kind) return;
+
+    if (committed === 'webrtc' && kind === 'webrtc') {
+      // Our committed WebRTC link died mid-session — fail over to the relay.
+      committed = null;
+      webrtc?.leave();
+      webrtc = null;
+      clearHeadstartTimer();
+      dlog('transport: webrtc lost, failing over to relay');
+      callbacks.onReconnecting?.(peerId);
+      if (!relay) startTransport('relay');
+      return;
     }
-  }, WEBRTC_TIMEOUT_MS);
+    if (committed === 'relay') {
+      // The relay was our reliable fallback and it has given up.
+      dlog('transport: relay lost, giving up');
+      relay?.leave();
+      relay = null;
+      callbacks.onClose(peerId);
+      return;
+    }
+
+    // Pre-commit failure (committed === null).
+    if (kind === 'webrtc') {
+      webrtc?.leave();
+      webrtc = null;
+      clearHeadstartTimer();
+      if (!relay) { dlog('transport: webrtc failed pre-connect, starting relay'); startTransport('relay'); }
+      return;
+    }
+    relay?.leave();
+    relay = null;
+    if (!webrtc) { dlog('transport: both transports failed pre-connect'); callbacks.onClose(peerId); }
+  };
+
+  // Kick off WebRTC, then race the relay after a short head start.
+  startTransport('webrtc');
+  headstartTimer = setTimeout(() => {
+    headstartTimer = null;
+    if (destroyed || committed !== null || relay) return;
+    dlog('transport: webrtc head start elapsed, racing relay');
+    startTransport('relay');
+  }, RELAY_HEADSTART_MS);
 
   return {
-    send: (type: string, data: unknown) => activeHandle.send(type, data),
+    send: (type, data) => active()?.send(type, data),
     leave: () => {
       destroyed = true;
-      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
-      activeHandle.leave();
+      clearHeadstartTimer();
+      webrtc?.leave(); webrtc = null;
+      relay?.leave(); relay = null;
     },
-    getPeers: () => activeHandle.getPeers(),
+    getPeers: () => active()?.getPeers() ?? {},
   };
 }
 
@@ -191,7 +281,7 @@ export async function createOnlineRoom(
 
   const receivers = new Map<string, (data: unknown, peerId: string) => void>();
 
-  const handle = await connectTransport(roomId, role, {
+  const handle = connectTransport(roomId, role, {
     onOpen: onPeerJoin,
     onClose: onPeerLeave,
     onReconnecting: onPeerReconnecting,
