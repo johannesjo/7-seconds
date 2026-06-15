@@ -165,4 +165,30 @@ describe('relay incoming dedup', () => {
     deliver('data', { t: 'state', d: {}, from: 'local-peer', seq: 1 });
     expect(onMessage).not.toHaveBeenCalled();
   });
+
+  it('still delivers later messages after an earlier one was permanently dropped', async () => {
+    // The soft-lock-prevention guarantee: a fully lost seq must NOT block future
+    // messages. Dedup uses `seq <= last`, not `seq === last + 1`, so seeing 1
+    // then 3 (2 lost forever) still delivers 3.
+    const onMessage = vi.fn();
+    await connect(makeCallbacks({ onMessage }));
+
+    deliver('data', { t: 'state', d: { v: 1 }, from: 'remote', seq: 1 });
+    // seq 2 never arrives (dropped on the wire)
+    deliver('data', { t: 'state', d: { v: 3 }, from: 'remote', seq: 3 });
+    expect(onMessage).toHaveBeenCalledTimes(2);
+    expect(onMessage).toHaveBeenLastCalledWith('state', { v: 3 }, 'remote');
+  });
+
+  it('delivers a retransmitted copy when the first copy was dropped', async () => {
+    // Receiver misses the original send but gets a retransmit — must still deliver
+    // exactly once.
+    const onMessage = vi.fn();
+    await connect(makeCallbacks({ onMessage }));
+
+    // Simulate: original seq 7 lost; first retransmit arrives, then a second.
+    deliver('data', { t: 'waypoints', d: { s: 7 }, from: 'remote', seq: 7 });
+    deliver('data', { t: 'waypoints', d: { s: 7 }, from: 'remote', seq: 7 });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+  });
 });

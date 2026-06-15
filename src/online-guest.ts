@@ -65,6 +65,15 @@ export class OnlineGuest {
           this.sendIdentity();
         },
         (peerId) => {
+          // Empty peerId before connecting means the transport itself failed
+          // (e.g. relay fallback creation failed). Fail fast to 'error' rather
+          // than hanging until the long discovery timeout.
+          if (peerId === '' && this.hostPeerId === null) {
+            this.clearTimeout();
+            this.clearReconnectTimer();
+            this.setConnectionState('error');
+            return;
+          }
           // Peer layer has exhausted all reconnection attempts — connection is gone.
           if (peerId === this.hostPeerId) {
             this.clearReconnectTimer();

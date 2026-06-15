@@ -21,6 +21,12 @@ describe('safeUUID', () => {
     expect(id).toMatch(UUID_V4_RE);
   });
 
+  it('falls back to a valid v4 UUID when crypto.randomUUID is undefined', () => {
+    // The real insecure-context shape: the method simply isn't there.
+    crypto.randomUUID = undefined as unknown as typeof crypto.randomUUID;
+    expect(safeUUID()).toMatch(UUID_V4_RE);
+  });
+
   it('produces unique values', () => {
     const ids = new Set(Array.from({ length: 100 }, () => safeUUID()));
     expect(ids.size).toBe(100);

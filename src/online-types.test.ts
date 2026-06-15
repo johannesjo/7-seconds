@@ -74,8 +74,52 @@ describe('isPlausibleGameState', () => {
     expect(isPlausibleGameState(makeState({ mapWidth: Infinity }))).toBe(false);
   });
 
-  it('rejects missing arrays', () => {
+  it('rejects missing or non-array fields', () => {
     expect(isPlausibleGameState(makeState({ units: undefined as unknown as OnlineGameState['units'] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ obstacles: null as unknown as OnlineGameState['obstacles'] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ elevationZones: 'x' as unknown as OnlineGameState['elevationZones'] }))).toBe(false);
+  });
+
+  it('rejects oversized elevationZones', () => {
+    const huge = makeState({ elevationZones: new Array(301).fill({ x: 0, y: 0, w: 1, h: 1 }) });
+    expect(isPlausibleGameState(huge)).toBe(false);
+  });
+
+  it('rejects an unknown unit type (would crash createUnit on UNIT_STATS lookup)', () => {
+    const u = { ...makeState().units[0], type: 'wizard' as OnlineGameState['units'][number]['type'] };
+    expect(isPlausibleGameState(makeState({ units: [u] }))).toBe(false);
+  });
+
+  it('rejects an invalid team', () => {
+    const u = { ...makeState().units[0], team: 'green' as OnlineGameState['units'][number]['team'] };
+    expect(isPlausibleGameState(makeState({ units: [u] }))).toBe(false);
+  });
+
+  it('rejects non-finite or negative unit numeric fields', () => {
+    const base = makeState().units[0];
+    expect(isPlausibleGameState(makeState({ units: [{ ...base, x: NaN }] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ units: [{ ...base, y: Infinity }] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ units: [{ ...base, hp: -1 }] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ units: [{ ...base, speed: -5 }] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ units: [{ ...base, gunAngle: NaN }] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ units: [{ ...base, maxHp: 0 }] }))).toBe(false);
+  });
+
+  it('rejects obstacle/elevation geometry with non-finite or negative extents', () => {
+    expect(isPlausibleGameState(makeState({ obstacles: [{ x: 0, y: 0, w: NaN, h: 10 }] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ obstacles: [{ x: 0, y: 0, w: -3, h: 10 }] }))).toBe(false);
+    expect(isPlausibleGameState(makeState({ elevationZones: [{ x: Infinity, y: 0, w: 5, h: 5 }] }))).toBe(false);
+  });
+
+  it('accepts a fully valid populated snapshot', () => {
+    const valid = makeState({
+      units: [
+        { id: 'r', type: 'zombie', team: 'red', x: 10, y: 20, hp: 50, maxHp: 100, radius: 7, speed: 60, range: 0, gunAngle: 1.2 },
+      ],
+      obstacles: [{ x: 5, y: 5, w: 30, h: 30 }],
+      elevationZones: [{ x: 1, y: 1, w: 2, h: 2 }],
+    });
+    expect(isPlausibleGameState(valid)).toBe(true);
   });
 });
 

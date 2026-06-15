@@ -69,8 +69,10 @@ const ROOM_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';
 
 /** Generate a 6-character alphanumeric room ID without ambiguous characters. */
 export function generateRoomId(): string {
-  // Rejection sampling avoids modulo bias (256 % 30 !== 0)
-  const limit = 256 - (256 % ROOM_CHARS.length); // 240 — largest multiple of 30 ≤ 256
+  // Rejection sampling keeps the distribution uniform regardless of alphabet
+  // size. ROOM_CHARS has 32 chars and 256 % 32 === 0, so limit is 256 and no
+  // byte is ever rejected today — but this stays correct if the alphabet changes.
+  const limit = 256 - (256 % ROOM_CHARS.length); // largest multiple of ROOM_CHARS.length ≤ 256
   let id = '';
   while (id.length < 6) {
     const bytes = crypto.getRandomValues(new Uint8Array(6 - id.length));
