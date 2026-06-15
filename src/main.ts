@@ -4,7 +4,7 @@ import { hashGameState } from './online-sync';
 import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
 import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team } from './types';
-import { ARMY_COMPOSITION, HORDE_MAX_WAVES } from './constants';
+import { ARMY_COMPOSITION, HORDE_MAX_WAVES, ROUND_DURATION_S } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
@@ -12,6 +12,9 @@ import { OnlineHost } from './online-host';
 import { OnlineGuest } from './online-guest';
 import { getJoinRoomId } from './online';
 import { findMatch } from './online-matchmaking';
+import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
+import type { PathList } from './online-async-core';
+import { createAsyncMatch, getAsyncJoinId } from './online-async';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash } from './online-types';
 import { PathDrawer } from './path-drawer';
@@ -69,6 +72,7 @@ const exitGameBtn = document.getElementById('exit-game-btn')!;
 
 // Online lobby elements
 const onlineBtn = document.getElementById('online-btn')!;
+const onlineAsyncBtn = document.getElementById('online-async-btn')!;
 const onlineRandomBtn = document.getElementById('online-random-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
 const onlineStatus = document.getElementById('online-status')!;
@@ -124,6 +128,15 @@ let guestEngine: GameEngine | null = null;
 let guestLastGameState: OnlineGameState | null = null;
 let guestEffectIndex = 0;
 let pendingSyncHashes: OnlineSyncHash[] = [];
+
+// Async ("play-by-mail") state
+let asyncController: AsyncGameController | null = null;
+let asyncMyTeam: 'blue' | 'red' = 'blue';
+let asyncCurrentRound = 1;
+/** Set by the playback engine's 'end' event (a side was eliminated). */
+let asyncMatchEnded = false;
+/** Guards the per-round playback finish so it runs exactly once. */
+let asyncRoundFinished = false;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -573,6 +586,17 @@ ctfPvpBtn.addEventListener('click', async () => {
 });
 
 confirmBtn.addEventListener('click', () => {
+  if (asyncController && guestPathDrawer) {
+    const myUnits = guestUnits.filter(u => u.team === asyncMyTeam);
+    const paths: PathList = myUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] }));
+    guestPathDrawer.destroy();
+    guestPathDrawer = null;
+    confirmBtn.classList.remove('active');
+    planningOverlay.classList.remove('active');
+    planningLabel.textContent = 'Waiting for opponent...';
+    void asyncController.submitPlan(paths);
+    return;
+  }
   if (onlineActive && onlineRole === 'guest' && guestPathDrawer) {
     const redUnits = guestUnits.filter(u => u.team === 'red');
     const paths: OnlinePathData = {
@@ -646,7 +670,7 @@ newBattleBtn.addEventListener('click', () => {
   onlineHost = null;
   onlineGuest?.destroy();
   onlineGuest = null;
-  stopGuestEngine();
+  destroyAsync();
   guestLastGameState = null;
   onlineActive = false;
   onlineRole = null;
@@ -1092,6 +1116,188 @@ function createHostCallbacks(overrides: {
   };
 }
 
+// --- Async ("play-by-mail") online matches -------------------------------
+
+const ASYNC_ROUND_END_TICK = Math.round(ROUND_DURATION_S * 60);
+
+/** Tear down any in-progress async match. */
+function destroyAsync(): void {
+  asyncController?.destroy();
+  asyncController = null;
+  renderer?.ticker.remove(asyncTickCallback);
+  stopGuestEngine();
+}
+
+/** Ticker callback that animates a resolved async round headlessly and, once
+ *  it ends deterministically (a side eliminated, or the fixed round duration
+ *  elapses), reports the authoritative end state back to the controller. */
+function asyncTickCallback(ticker: { deltaMS: number }): void {
+  if (!guestEngine || !renderer) return;
+  guestEngine.externalTick(ticker.deltaMS);
+
+  const units = guestEngine.getUnits();
+  const dt = ticker.deltaMS / 1000;
+  renderer.renderUnits(units, dt, undefined, guestEngine.phase === 'playing');
+  renderer.renderProjectiles(guestEngine.getProjectiles());
+
+  const { events, nextIndex } = guestEngine.getReplayEventsSince(guestEffectIndex);
+  if (events.length > 0) {
+    renderer.effects?.dispatchEvents(events);
+    guestEffectIndex = nextIndex;
+  }
+  renderer.effects?.update(dt);
+
+  const counts = guestEngine.getAliveCount();
+  blueCountEl.textContent = `Blue: ${counts.blue}`;
+  redCountEl.textContent = `Red: ${counts.red}`;
+
+  if (asyncRoundFinished) return;
+  const tick = guestEngine.getSimulationTick();
+  if (asyncMatchEnded || tick >= ASYNC_ROUND_END_TICK) {
+    asyncRoundFinished = true;
+    renderer.ticker.remove(asyncTickCallback);
+    lastReplayData = guestEngine.getReplayData() ?? lastReplayData;
+    const endState = guestEngine.getOnlineGameState();
+    const gameOver = asyncMatchEnded || counts.blue === 0 || counts.red === 0;
+    const round = asyncCurrentRound;
+    stopGuestEngine();
+    void asyncController?.onRoundPlayed(round, endState, gameOver);
+  }
+}
+
+/** Run a resolved round through the headless engine for both players to watch. */
+function startAsyncRoundPlayback(input: PlayRoundInput): void {
+  stopGuestEngine();
+  pendingSyncHashes = [];
+  asyncMatchEnded = false;
+  asyncRoundFinished = false;
+
+  guestEngine = new GameEngine(null, (type) => {
+    if (type === 'end') asyncMatchEnded = true;
+  }, { seed: input.seed });
+  guestEngine.loadOnlineGameState(input.startState);
+  guestEngine.setBluePaths(input.bluePaths);
+  guestEngine.setRedPaths(input.redPaths);
+  guestEngine.startPlaying();
+  guestEffectIndex = 0;
+  roundCounterEl.textContent = `Round ${input.round}`;
+  renderer!.ticker.add(asyncTickCallback);
+}
+
+/** Bridge the async protocol controller to the UI / playback engine. */
+function asyncHooks(): AsyncGameHooks {
+  return {
+    onPlanTurn(round, startState, myTeam) {
+      asyncCurrentRound = round;
+      asyncMyTeam = myTeam;
+      stopGuestEngine();
+      onlineLobby.style.display = 'none';
+
+      document.body.classList.toggle('day-mode', dayModeCb.checked);
+      renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+      renderer!.adaptToRemoteMap(startState.mapWidth, startState.mapHeight);
+      renderer!.effects?.clear();
+      renderer!.clearDyingUnits();
+
+      guestUnits = startState.units.map(u => createUnitFromState(u));
+      guestElevationZones = startState.elevationZones;
+      guestObstacles = startState.obstacles;
+      renderer!.renderElevationZones(startState.elevationZones);
+      renderer!.renderObstacles(startState.obstacles);
+      renderer!.renderUnits(guestUnits);
+
+      guestPathDrawer?.destroy();
+      guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
+      guestPathDrawer.enable(myTeam, guestUnits, guestElevationZones);
+
+      planningLabel.textContent = 'Your Planning';
+      planningLabel.style.color = myTeam === 'blue'
+        ? 'var(--color-planning-blue)' : 'var(--color-planning-red)';
+      planningOverlay.classList.add('active');
+      confirmBtn.classList.add('active');
+      battleHud.style.display = 'none';
+      roundCounterEl.textContent = `Round ${round}`;
+      showScreen('battle');
+    },
+
+    onAwaitOpponent(round) {
+      guestPathDrawer?.destroy();
+      guestPathDrawer = null;
+      planningOverlay.classList.remove('active');
+      confirmBtn.classList.remove('active');
+      onlineShareContainer.style.display = 'none';
+      setOnlineStatus(`Turn submitted (round ${round}). Waiting for your friend — you can safely leave and return later.`, true);
+      onlineLobby.style.display = 'flex';
+      showScreen('battle');
+    },
+
+    onPlayRound(input) {
+      onlineLobby.style.display = 'none';
+      planningOverlay.classList.remove('active');
+      confirmBtn.classList.remove('active');
+      battleHud.style.display = '';
+      showScreen('battle');
+      startAsyncRoundPlayback(input);
+    },
+
+    onGameOver(status, finalState) {
+      destroyAsync();
+      const winner: Team = status === 'guest_won' ? 'red' : 'blue';
+      const iWon = (asyncMyTeam === winner);
+      const color = winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
+      winnerTextEl.innerHTML = `${iWon ? 'You Win!' : 'You Lose'}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
+      winnerTextEl.style.color = color;
+      const blueAlive = finalState.units.filter(u => u.team === 'blue' && u.hp > 0).length;
+      const redAlive = finalState.units.filter(u => u.team === 'red' && u.hp > 0).length;
+      resultStatsEl.innerHTML = [`Blue survivors: ${blueAlive}`, `Red survivors: ${redAlive}`].join('<br>');
+      rematchBtn.style.display = 'none';
+      replayBtn.style.display = lastReplayData ? '' : 'none';
+      newBattleBtn.textContent = 'Back';
+      returnToScreen = 'result';
+      showScreen('result');
+    },
+
+    onError(message) {
+      onlineShareContainer.style.display = 'none';
+      setOnlineStatus(message);
+      onlineLobby.style.display = 'flex';
+      showScreen('battle');
+    },
+  };
+}
+
+/** Start an async match: create a new one (host) or open/join an existing one. */
+async function startAsyncGame(roomId: string | null): Promise<void> {
+  await initRenderer();
+  destroyAsync();
+  showScreen('battle');
+  onlineLobby.style.display = 'flex';
+  onlineShareContainer.style.display = 'none';
+  onlineStatus.style.display = '';
+  document.getElementById('online-record')!.style.display = 'none';
+
+  let id = roomId;
+  if (!id) {
+    setOnlineStatus('Creating match...', true);
+    const generated = GameEngine.generateInitialState();
+    const created = await createAsyncMatch(generated);
+    if (!created) {
+      setOnlineStatus('Could not create match. Async play needs the backend enabled.');
+      return;
+    }
+    id = created.match.id;
+    onlineShareContainer.style.display = '';
+    onlineShareUrl.value = created.shareUrl;
+    setOnlineStatus('Share this link with a friend. You can plan your first turn now.', true);
+  } else {
+    setOnlineStatus('Loading match...', true);
+  }
+
+  asyncController = new AsyncGameController(id, asyncHooks());
+  const ok = await asyncController.start();
+  if (!ok) { asyncController = null; }
+}
+
 // Online PvP button (host flow)
 onlineBtn.addEventListener('click', async () => {
   onlineActive = true;
@@ -1115,6 +1321,12 @@ onlineBtn.addEventListener('click', async () => {
   }));
 
   await onlineHost.createRoom();
+});
+
+// Async vs Friend — create a play-by-mail match (turns persisted server-side)
+onlineAsyncBtn.addEventListener('click', () => {
+  requestNotificationPermission();
+  void startAsyncGame(null);
 });
 
 // Online vs Random — client-side matchmaking via Supabase Realtime
@@ -1181,6 +1393,7 @@ onlineCancelBtn.addEventListener('click', () => {
   onlineHost = null;
   onlineGuest?.destroy();
   onlineGuest = null;
+  destroyAsync();
   onlineActive = false;
   onlineRole = null;
   onlineLobby.style.display = 'none';
@@ -1192,10 +1405,15 @@ window.addEventListener('age-verified-join', ((e: CustomEvent<string>) => {
   startOnlineGuestMode(e.detail);
 }) as EventListener);
 
+window.addEventListener('age-verified-async-join', ((e: CustomEvent<string>) => {
+  void startAsyncGame(e.detail);
+}) as EventListener);
+
 // Clean up online connections on tab close to avoid zombie Supabase channels
 window.addEventListener('beforeunload', () => {
   onlineHost?.destroy();
   onlineGuest?.destroy();
+  asyncController?.destroy();
 });
 
 // Initialize renderer and show battlefield preview behind start screen
@@ -1205,6 +1423,20 @@ window.addEventListener('beforeunload', () => {
   if (dayModeCb.checked) renderer!.setTheme(DAY_THEME);
   showPreview();
   showScreen('prompt');
+
+  // Async match link (?amatch=) — distinct from live ?join= WebRTC rooms.
+  const asyncJoinId = getAsyncJoinId();
+  if (asyncJoinId) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('amatch');
+    window.history.replaceState({}, '', cleanUrl.toString());
+    if (localStorage.getItem('7s-age-verified')) {
+      void startAsyncGame(asyncJoinId);
+    } else {
+      sessionStorage.setItem('7s-pending-async-join', asyncJoinId);
+    }
+    return;
+  }
 
   // Check URL for join param (works for both web links and Android deep links)
   const joinRoomId = getJoinRoomId();

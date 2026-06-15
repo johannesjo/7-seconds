@@ -1,4 +1,4 @@
-import { getSupabaseClient, generateRoomId, getShareUrl } from './online';
+import { getSupabaseClient, generateRoomId } from './online';
 import { ensureAuth } from './online-auth';
 import { dlog } from './online-debug';
 import type { OnlineGameState } from './online-types';
@@ -26,6 +26,22 @@ export interface RoundTurn extends TurnRecord {
 /** Host plays blue, guest plays red — same convention as live online play. */
 export function teamFor(match: MatchRecord, userId: string): AsyncTeam {
   return match.hostPlayer === userId ? 'blue' : 'red';
+}
+
+/** Build a share link for an async match. Uses a distinct `amatch` param so
+ *  async links are never confused with live `?join` WebRTC rooms. */
+export function getAsyncShareUrl(id: string): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set('amatch', id);
+  url.searchParams.delete('join');
+  url.searchParams.delete('relay');
+  url.searchParams.delete('debug');
+  return url.toString();
+}
+
+/** Read the async match id from the current URL, or null if absent. */
+export function getAsyncJoinId(): string | null {
+  return new URLSearchParams(window.location.search).get('amatch');
 }
 
 // --- row mapping ---------------------------------------------------------
@@ -102,7 +118,7 @@ export async function createAsyncMatch(
     return null;
   }
   dlog(`async: created match ${id}`);
-  return { match: mapMatch(data as MatchRow), shareUrl: getShareUrl(id) };
+  return { match: mapMatch(data as MatchRow), shareUrl: getAsyncShareUrl(id) };
 }
 
 export async function loadMatch(id: string): Promise<MatchRecord | null> {

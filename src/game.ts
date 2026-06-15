@@ -769,6 +769,16 @@ export class GameEngine {
     };
   }
 
+  /** Generate a fresh standard PvP starting state (army + map) headlessly, for
+   *  seeding an async match's authoritative initial state at creation time. */
+  static generateInitialState(): OnlineGameState {
+    const engine = new GameEngine(null, () => {});
+    engine.startBattle();
+    const state = engine.getOnlineGameState();
+    engine.stop();
+    return state;
+  }
+
   stop(): void {
     this.running = false;
     this.renderer?.ticker.remove(this.tick, this);
