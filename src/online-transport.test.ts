@@ -135,6 +135,49 @@ describe('connectTransport racing', () => {
     expect(cb.onClose).not.toHaveBeenCalled();
   });
 
+  it('tears down a losing transport whose setup resolves after the winner committed', async () => {
+    const cb = makeCallbacks();
+    connectTransport('room', 'host', cb);
+    const webrtc = last('webrtc');
+    await ready(webrtc);
+
+    // Head start elapses → relay starts, but its setup promise is still pending.
+    await vi.advanceTimersByTimeAsync(HEADSTART_MS);
+    const relay = last('relay');
+
+    // WebRTC opens and commits while the relay handle hasn't resolved yet.
+    webrtc.callbacks.onOpen('peer-1');
+    expect(cb.onOpen).toHaveBeenCalledTimes(1);
+
+    // The relay setup now resolves — the orphan must be torn down, not adopted.
+    await ready(relay);
+    expect(relay.handle.leave).toHaveBeenCalled();
+
+    // A late relay open must not produce a second onOpen.
+    relay.callbacks.onOpen('peer-1');
+    expect(cb.onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards onReconnecting only from the committed transport', async () => {
+    const cb = makeCallbacks();
+    connectTransport('room', 'host', cb);
+    const webrtc = last('webrtc');
+    await ready(webrtc);
+    await vi.advanceTimersByTimeAsync(HEADSTART_MS);
+    const relay = last('relay');
+    await ready(relay);
+
+    webrtc.callbacks.onOpen('peer-1'); // webrtc wins, relay torn down
+
+    // The losing relay emitting onReconnecting must be ignored.
+    relay.callbacks.onReconnecting?.('peer-1');
+    expect(cb.onReconnecting).not.toHaveBeenCalled();
+
+    // The committed transport's onReconnecting is forwarded.
+    webrtc.callbacks.onReconnecting?.('peer-1');
+    expect(cb.onReconnecting).toHaveBeenCalledWith('peer-1');
+  });
+
   it('only forwards messages from the committed transport', async () => {
     const cb = makeCallbacks();
     connectTransport('room', 'host', cb);

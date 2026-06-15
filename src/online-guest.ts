@@ -75,8 +75,9 @@ export class OnlineGuest {
             }
             return;
           }
-          // Peer layer has exhausted all reconnection attempts — connection is gone.
-          if (peerId === this.hostPeerId) {
+          // Real peer match, or an empty-peerId give-up after a failed failover —
+          // either way the connection is gone. Don't wait out the grace timer.
+          if (peerId === this.hostPeerId || peerId === '') {
             this.clearReconnectTimer();
             this.setConnectionState('disconnected');
           }
@@ -86,6 +87,7 @@ export class OnlineGuest {
           if (peerId !== this.hostPeerId) return;
           if (this.connectionState === 'reconnecting') return;
           this.setConnectionState('reconnecting');
+          this.clearReconnectTimer();
           this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
             if (this.connectionState === 'reconnecting') {

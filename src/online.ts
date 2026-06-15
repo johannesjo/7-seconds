@@ -203,6 +203,8 @@ export function connectTransport(
     if (committed === 'relay') {
       // The relay was our reliable fallback and it has given up.
       dlog('transport: relay lost, giving up');
+      relay?.leave();
+      relay = null;
       callbacks.onClose(peerId);
       return;
     }

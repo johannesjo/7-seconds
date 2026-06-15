@@ -660,6 +660,67 @@ describe('createPeerConnection', () => {
       handle.leave();
     });
 
+    it('guest rebuilds a fresh PC and answers when the host re-offers after a loss', async () => {
+      const cb = makeCallbacks();
+      const handle = await createAndSubscribe('guest', cb);
+
+      // Initial connect.
+      sendOfferSignal('host-1', 'offer-1');
+      await vi.advanceTimersByTimeAsync(0);
+      const firstPC = lastCreatedPC;
+      const guestDC = createMockDataChannel();
+      firstPC.ondatachannel?.({ channel: guestDC });
+      guestDC.readyState = 'open';
+      guestDC.onopen?.();
+      expect(cb.onOpen).toHaveBeenCalledWith('host-1');
+
+      // Connection lost → guest schedules a reconnect and waits for a fresh offer.
+      guestDC.readyState = 'closed';
+      guestDC.onclose?.();
+      expect(cb.onReconnecting).toHaveBeenCalledWith('host-1');
+
+      // Host's fresh offer (new SDP) → guest builds a brand-new PC and answers.
+      sendOfferSignal('host-1', 'offer-2');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lastCreatedPC).not.toBe(firstPC);
+      expect(lastCreatedPC.setRemoteDescription).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'offer', sdp: 'offer-2' }),
+      );
+
+      handle.leave();
+    });
+
+    it('does not tear down the rebuilt PC when the delayed reconnect fires (glare)', async () => {
+      const cb = makeCallbacks();
+      const handle = await createAndSubscribe('guest', cb);
+
+      sendOfferSignal('host-1', 'offer-1');
+      await vi.advanceTimersByTimeAsync(0);
+      const firstPC = lastCreatedPC;
+      const guestDC = createMockDataChannel();
+      firstPC.ondatachannel?.({ channel: guestDC });
+      guestDC.readyState = 'open';
+      guestDC.onopen?.();
+
+      // Loss detected; guest's proactive teardown is scheduled (RECONNECT_DELAY_MS).
+      guestDC.readyState = 'closed';
+      guestDC.onclose?.();
+
+      // Host's fresh offer arrives BEFORE the delayed teardown → guest rebuilds.
+      sendOfferSignal('host-1', 'offer-2');
+      await vi.advanceTimersByTimeAsync(0);
+      const rebuiltPC = lastCreatedPC;
+      expect(rebuiltPC).not.toBe(firstPC);
+      rebuiltPC.close.mockClear();
+
+      // The delayed proactive teardown now fires — it must NOT close the rebuilt PC.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(rebuiltPC.close).not.toHaveBeenCalled();
+      expect(lastCreatedPC).toBe(rebuiltPC); // no further rebuild
+
+      handle.leave();
+    });
+
     it('does not reconnect during intentional teardown (leave)', async () => {
       const cb = makeCallbacks();
       const handle = await createAndSubscribe('host', cb);

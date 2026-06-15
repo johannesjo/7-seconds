@@ -59,6 +59,10 @@ export async function createPeerConnection(
   let keepaliveCheckTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectAttemptTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnecting = false;
+  /** Guest only: set when the host's fresh reconnect offer has already rebuilt
+   *  our PC during the current reconnect cycle, so the delayed proactive
+   *  teardown doesn't destroy a connection that's mid-negotiation (glare). */
+  let guestRebuiltThisCycle = false;
   /** SDP of the offer the guest has most recently applied — used to ignore the
    *  host's periodic re-announcements of the same offer (a duplicate offer
    *  applied to a live PC would needlessly renegotiate and can break it). */
@@ -147,6 +151,8 @@ export async function createPeerConnection(
   };
 
   const scheduleFullReconnect = () => {
+    // Start of a guest reconnect cycle — clear any prior rebuild marker.
+    guestRebuiltThisCycle = false;
     setTimeout(() => {
       if (destroyed) return;
       doFullReconnect();
@@ -157,8 +163,31 @@ export async function createPeerConnection(
     if (reconnectAttemptTimer) { clearTimeout(reconnectAttemptTimer); reconnectAttemptTimer = null; }
   };
 
+  /** Arm the safety-net timer that bounds a single reconnect attempt. When it
+   *  fires, reset `reconnecting` and let handleConnectionLost retry or give up. */
+  const armReconnectAttemptTimer = () => {
+    clearReconnectAttemptTimer();
+    reconnectAttemptTimer = setTimeout(() => {
+      reconnectAttemptTimer = null;
+      if (destroyed || dc?.readyState === 'open') return;
+      dlog('reconnect attempt timed out');
+      reconnecting = false;
+      handleConnectionLost();
+    }, RECONNECT_ATTEMPT_TIMEOUT_MS);
+  };
+
   const doFullReconnect = () => {
     if (destroyed) return;
+
+    // Glare: the host's fresh offer already rebuilt our PC during this cycle.
+    // Don't tear that PC back down — let it finish negotiating; just keep the
+    // safety-net timer running to bound the new handshake.
+    if (role === 'guest' && guestRebuiltThisCycle) {
+      dlog('reconnect: guest already rebuilt from host offer, not tearing down');
+      armReconnectAttemptTimer();
+      return;
+    }
+
     dlog('full reconnect: tearing down old PC');
 
     // Set tearingDown to prevent dc.onclose from re-triggering handleConnectionLost
@@ -176,16 +205,8 @@ export async function createPeerConnection(
 
     tearingDown = false;
 
-    // Set a timeout so this reconnect attempt doesn't hang forever.
-    // When it fires, reset reconnecting and let handleConnectionLost
-    // decide whether to retry or give up.
-    reconnectAttemptTimer = setTimeout(() => {
-      reconnectAttemptTimer = null;
-      if (destroyed || dc?.readyState === 'open') return;
-      dlog('reconnect attempt timed out');
-      reconnecting = false;
-      handleConnectionLost();
-    }, RECONNECT_ATTEMPT_TIMEOUT_MS);
+    // Bound this reconnect attempt so it doesn't hang forever.
+    armReconnectAttemptTimer();
 
     if (role === 'host') {
       // Host: create new PC and send fresh offer
@@ -230,6 +251,7 @@ export async function createPeerConnection(
       reconnecting = false;
       tearingDown = false;
       reconnectAttempts = 0;
+      guestRebuiltThisCycle = false;
       clearAnnounceInterval();
       clearReconnectAttemptTimer();
       startKeepalive();
@@ -344,6 +366,10 @@ export async function createPeerConnection(
         pendingCandidates = [];
         tearingDown = false;
       }
+
+      // If we're mid-reconnect, this fresh offer is the host driving recovery —
+      // mark it so the delayed proactive teardown doesn't undo this rebuild.
+      if (reconnecting) guestRebuiltThisCycle = true;
 
       remotePeerId = msg.peerId;
       appliedOfferSdp = msg.sdp;
