@@ -1,3 +1,4 @@
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getSupabaseClient, localPeerId } from './online';
 import { dlog } from './online-debug';
 import type { PeerCallbacks, PeerHandle } from './online-peer';
@@ -10,6 +11,13 @@ const RELAY_KEEPALIVE_TIMEOUT_MS = 15_000;
 const MAX_RECONNECT_ATTEMPTS = 3;
 /** How long to wait for peer to respond during reconnection (ms). */
 const RECONNECT_TIMEOUT_MS = 15_000;
+/** Delays (ms) at which each data message is re-broadcast. Supabase broadcast is
+ *  best-effort and unordered, so a single drop would otherwise soft-lock the game
+ *  (a lost `waypoints`/`result`/`paths` has no other recovery). Re-sending a few
+ *  times sharply cuts the loss probability; the receiver dedupes by sequence
+ *  number so duplicates are harmless. WebRTC's data channel is already reliable,
+ *  so this only applies to the relay fallback. */
+const RETRANSMIT_DELAYS_MS = [250, 700];
 
 /**
  * Create a relay connection via Supabase broadcast.
@@ -36,6 +44,23 @@ export async function createRelayConnection(
   let keepaliveCheckTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let lastPongTime = 0;
+  /** Monotonic sequence number stamped on each outgoing data message. */
+  let dataSeq = 0;
+  /** Highest sequence seen per message type, for deduping retransmissions. */
+  const lastSeqByType = new Map<string, number>();
+  /** Pending retransmit timers, cleared on teardown. */
+  const retransmitTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  /** Supabase broadcast can reject (e.g. socket mid-reconnect). Swallow the
+   *  failure — the retransmit/announce loops are the recovery mechanism, and an
+   *  unhandled rejection would otherwise surface as a console error. */
+  const safeSend = (msg: Parameters<RealtimeChannel['send']>[0]) => {
+    try {
+      void Promise.resolve(channel.send(msg)).catch((e) => dlog(`relay send error: ${e}`));
+    } catch (e) {
+      dlog(`relay send threw: ${e}`);
+    }
+  };
 
   const clearAnnounceInterval = () => {
     if (announceInterval) { clearInterval(announceInterval); announceInterval = null; }
@@ -46,7 +71,7 @@ export async function createRelayConnection(
   };
 
   const announceJoin = () => {
-    channel.send({ type: 'broadcast', event: 'join', payload: { peerId: localPeerId } });
+    safeSend({ type: 'broadcast', event: 'join', payload: { peerId: localPeerId } });
   };
 
   const stopKeepalive = () => {
@@ -60,7 +85,7 @@ export async function createRelayConnection(
 
     keepaliveTimer = setInterval(() => {
       if (destroyed || !remotePeerId) return;
-      channel.send({
+      safeSend({
         type: 'broadcast',
         event: 'ping',
         payload: { peerId: localPeerId },
@@ -162,6 +187,15 @@ export async function createRelayConnection(
       handlePeerRejoined(msg.from);
     }
 
+    // Drop retransmitted duplicates: each message type carries a monotonic
+    // sequence, so anything at or below the last seen seq has already been
+    // delivered (or is a stale reorder we don't want to re-apply).
+    if (typeof msg.seq === 'number') {
+      const last = lastSeqByType.get(msg.t);
+      if (last !== undefined && msg.seq <= last) return;
+      lastSeqByType.set(msg.t, msg.seq);
+    }
+
     try {
       callbacks.onMessage(msg.t, msg.d, msg.from);
     } catch (e) {
@@ -179,7 +213,7 @@ export async function createRelayConnection(
       handlePeerRejoined(peerId);
     }
 
-    channel.send({
+    safeSend({
       type: 'broadcast',
       event: 'pong',
       payload: { peerId: localPeerId },
@@ -235,11 +269,25 @@ export async function createRelayConnection(
 
   const send = (type: string, data: unknown) => {
     if (destroyed) return;
-    channel.send({
-      type: 'broadcast',
-      event: 'data',
-      payload: { t: type, d: data, from: localPeerId },
-    });
+    const payload = { t: type, d: data, from: localPeerId, seq: ++dataSeq };
+    const broadcast = () => {
+      if (destroyed) return;
+      safeSend({ type: 'broadcast', event: 'data', payload });
+    };
+    broadcast();
+    // Re-send a few times so a dropped broadcast doesn't soft-lock the game.
+    for (const delay of RETRANSMIT_DELAYS_MS) {
+      const timer = setTimeout(() => {
+        retransmitTimers.delete(timer);
+        broadcast();
+      }, delay);
+      retransmitTimers.add(timer);
+    }
+  };
+
+  const clearRetransmitTimers = () => {
+    for (const timer of retransmitTimers) clearTimeout(timer);
+    retransmitTimers.clear();
   };
 
   const leave = () => {
@@ -247,7 +295,8 @@ export async function createRelayConnection(
     stopKeepalive();
     clearReconnectTimer();
     clearAnnounceInterval();
-    channel.send({ type: 'broadcast', event: 'bye', payload: { peerId: localPeerId } });
+    clearRetransmitTimers();
+    safeSend({ type: 'broadcast', event: 'bye', payload: { peerId: localPeerId } });
     client.removeChannel(channel);
   };
 
