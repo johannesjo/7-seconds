@@ -169,6 +169,16 @@ export class OnlineHost {
   }
 
   private handlePeerLeave(peerId: string): void {
+    // No guest ever connected and the transport gave up (both WebRTC and relay
+    // failed) — surface as an error rather than leaving the user on "waiting".
+    if (!this.guestPeerId) {
+      if (this.connectionState === 'waiting') {
+        this.clearTimeout();
+        this.clearReconnectTimer();
+        this.setConnectionState('error');
+      }
+      return;
+    }
     if (peerId === this.guestPeerId) {
       // Peer layer has exhausted all reconnection attempts — connection is gone.
       this.clearReconnectTimer();

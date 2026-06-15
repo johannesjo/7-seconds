@@ -65,6 +65,16 @@ export class OnlineGuest {
           this.sendIdentity();
         },
         (peerId) => {
+          // Never connected and the transport gave up (both WebRTC and relay
+          // failed) — surface as an error instead of hanging on "connecting".
+          if (!this.hostPeerId) {
+            if (this.connectionState === 'connecting') {
+              this.clearTimeout();
+              this.clearReconnectTimer();
+              this.setConnectionState('error');
+            }
+            return;
+          }
           // Peer layer has exhausted all reconnection attempts — connection is gone.
           if (peerId === this.hostPeerId) {
             this.clearReconnectTimer();

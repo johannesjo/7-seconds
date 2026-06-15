@@ -374,6 +374,71 @@ describe('createPeerConnection', () => {
 
       handle.leave();
     });
+
+    it('does not re-apply a duplicate re-announced offer to a live PC', async () => {
+      const cb = makeCallbacks();
+      const handle = await createAndSubscribe('guest', cb);
+
+      sendOfferSignal('host-99', 'offer-sdp-1');
+      await vi.advanceTimersByTimeAsync(0);
+      const firstPC = lastCreatedPC;
+      expect(firstPC.setRemoteDescription).toHaveBeenCalledTimes(1);
+
+      // Host re-announces the SAME offer — must NOT renegotiate the live PC.
+      sendOfferSignal('host-99', 'offer-sdp-1');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(firstPC.setRemoteDescription).toHaveBeenCalledTimes(1);
+      expect(lastCreatedPC).toBe(firstPC); // no new PC created
+
+      handle.leave();
+    });
+
+    it('re-sends the answer (not a new one) when a duplicate offer arrives before connecting', async () => {
+      const cb = makeCallbacks();
+      const handle = await createAndSubscribe('guest', cb);
+
+      sendOfferSignal('host-99', 'offer-sdp-1');
+      await vi.advanceTimersByTimeAsync(0);
+
+      const answerSendsBefore = mockChannelSend.mock.calls.filter(
+        (c) => c[0]?.payload?.type === 'answer',
+      ).length;
+      expect(lastCreatedPC.createAnswer).toHaveBeenCalledTimes(1);
+
+      // Duplicate offer while not yet connected → re-send existing answer.
+      sendOfferSignal('host-99', 'offer-sdp-1');
+      await vi.advanceTimersByTimeAsync(0);
+
+      const answerSendsAfter = mockChannelSend.mock.calls.filter(
+        (c) => c[0]?.payload?.type === 'answer',
+      ).length;
+      expect(answerSendsAfter).toBe(answerSendsBefore + 1);
+      // But no fresh answer was generated.
+      expect(lastCreatedPC.createAnswer).toHaveBeenCalledTimes(1);
+
+      handle.leave();
+    });
+
+    it('rebuilds a fresh PC when the host sends a new offer (reconnect)', async () => {
+      const cb = makeCallbacks();
+      const handle = await createAndSubscribe('guest', cb);
+
+      sendOfferSignal('host-99', 'offer-sdp-1');
+      await vi.advanceTimersByTimeAsync(0);
+      const firstPC = lastCreatedPC;
+
+      // A genuinely new offer (different SDP) from the same host → fresh PC.
+      sendOfferSignal('host-99', 'offer-sdp-2');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(lastCreatedPC).not.toBe(firstPC);
+      expect(firstPC.close).toHaveBeenCalled();
+      expect(lastCreatedPC.setRemoteDescription).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'offer', sdp: 'offer-sdp-2' }),
+      );
+
+      handle.leave();
+    });
   });
 
   describe('data channel messaging', () => {
@@ -542,19 +607,28 @@ describe('createPeerConnection', () => {
       handle.leave();
     });
 
-    it('host attempts ICE restart on connection loss', async () => {
+    it('host does a full reconnect (fresh PC + plain offer) on connection loss', async () => {
       const cb = makeCallbacks();
       const handle = await createAndSubscribe('host', cb);
 
       sendAnswerSignal('remote-42');
       await vi.advanceTimersByTimeAsync(0);
       openDataChannel();
-      closeDataChannel();
 
+      mockChannelSend.mockClear();
+      closeDataChannel();
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(lastCreatedPC.restartIce).toHaveBeenCalled();
-      expect(lastCreatedPC.createOffer).toHaveBeenCalledWith({ iceRestart: true });
+      // Reconnection is symmetric: host rebuilds the PC (new data channel) and
+      // re-offers with a plain offer — no ICE restart, which would mismatch the
+      // guest's freshly-created PC.
+      expect(lastCreatedPC.restartIce).not.toHaveBeenCalled();
+      expect(lastCreatedPC.createOffer).toHaveBeenCalledWith();
+      expect(lastCreatedPC.createDataChannel).toHaveBeenCalledWith('data');
+      const offerSends = mockChannelSend.mock.calls.filter(
+        (c) => c[0]?.event === 'signal' && c[0]?.payload?.type === 'offer',
+      );
+      expect(offerSends.length).toBeGreaterThanOrEqual(1);
 
       handle.leave();
     });
