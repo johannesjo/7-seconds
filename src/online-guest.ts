@@ -65,17 +65,19 @@ export class OnlineGuest {
           this.sendIdentity();
         },
         (peerId) => {
-          // Empty peerId before connecting means the transport itself failed
-          // (e.g. relay fallback creation failed). Fail fast to 'error' rather
-          // than hanging until the long discovery timeout.
-          if (peerId === '' && this.hostPeerId === null) {
-            this.clearTimeout();
-            this.clearReconnectTimer();
-            this.setConnectionState('error');
+          // Never connected and the transport gave up (both WebRTC and relay
+          // failed) — surface as an error instead of hanging on "connecting".
+          if (!this.hostPeerId) {
+            if (this.connectionState === 'connecting') {
+              this.clearTimeout();
+              this.clearReconnectTimer();
+              this.setConnectionState('error');
+            }
             return;
           }
-          // Peer layer has exhausted all reconnection attempts — connection is gone.
-          if (peerId === this.hostPeerId) {
+          // Real peer match, or an empty-peerId give-up after a failed failover —
+          // either way the connection is gone. Don't wait out the grace timer.
+          if (peerId === this.hostPeerId || peerId === '') {
             this.clearReconnectTimer();
             this.setConnectionState('disconnected');
           }
@@ -85,6 +87,7 @@ export class OnlineGuest {
           if (peerId !== this.hostPeerId) return;
           if (this.connectionState === 'reconnecting') return;
           this.setConnectionState('reconnecting');
+          this.clearReconnectTimer();
           this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
             if (this.connectionState === 'reconnecting') {
