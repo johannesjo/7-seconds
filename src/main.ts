@@ -13,7 +13,7 @@ import { OnlineGuest } from './online-guest';
 import { getJoinRoomId } from './online';
 import { findMatch } from './online-matchmaking';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
-import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash } from './online-types';
+import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash, isPlausibleGameState } from './online-types';
 import { PathDrawer } from './path-drawer';
 import { recordWin, recordLoss, getScore, getOverallScore } from './online-score';
 import { requestNotificationPermission, notify } from './notify';
@@ -124,6 +124,8 @@ let guestEngine: GameEngine | null = null;
 let guestLastGameState: OnlineGameState | null = null;
 let guestEffectIndex = 0;
 let pendingSyncHashes: OnlineSyncHash[] = [];
+/** Set once a desync is detected in the current round to avoid console spam. */
+let guestDesyncWarned = false;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -753,7 +755,9 @@ function startOnlineHostGame(): void {
           const blueUnits = engine.getUnits().filter(u => u.team === 'blue');
           onlineHost.sendWaypoints({
             bluePaths: blueUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] })),
-            seed: engine.getSeed(),
+            // Send the per-round seed (base + round number), not the base seed —
+            // otherwise the guest desyncs from round 2 onward.
+            seed: engine.getRoundSeed(),
           });
         }
       } else {
@@ -808,8 +812,12 @@ function guestTickCallback(ticker: { deltaMS: number }): void {
   while (pendingSyncHashes.length > 0 && currentTick >= pendingSyncHashes[0].tick) {
     const expected = pendingSyncHashes.shift()!;
     const guestHash = hashGameState(guestEngine.getUnits());
-    if (guestHash !== expected.hash) {
-      console.warn(`[lockstep] desync at tick ${expected.tick}: host=${expected.hash.toString(16)} guest=${guestHash.toString(16)}`);
+    if (guestHash !== expected.hash && !guestDesyncWarned) {
+      // Warn once per round — host stays authoritative for the result and
+      // re-sends a fresh snapshot next round, so a mid-round desync is visual
+      // only. Logging every tick afterward would just spam the console.
+      guestDesyncWarned = true;
+      console.warn(`[lockstep] desync at tick ${expected.tick}: host=${expected.hash.toString(16)} guest=${guestHash.toString(16)} — guest view may diverge until next round`);
     }
   }
 
@@ -870,6 +878,12 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
     },
 
     onGameState(state: OnlineGameState) {
+      // The host is untrusted (especially vs. random opponents) — drop snapshots
+      // with absurd sizes so a malicious/buggy peer can't exhaust the renderer.
+      if (!isPlausibleGameState(state)) {
+        console.warn('[online] dropped implausible game state from host');
+        return;
+      }
       onlineLobby.style.display = 'none';
       document.body.classList.toggle('day-mode', dayModeCb.checked);
       renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
@@ -966,9 +980,10 @@ async function startOnlineGuestMode(roomId: string): Promise<void> {
         .map(u => ({ unitId: u.id, waypoints: [...u.waypoints] }));
       guestEngine.setRedPaths(redPaths);
 
-      // Start simulation directly — bypasses planning phase machinery
-      guestEngine.startPlaying();
+      // Start simulation with the host's per-round seed for lockstep determinism.
+      guestEngine.startPlaying(data.seed);
       guestEffectIndex = 0;
+      guestDesyncWarned = false;
 
       // Drive the headless engine from the renderer's ticker
       renderer!.ticker.add(guestTickCallback);

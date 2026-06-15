@@ -1,6 +1,6 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
 import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
-import { OnlineGameState } from './online-types';
+import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELEVATION_ZONES } from './online-types';
 import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
@@ -84,6 +84,13 @@ export class GameEngine {
 
   getSeed(): number {
     return this.seed;
+  }
+
+  /** The effective PRNG seed for the current round (base seed + round number).
+   *  This is the exact value passed to createRng() when a round starts, so it's
+   *  what the host must transmit to the guest for lockstep determinism. */
+  getRoundSeed(): number {
+    return this.seed + this.roundNumber;
   }
 
   startBattle(): void {
@@ -663,8 +670,11 @@ export class GameEngine {
   }
 
   /** Start simulation directly in 'playing' state (for guest lockstep).
-   *  Bypasses planning phases — call after loadOnlineGameState + setPaths. */
-  startPlaying(): void {
+   *  Bypasses planning phases — call after loadOnlineGameState + setPaths.
+   *  Pass the host's per-round seed (from OnlineWaypointData) so the guest's
+   *  PRNG matches the host exactly; the guest can't derive it locally because
+   *  its headless engine doesn't track the round number. */
+  startPlaying(roundSeed?: number): void {
     this.running = true;
     this.lockstepMode = true;
     this._phase = 'playing';
@@ -674,7 +684,7 @@ export class GameEngine {
     this.simulationTick = 0;
     this.endingBattle = false;
     this.pendingWinner = null;
-    this.rng = createRng(this.seed + this.roundNumber);
+    this.rng = createRng(roundSeed ?? (this.seed + this.roundNumber));
     this.replayFrames = [];
     this.replayEvents = [];
   }
@@ -714,11 +724,12 @@ export class GameEngine {
     this.setPaths('blue', paths);
   }
 
-  /** Load full game state from an OnlineGameState snapshot (for guest sync). */
+  /** Load full game state from an OnlineGameState snapshot (for guest sync).
+   *  Caps array sizes defensively — the snapshot comes from an untrusted peer. */
   loadOnlineGameState(state: OnlineGameState): void {
-    this.obstacles = state.obstacles;
-    this.elevationZones = state.elevationZones;
-    this.units = state.units.map(u => createUnitFromState(u));
+    this.obstacles = state.obstacles.slice(0, MAX_ONLINE_OBSTACLES);
+    this.elevationZones = state.elevationZones.slice(0, MAX_ONLINE_ELEVATION_ZONES);
+    this.units = state.units.slice(0, MAX_ONLINE_UNITS).map(u => createUnitFromState(u));
     this.projectiles = [];
     this.replayFrames = [];
     this.replayEvents = [];

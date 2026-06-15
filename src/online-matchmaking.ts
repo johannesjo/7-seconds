@@ -41,15 +41,17 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
       if (resolved) return;
       const state = channel.presenceState();
 
+      // First pass: if a host has already selected us, accept immediately.
+      // Also collect every currently-seeking peer (including ourselves) so we
+      // can pair deterministically below.
+      const seeking = new Set<string>([seekerId]);
       for (const presences of Object.values(state)) {
-        if (resolved) return;
         // Presence lists can be transiently empty during sync; skip those.
         const p = presences[0] as Record<string, unknown> | undefined;
         if (!p) continue;
         const peerId = p.seekerId as string;
-        if (!peerId || peerId === seekerId) continue;
+        if (!peerId) continue;
 
-        // Check if a hosting peer has selected us as guest
         if (p.status === 'hosting' && p.guestId === seekerId) {
           resolved = true;
           dlog(`matchmaking: matched as guest, room=${p.roomId}`);
@@ -58,20 +60,28 @@ export function findMatch(): { promise: Promise<MatchResult>; cancel: () => void
           return;
         }
 
-        // Try to match with a seeking peer — deterministic: lower ID = host
-        if (p.status === 'seeking' && seekerId < peerId) {
-          resolved = true;
-          const roomId = generateRoomId();
-          dlog(`matchmaking: I am host, matched with ${peerId.slice(0, 8)}`);
-          // Update presence so guest discovers the match
-          Promise.resolve(channel.track({ seekerId, status: 'hosting', roomId, guestId: peerId }))
-            .catch((e) => dlog(`matchmaking: track(hosting) failed: ${e}`));
-          // Keep channel alive so guest receives the presence update
-          setTimeout(cleanup, HOST_LINGER_MS);
-          resolve({ role: 'host', roomId });
-          return;
-        }
+        if (p.status === 'seeking' && peerId !== seekerId) seeking.add(peerId);
       }
+
+      // Deterministic pairing: sort all seekers and pair them (0,1)(2,3)…
+      // Only the even-indexed peer of each pair hosts, so a peer can never be
+      // pulled into two pairs at once — which is what the naive "lower ID hosts"
+      // rule allowed when 3+ peers searched simultaneously.
+      const sorted = [...seeking].sort();
+      const myIndex = sorted.indexOf(seekerId);
+      if (myIndex % 2 === 0 && myIndex + 1 < sorted.length) {
+        const guestId = sorted[myIndex + 1];
+        resolved = true;
+        const roomId = generateRoomId();
+        dlog(`matchmaking: I am host, matched with ${guestId.slice(0, 8)}`);
+        // Update presence so guest discovers the match
+        Promise.resolve(channel.track({ seekerId, status: 'hosting', roomId, guestId }))
+          .catch((e) => dlog(`matchmaking: track(hosting) failed: ${e}`));
+        // Keep channel alive so guest receives the presence update
+        setTimeout(cleanup, HOST_LINGER_MS);
+        resolve({ role: 'host', roomId });
+      }
+      // Odd index (or unpaired last peer): wait to be selected as guest.
     };
 
     channel.on('presence', { event: 'sync' }, () => {
