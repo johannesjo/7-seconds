@@ -1,358 +1,428 @@
 # Unified, reliable online play — seamless drop-in / drop-out
 
 **Date:** 2026-06-16
-**Status:** Plan / design of record
-**Scope:** `src/online-async*`, `src/online*`, `supabase/`
+**Status:** Plan / design of record (revised after multi-lens review)
+**Scope:** `src/online-async*`, `src/online*`, `src/game.ts`, `supabase/`
+
+> **Revision note.** This version incorporates four review passes — distributed
+> correctness, architecture, implementation feasibility (verified against the
+> code), and product/UX. The biggest change from the first draft: the live and
+> async paths use **two different seed models**, so "a live game silently
+> becomes play-by-mail mid-round" is *not* free. The plan now unifies the
+> protocol up front (Part 2) and constrains live↔async handoff to **round
+> boundaries**, which makes the rest tractable.
 
 ## The ask
 
-Three things, in priority order:
-
-1. **Make async reliable.** Today it stalls: matches get stuck, players see
-   "please retry", turns silently fail, and a dropped client can wedge a match
+1. **Make async reliable.** Today it stalls: matches wedge, players see
+   "please retry," turns silently fail, and a dropped client can hang a match
    forever.
-2. **Unify async and WebRTC** into one experience instead of two parallel
-   stacks the player chooses between up front.
-3. **Let a player make their first move before the opponent arrives**, and
-   allow either side to drop out and back in at any point without breaking the
-   match.
-
-This document explains why these are really *one* change, and lays out a
-phased path to get there without a rewrite.
+2. **Unify async and WebRTC** into one experience instead of two stacks the
+   player picks up front.
+3. **Let a player make their first move before the opponent arrives**, and let
+   either side drop out and back in without breaking the match.
 
 ---
 
-## Key insight: async is already the stronger foundation
+## Key insight: async is the stronger foundation — but the two stacks disagree on the seed
 
-Both modes already share the same engine contract:
+Both modes share the deterministic-lockstep engine: a round's outcome is
+reproducible from `OnlineGameState` (round start) + each side's `PathList`
+waypoints + a per-round seed (`createRng(seed + roundNumber)`, `src/game.ts`).
+They share `OnlineGameState` (`src/online-types.ts`), the `PathList` move type,
+and the desync hash (`src/online-sync.ts`).
 
-- Deterministic lockstep: a round's outcome is fully reproducible from
-  `OnlineGameState` (start of round) + each side's `OnlinePathData` (waypoints)
-  + the per-round seed (`createRng(seed + roundNumber)` in `src/game.ts`). This
-  is documented and verified in `docs/async-play.md`.
-- The same `OnlineGameState` snapshot type (`src/online-types.ts`) and the same
-  `PathList` move type (`src/online-async-core.ts`, `OnlinePathData` in
-  `src/online-types.ts`).
-- The same desync hash (`hashGameState`, `src/online-sync.ts`).
+The durable async turn log (`matches` + `turns` in Postgres) is strictly more
+capable than the ephemeral WebRTC channel: it survives drops and is resumable.
+So the thesis stands:
 
-The **only** difference between the two stacks is *where the turn data lives*:
+> **Make the durable turn log the single source of truth for all online play.
+> Treat WebRTC/relay as an optional low-latency accelerator, not a separate
+> mode.**
 
-| | Source of truth | Transport | Resume after drop | First move before peer |
-|---|---|---|---|---|
-| **WebRTC** (`online-peer/relay/host/guest`) | ephemeral, in two peers' RAM | P2P data channel + Supabase relay fallback | no — peer drop ends the game | no — host waits for guest |
-| **Async** (`online-async*`) | durable Postgres (`matches` + `turns`) | Supabase Realtime Postgres-changes | yes — reopen the link | almost (host waits on lobby today) |
+**But there is a real impedance mismatch the first draft hand-waved.** The two
+stacks derive the per-round seed *differently*:
 
-The durable turn log is strictly more capable. So the unification thesis is:
+- **Live** (`main.ts` `sendWaypoints` → `engine.getRoundSeed()`): the **host
+  authors** the seed (`seed + roundNumber`) and streams it to the guest. There
+  is no blind commit — the host already sees everything, so it just sends state
+  outright (`sendGameState`).
+- **Async** (`online-async-game.ts:298`, `deriveMatchSeed`): the round-1 seed is
+  **derived from both players' blind commit hashes** (anti-grind fairness); no
+  single player authors it.
 
-> **Make the durable async turn log the single source of truth for *all*
-> online play. Treat WebRTC/relay as an optional "live presence" accelerator
-> that makes turn delivery instant when both players happen to be online — not
-> as a separate game mode.**
+Consequence: a round that is played live was **never written to `turns`** (no
+commit, no reveal, no hashes). If the WebRTC link dies mid-round, the async
+path at `online-async-game.ts:298` has nothing to resolve from —
+`hashPaths(blue.paths)` doesn't exist — and the match wedges. The earlier
+conclusion that this was "graceful" was wrong.
 
-A "live" game becomes "an async match where both clients are currently
-subscribed and reacting within seconds." A player walking away becomes "an
-async match where one client stopped reacting." There is no mode switch, no
-state hand-off, no separate code path to keep in sync. This is exactly the
-drop-in/drop-out behavior the request describes — it falls out of the model
-rather than being bolted on.
-
-This also resolves the "very difficult to unify" conclusion an earlier analysis
-reached: that conclusion assumed we'd try to *bridge two live engines into the
-async protocol mid-game*. We do the opposite — everything is async underneath,
-and WebRTC is demoted to a delivery optimization.
+**The fix that unblocks everything: one protocol.** Make *all* online play —
+live or not — go through commit→reveal with the seed derived from both commits.
+Live play then just means "both commits/reveals are landing within seconds, so
+we also animate them in real time." The seed is uniform, the turn log is always
+populated, and live↔async transitions become safe. This is the load-bearing
+decision; it moves into Part 2 rather than being deferred to Part 3.
 
 ---
 
-## Part 1 — Reliability fixes (do this first, ships value immediately)
+## Decisions this plan makes (the hard choices, surfaced)
 
-These harden the existing async stack and are valuable even before any
-unification. Concrete defects found in the current code:
+1. **Uniform commit-reveal seed for every online round** (live included). The
+   host no longer authors the seed. This costs live play one extra round-trip
+   (commit hashes before the animation can start) but removes the mismatch and
+   closes a cheat vector. *(Part 2.0)*
+2. **Live↔async handoff happens only at round boundaries, never mid-round.**
+   There is no engine "checkpoint/resume": the incremental live ticker
+   (`guestTickCallback`) and the atomic `resolveRound()` are different machines.
+   If a peer drops mid-round, the present player finishes the round
+   *deterministically from the already-committed reveals* (same inputs the live
+   sim used), then the next round is async. No rewind, no mid-round adoption.
+   *(Part 3.2)*
+3. **Strangers are not play-by-mail.** Matchmade games assume a single session;
+   they get a short inactivity timeout and a "one-off" framing. Only friend
+   matches get the multi-day cadence. *(Part 2 + UX)*
+4. **Phase 3 (WebRTC accelerator) is gated, not assumed.** Parts 1+2 deliver the
+   entire stated ask on the durable log alone. Build Phase 3 only if measured
+   turn-resolution latency is a real complaint. *(Sequencing)*
 
-### 1.1 No retry on transient backend failures
+---
 
-`commitTurn`, `revealTurn`, `persistRoundResult` (`src/online-async.ts`) each
-return `false` on any error and the controller surfaces "please retry" to the
-user (`submitPlan`, `onRoundPlayed` in `src/online-async-game.ts`). A brief
-network blip therefore wedges the match until the player manually re-submits.
+## Part 1 — Reliability hardening (do first; ships value with no schema change)
 
-**Fix:** wrap all Supabase writes in a small retry helper with exponential
-backoff + jitter (e.g. 3 attempts: 300ms / 900ms / 2.7s). Distinguish
-*transient* failures (network/5xx — retry) from *logical* ones (RLS denial,
-unique-violation — don't retry, treat per 1.2/1.3). A single
-`withRetry(fn, { isTransient })` used by every write keeps this in one place.
+Concrete defects, with the corrected fixes from the correctness review.
 
-### 1.2 Commit is not idempotent
+### 1.1 Retry transient backend failures
+`commitTurn` / `revealTurn` / `persistRoundResult` (`src/online-async.ts`)
+return `false` on any error; the controller surfaces "please retry"
+(`submitPlan`, `onRoundPlayed`). A blip wedges the match.
 
+**Fix:** one `withRetry(fn, { isTransient })` wrapping every write — 3 attempts,
+exponential backoff + jitter (~300ms/900ms/2.7s). Retry only *transient*
+failures (network/5xx); never retry *logical* ones (RLS denial,
+unique-violation — those route to 1.2/1.4). The injectable `AsyncIO` seam
+(`online-async-game.ts:60`) and the `FakeBackend` test harness make this
+unit-testable by mocking failures.
+
+### 1.2 Idempotent commit — but do not clobber a reveal
 `commitTurn` does a bare `insert`; a retried/double-clicked commit hits the
-`(match_id, round, team)` primary key and returns an error the caller reads as
-failure. The player's commit actually landed, but they see "could not submit."
+`(match_id, round, team)` PK and reads as failure even though the commit landed.
 
-**Fix:** make commit idempotent. On unique-violation, re-read the existing row;
-if its `commit_hash` equals ours, treat as success. Better: use
-`upsert(..., { onConflict: 'match_id,round,team', ignoreDuplicates: true })`
-and then verify the stored hash matches. (Reveal is already idempotent at the
-query level, but should likewise be retried.)
+**Fix:** `upsert(..., { onConflict: 'match_id,round,team', ignoreDuplicates: true })`,
+then **read the row back and verify `commit_hash` equals ours**. Three outcomes:
+hash matches → success; row already has non-null `paths` (already revealed) →
+success, do nothing; hash differs → protocol violation (different paths under
+same slot), surface an unrecoverable error. `ignoreDuplicates` guarantees we
+never overwrite a revealed `paths` column. (Reveal is already idempotent at the
+query level but must also be retried per 1.1.)
 
-### 1.3 Realtime subscription has no liveness guarantee or fallback
-
-`subscribeMatch` (`src/online-async.ts`) logs the channel status but never acts
-on `CHANNEL_ERROR` / `TIMED_OUT` / `CLOSED`. If the socket drops, the match
-hangs silently with no recovery (the analysis confirmed there is no fallback
-poll). The comment "fire within seconds when both players online" is an
-assumption, not a guarantee.
+### 1.3 Self-healing subscription + safety-net poll (highest leverage)
+`subscribeMatch` (`src/online-async.ts:264`) logs channel status but never acts
+on `CHANNEL_ERROR`/`TIMED_OUT`/`CLOSED`, and there is no fallback. A dropped
+socket hangs the match silently.
 
 **Fix:**
-- On a non-`SUBSCRIBED` status, tear down and re-subscribe with backoff.
-- Add a **safety-net poll**: a low-frequency `refresh()` (e.g. every 15–20s)
-  while the match is open and the tab is visible, plus an immediate `refresh()`
-  on `visibilitychange → visible` and on `online` (network regained). This is
-  the single highest-leverage reliability fix — it makes the match
-  self-healing regardless of Realtime delivery.
+- On non-`SUBSCRIBED` status, tear down and re-subscribe with **bounded**
+  backoff (max ~5 attempts, 1/2/4/8/16s). After exhausting, surface a single
+  non-alarming notice and rely on the poll.
+- Add a **safety-net poll**: low-frequency `refresh()` (~15–20s) only while the
+  match is non-terminal **and the tab is visible**; plus an immediate
+  `refresh()` on `visibilitychange→visible` and on `online`. Pause the poll and
+  unsubscribe on `visibilitychange→hidden`.
+- **Correctness guard (already true in code — keep it):** when `fetchTurns`
+  returns `null` (transient), the poll must **no-op**, never act on a phantom
+  empty list. `step()` at `online-async-game.ts:243` already does this; the poll
+  must route through the same path and not bypass it. A poll must never
+  re-prompt a redraw.
 
-### 1.4 A dropped client can wedge the match forever
+### 1.4 Stop dropped clients wedging the match
+Three stuck states, none of which recover today:
 
-Three stuck states the analysis found, none of which recover today:
+- **Round-advance race.** Two clients resolve the same round; the first
+  `persistRoundResult` wins the `expectedRound` guard, the second fails.
+  **Fix (corrected):** treat the guard-failure-because-already-advanced case as
+  **benign success** — but do **not** clear the stash and continue blindly.
+  `onRoundPlayed` (`online-async-game.ts:191-199`) currently ignores `persist`'s
+  return value and clears the stash unconditionally. Change it to: check the
+  return; on guard-failure, **`refresh()` to pick up the advanced round
+  (including the now-set `seed`) before doing anything else, and only clear the
+  stash for a round once that round is confirmed advanced**. Surface an error
+  *only* if the round did not advance.
+- **Stale-seed re-derivation (new, from review).** After a lost round-1 advance
+  race, a client still holding `match.seed == null` in memory must **reload the
+  match before resolving round 2** — otherwise `match.seed ?? deriveMatchSeed(...)`
+  at `online-async-game.ts:298` re-derives a seed from round-2 hashes and
+  diverges. The `refresh()` in the fix above must complete before the next
+  `resolve()`.
+- **Stuck-reveal (opponent revealed, you never resolved).** Resolution must not
+  depend on one specific client staying alive — see 1.5.
+- **Indefinite wait.** Add an inactivity timeout (1.4b).
 
-- Opponent commits, then never reveals/resolves → you wait indefinitely.
-- A player resolves + advances; the other player's `persistRoundResult`
-  fails the `expectedRound` guard and they see an error instead of just
-  re-syncing to the new round.
-- Both drop mid-resolve; on reopen both race to persist and one gets an error.
+### 1.4b Abandon / forfeit / timeout (needs new infrastructure)
+**Verified:** there is **no scheduled-job infra** today (no `pg_cron`, no
+`Deno.cron`, only the webhook-triggered `notify-turn`). So this is real work:
+- Add nullable `last_move_at` (and `abandon_after`) columns to `matches`
+  (backward-compatible; backfill from `updated_at` on first access).
+- Add a scheduled Edge Function (`Deno.cron` or `pg_cron`) that flips a match to
+  `abandoned` past its threshold. **Friend matches: long (e.g. 7d). Matchmade:
+  short (e.g. 12–24h).**
+- Player-facing: a **Forfeit** button (self-initiated loss, any time), a
+  once-per-day **Nudge** (re-notify the opponent, or copyable message if push is
+  denied), and a **Claim-win** that only appears past threshold, with a short
+  grace/confirm window so a returning opponent isn't robbed. Mutual inactivity →
+  draw. Estimate: ~2–3 days incl. the cron function.
 
-**Fixes:**
-- **Treat the round-advance race as success, not error.** In `onRoundPlayed`,
-  if `persist` fails the `expectedRound` guard because the round already
-  advanced, that is the *expected* benign outcome — `refresh()` and continue
-  silently. Only surface an error if the round did **not** advance.
-- **Server-side resolution for the stuck-reveal case (see 1.5).** Once both
-  sides have revealed, the round outcome is fully determined; it should not
-  depend on a *specific* client staying alive to run `resolveRound`. Any
-  participant (or the server) can resolve it.
-- **Abandon/forfeit affordance + timeout.** Add an explicit "claim win /
-  abandon" path: if it's been the opponent's turn for longer than a threshold
-  (configurable, e.g. 7 days for friends; shorter for matchmade), either the
-  present player may claim, or a scheduled job flips the match to `abandoned`.
-  Surface this in the lobby ("Your friend hasn't moved in 3 days — [Nudge] /
-  [Claim win]").
+### 1.5 Make resolution any-client (then server-side)
+`resolveRound` runs on whichever client is present and *that* client writes the
+authoritative `latest_state` (`startAsyncRoundPlayback` in `main.ts`); the DB
+comment in `0001_async_matches.sql` admits "no server referee."
 
-### 1.5 Resolution is client-trusted and client-bound
+- **Short term:** allow *any* present client to resolve a fully-revealed round
+  it didn't personally play (relax the `playingRound` gate in `resolve()`),
+  persisting under the `expectedRound` guard so the first writer wins and the
+  rest no-op via 1.4.
+- **Medium term:** a Supabase Edge Function `resolve-round`, triggered by the
+  reveal webhook (mirroring `notify-turn`), runs the same deterministic
+  `resolveRound` server-side and writes `latest_state` + advances the round.
+  **Idempotency (new, from review):** the webhook can fire more than once and
+  both reveals may arrive near-simultaneously, so the function must (a) verify
+  both reveals are durably present, (b) check `current_round` still equals the
+  round being resolved and **no-op if it already advanced**, (c) persist under
+  the same `expectedRound` guard. This makes the match un-wedgeable and removes
+  the client-trust hole.
+- **Blocker (verified):** `src/game.ts:7-8` imports `Renderer` and `PathDrawer`,
+  which import `pixi.js`. The *pure* modules `resolveRound` needs (`units`,
+  `constants`, `types`, `rng`, `online-types`, `battlefield`, `ctf`,
+  `ai-scoring`, `obstacle-merge`) are all DOM-clean. Deno can't tree-shake, so
+  **extract the headless simulation into `game-core.ts`** (no Pixi/DOM) that
+  both the client `GameEngine` and the Edge Function import. Worth doing
+  regardless of the server-side step.
 
-`resolveRound` runs on whichever client happens to be present
-(`startAsyncRoundPlayback` in `main.ts`), and that client also *writes* the
-authoritative `latest_state`. The DB comment in `0001_async_matches.sql` is
-candid: "no server referee re-simulates the match." This is the root of both
-the wedge cases and a cheating vector (a client can write any `latest_state`).
+### 1.6 Recover from lost local stash (don't promise a redraw that can't work)
+Committed paths live only in `localStorage` (`localStoragePathStash`). If
+cleared, reveal is impossible and the current "please redraw it" message is a
+trap: the server already holds the old commit hash, so a redraw fails
+`verifyReveal` (`online-async-core.ts:111`) and the round can never resolve.
 
-**Fix (incremental):**
-- Short term: keep client resolution but make it *any-client* resolution —
-  remove the `playingRound === this.playingRound` gating so a freshly reopened
-  client will resolve a fully-revealed round it didn't personally play. Persist
-  with the `expectedRound` guard so the first writer wins and the rest no-op.
-- Medium term: add a **Supabase Edge Function `resolve-round`** that runs the
-  same deterministic `resolveRound` server-side once both reveals exist
-  (triggered by the reveal webhook, mirroring `notify-turn`). The server writes
-  `latest_state` + advances the round. Clients then become pure *animators* of
-  a result the server already computed — no client can wedge or forge it. The
-  engine is already headless and deterministic, so this reuses `resolveRound`
-  verbatim in a Deno function (the engine core must be import-clean of DOM —
-  see Risks).
+**Fix:**
+- Replace the false "redraw" affordance with an explicit, honest path: detect
+  the lost-stash case and offer **Forfeit this round** (advance via 1.4b
+  semantics) so the match is never permanently wedged.
+- *Optional* device-recovery: store an **encrypted** copy of the paths in the
+  `turns` row at commit, revealing the key only at reveal. **Caveat (from
+  review):** a key derived purely from public `matchId + userId` is brute-forceable
+  by anyone with DB access (small path space → known-plaintext attack), so it
+  does **not** preserve blind fairness against a malicious server. If pursued,
+  the key must include a client-held secret the server cannot derive — and even
+  then it only survives same-device resets, **not** device switches (anonymous
+  `auth.uid()` differs per device, `online-auth.ts`). Given the complexity, the
+  **Forfeit escape hatch is the recommended baseline**; treat encrypted recovery
+  as a later nice-to-have.
 
-### 1.6 Lost local stash blocks reveal with no recovery
+### 1.7 Notifications: idempotent, observable, host-aware
+`notify-turn` swallows errors and always returns 200; `registerTurnNotifications`
+(`online-push.ts`) clobbers the player row each call. **Also (from review):**
+`notify-turn` early-returns when the opponent is `null`, so a host's first move
+(2.2) sends nothing.
 
-After commit, paths live only in `localStorage` (`localStoragePathStash`). If
-that's cleared (or the player switches devices), reveal is impossible and they
-see "your submitted plan was lost; please redraw it" — but the commit hash is
-already on the server, so a redraw won't match and the round can't resolve.
+**Fix:** retry push once on transient FCM/Resend failure; log delivery
+outcomes; only write changed fields on re-register; and handle the
+no-guest-yet case explicitly (no error, defer the "your turn" notification
+until a guest joins). Lower priority than 1.1–1.5.
 
-**Fix:** make the stash recoverable. Options, in order of preference:
-- Encrypt the paths client-side and store the ciphertext in the `turns` row at
-  commit time (key derived from the match id + user); reveal just publishes the
-  key/plaintext. This keeps blind-fairness (server can't read pre-reveal) while
-  making reveal device-independent. Simpler interim: accept that on stash loss
-  we can offer "redraw" only if the player hasn't committed elsewhere, and
-  detect the hash-mismatch case explicitly with a clear message + a "forfeit
-  round" escape hatch so the match isn't permanently wedged.
-
-### 1.7 Notifications are best-effort and swallow failures
-
-`notify-turn` (`supabase/functions/notify-turn`) catches push/email errors and
-always returns 200; `registerTurnNotifications` (`src/online-push.ts`)
-overwrites the player row on every call and ignores upsert failures.
-
-**Fix:** make the function idempotent and observable (log delivery
-success/failure to a table or at least structured logs); retry push once on
-transient FCM/Resend failure; stop clobbering `email`/flags on re-register
-(only write fields that changed). Lower priority than 1.1–1.5.
-
-**Outcome of Part 1:** the *existing* async mode becomes reliable and
-self-healing. Ship it. This de-risks everything after it.
+**Outcome of Part 1:** the existing async mode becomes reliable and
+self-healing. Shippable on its own.
 
 ---
 
-## Part 2 — One lobby, drop-in / drop-out, first move before the opponent
+## Part 2 — One protocol, one lobby, first move, real drop-in/out
 
-This is the UX unification. It does **not** require WebRTC yet — it's built
-entirely on the (now reliable) durable turn log.
+### 2.0 Uniform commit-reveal seed (the unification prerequisite)
+Per the decision above: route **live** rounds through commit→reveal with
+`deriveMatchSeed` too. This is the change that makes one source of truth
+*actually* true and is a precondition for any later live accelerator. Without
+it, Part 3 cannot degrade safely. (If we decide we never want live unification,
+we can skip 2.0 and keep live WebRTC fully separate — see Sequencing.)
 
-### 2.1 Collapse the menu to one "Play online" flow
+### 2.1 Collapse the menu — with the right framing per intent
+Today: three buttons (`online-btn`, `online-random-btn`, `online-async-btn`) →
+three paths (`startOnlineHostGame`, `startOnlineGuestMode`, `startAsyncGame`).
+Collapse to:
+- **Play with a friend** → durable match + share link (multi-day cadence).
+- **Play a stranger** → matchmaking that creates/joins a **durable match**, but
+  framed as a **single session** with a short timeout (Decision 3). Do **not**
+  imply a stranger will return for turn 2.
 
-Today there are three buttons (`online-btn`, `online-random-btn`,
-`online-async-btn`) and three code paths (`startOnlineHostGame`,
-`startOnlineGuestMode`, `startAsyncGame`). Collapse to:
+**Feasibility (verified):** the matchmaking change itself is small —
+`online-matchmaking.ts` swaps `generateRoomId()` for `createAsyncMatch()` and
+returns a match id + team — **but the ripple is medium-to-large**: `main.ts`'s
+`startOnlineGuestMode`/host flows must open `AsyncGameController` instead of the
+WebRTC engine, and `online-matchmaking.test.ts` needs a new variant. Scope it as
+its own chunk (~2–3 days), not a one-liner.
 
-- **Play with a friend** → creates a durable match, shows the share link.
-- **Play a stranger** → matchmaking (existing `online-matchmaking.ts`) that
-  *creates / joins a durable match* instead of a bare WebRTC room.
+### 2.2 Let the host move first
+While `status === 'open'`, still show the share link **and** let the host plan +
+commit round 1. The commit-reveal model already supports this: the host's hash
+sits in `turns`; the moment a guest joins (`status → active`) and commits, the
+round resolves.
 
-Both land in the **same `AsyncGameController`-driven flow**. "Live" vs
-"play-by-mail" is no longer a choice the player makes — it's just how fast the
-other side happens to respond.
+**Feasibility (corrected — not "small, contained"):** the controller change is
+one early-return at `online-async-game.ts:253`, but it ripples:
+- `asyncHooks()` in `main.ts` must merge `onWaitingForGuest` (hides planning,
+  shows share link) and `onPlanTurn` (shows planning) into a combined
+  share-link-**and**-planning state.
+- Notification timing must change (1.7): suppress "your turn" until a guest
+  exists, then notify on join.
+- The existing test `online-async-game.test.ts:438-455` asserts the **opposite**
+  ("no premature planning") and must be rewritten.
+Estimate ~1 day. Still the highest visible-payoff change.
 
-### 2.2 Let the host move first ("first move before opponent arrives")
-
-Currently `onWaitingForGuest` (`online-async-game.ts` → `main.ts`) parks the
-host on the share-link screen and *blocks planning* until a guest joins. The
-request is to let them plan round 1 immediately.
-
-**Change:** while `status === 'open'`, still show the share link, **but also
-allow the host to plan and commit round 1.** The commit-reveal model already
-supports this perfectly — the host commits a hash, it sits in `turns`, and the
-moment a guest joins (`status → active`) and commits, the round resolves. This
-is a small, contained change:
-
-- In `step()`, for `action === 'commit'` while `status === 'open'`: show the
-  share link **and** enable planning (instead of returning early at
-  `online-async-game.ts:253`).
-- Keep `onWaitingForGuest` for the post-commit state ("Move locked in — waiting
-  for a friend to join and play").
-
-This makes the host's first session productive instead of a dead wait, and it's
-the single most visible "seamless" improvement.
-
-### 2.3 Drop-in / drop-out is already the model — make the UI honest about it
-
-Because state is durable, leaving and returning is just unsubscribe / reopen.
-The work here is presentational, not architectural:
-
-- A **"matches" list** screen (we already store match ids; list the player's
-  active matches with whose-turn-it-is badges). Reopening any match calls
-  `startAsyncGame(id)`. This turns drop-out from "lose the game" into "come back
-  later," and gives notifications somewhere to deep-link.
-- Clear, non-alarming presence/status copy driven by match state + (optionally)
-  a lightweight presence channel (2.4): "Your turn," "Waiting for Alex,"
-  "Alex is here now" (live), "Alex left — your move is saved."
-- The existing deep-link (`?amatch=`) already resumes; ensure
-  `notify-turn`/push payloads carry it (they do) and that the matches list is
-  the default landing when several are active.
+### 2.3 Drop-in/out + a matches list (the resume primitive)
+Durable state makes leaving/returning just unsubscribe/reopen; the work is
+presentational:
+- A **matches list** screen with explicit status badges: **Your turn** (you
+  haven't committed), **Waiting for opponent** (you committed), **Round playing**
+  (both committed, resolving), **Abandoned**. Reopening calls `startAsyncGame(id)`.
+- A small **concurrent-match cap** (e.g. 5) with a clear "finish or abandon one"
+  message; **unread badges** for matches awaiting you; **abandoned-match
+  lifecycle** (auto-hide/archive after ~30d, retain in DB).
+- The `?amatch=` deep link already resumes; ensure push payloads carry it (they
+  do) and that the matches list is the default landing when several are active.
 
 ### 2.4 Optional presence (cheap, no WebRTC)
+A Supabase Realtime **presence** channel per match drives "opponent is online
+now" affordances. **Strictly a UI hint** (from review): presence is best-effort
+and must **not** drive the safety-net poll frequency or any correctness
+decision — the state machine is driven by Postgres `turns` alone.
 
-To make "the other player is here right now" feel live without P2P, add a
-Supabase Realtime **presence** channel per match (separate from the
-postgres-changes subscription). This drives "Alex is online" affordances and
-lets us tighten the safety-net poll when both are present. Pure additive; no
-effect on correctness.
-
-**Outcome of Part 2:** one mode, first-move-before-opponent, real drop-in/out,
-a matches list. Still 100% durable-log based — already "seamless and reliable"
-for the turn-based cadence. **This may be enough**; Part 3 is the latency
-optimization on top.
+**Outcome of Part 2:** one protocol, one lobby, first-move-before-opponent, real
+drop-in/out, a matches list — all on the durable log. **This likely satisfies
+the entire ask.** Part 3 is pure latency polish.
 
 ---
 
-## Part 3 — WebRTC as a live accelerator (optimization, not a mode)
+## Part 3 — WebRTC as a live accelerator (gated; round-boundary handoff only)
 
-Now layer real-time speed onto the unified flow for the case where both players
-are actively present and want the round to *animate live* rather than each
-watching a resolved replay.
+Layer real-time animation onto the unified flow for the case where both players
+are present and want the round to animate live rather than each watching a
+resolved replay.
 
-### 3.1 Reframe the transport layer
+### 3.1 Reframe the transport, not the truth
+Keep the clean transport seam — `PeerHandle`/`PeerCallbacks`
+(`src/online-peer.ts`), the racing/failover proxy in `connectTransport`
+(`src/online.ts`), typed channels in `createOnlineRoom`. Change *what it
+carries*: commit/reveal messages mirrored over the data channel for instant
+feel **and** written to Postgres for durability. Because of 2.0 the seed is the
+same on both sides regardless of which message arrived first. The persisted
+result is always `resolveRound`'s deterministic output (already true in the
+async path), so a desync or drop never corrupts the match.
 
-The WebRTC/relay stack already hides behind a clean transport seam:
-`PeerHandle` + `PeerCallbacks` (`src/online-peer.ts`), the racing/failover proxy
-in `connectTransport` (`src/online.ts`), and typed channels in
-`createOnlineRoom`. Keep all of it — but change *what it carries*. Instead of
-being the source of truth, the live channel becomes a **low-latency mirror of
-the durable turn log**:
+### 3.2 Degrade only at round boundaries (Decision 2)
+There is **no mid-round engine handoff** — the incremental live ticker
+(`guestTickCallback`, `main.ts:839`) and atomic `resolveRound()`
+(`main.ts:1224`) are different machines and the engine has no checkpoint/resume.
+So:
+- If WebRTC dies **mid-round**, the present player **finishes the current round
+  deterministically from the already-committed reveals** (the very inputs the
+  live sim was using — identical outcome, guaranteed by 2.0). The UI shows an
+  "Opponent disconnected — finishing the round" overlay; no rewind.
+- The **next** round is plain async until/unless the peer returns and a live
+  channel re-establishes at the next boundary.
+This keeps "seamless" honest: live when both are present, play-by-mail when not,
+switching cleanly between rounds.
 
-- When both peers are connected, a commit/reveal is sent over the data channel
-  *and* written to Postgres. The data channel makes it feel instant; the DB
-  write makes it durable and is the tie-breaker.
-- The live simulation (host-authoritative lockstep, `guestTickCallback` in
-  `main.ts`) runs exactly as today for the *animation*, but the **persisted
-  result is always `resolveRound`'s deterministic output** (already true in the
-  async path via `startAsyncRoundPlayback`). So a desync or a mid-round drop
-  never corrupts the match — worst case both sides fall back to watching the
-  resolved replay, which the durable log can always reproduce.
+### 3.3 Signaling shares the match identity
+WebRTC signaling already uses a Realtime channel keyed by room id
+(`rtc-${roomId}`); key it by the durable match id so the live session and turn
+log are one identity. When presence (2.4) shows both players present, clients
+opportunistically open the data channel; if it never connects, nothing breaks —
+it's async underneath.
 
-### 3.2 Drop-out during a live round degrades gracefully
+### Simpler alternative if Phase 3 isn't worth it
+If latency never becomes a complaint, the honest option is to **keep live
+WebRTC as a separate fast-path that only shares the lobby + matchmaking**, and
+*not* route it through the turn log at all (skip 2.0/3.x). This is less elegant
+but avoids the extra live commit round-trip and the dual-write path. Decide
+based on real usage, not aesthetics.
 
-If the WebRTC link dies mid-round (today: game over), the present player simply
-finishes the round as a resolved/animated async round from the durable
-reveals, and the match continues. The departing player picks it up later from
-the durable log. The existing `connectTransport` failover (WebRTC → relay →
-close) becomes "live → still-live-via-relay → fall back to turn-log," with the
-last step being graceful instead of fatal.
+---
 
-### 3.3 Signaling reuses the match row
+## Cross-cutting: product / UX requirements
 
-WebRTC signaling already uses a Supabase Realtime channel keyed by room id
-(`rtc-${roomId}` in `online-peer.ts`). Key it by the durable match id so a live
-session and its turn log are the same identity. When a player opens a match and
-sees (via presence, 2.4) that the opponent is also present, the client opportun-
-istically establishes the data channel; if it never connects, nothing breaks —
-it's pure async underneath.
+These make the experience *feel* seamless and reliable, beyond correctness:
 
-**Outcome of Part 3:** when both are present it feels like today's live game
-(instant, animated, lockstep); when one leaves it silently becomes
-play-by-mail; when they return it's live again. One match, one source of truth,
-no mode switch.
+- **First-move fairness copy (2.2):** explain that both players commit blindly
+  regardless of who moved first ("your opponent's move stays hidden until you've
+  both committed — still a fair simultaneous turn"), so a late-joining friend
+  doesn't feel disadvantaged.
+- **Retry/error feedback (1.1):** during auto-retry show a quiet "Submitting…"
+  state, not a raw error; on final failure show a plain-language message and a
+  reassurance that the move is saved locally. Never surface backend codes.
+- **Reconnection/sync UX (1.3):** when the subscription is down >~5s, show a
+  subtle "Syncing…" on the affected match; resume cleanly on
+  background→foreground.
+- **Live-disconnect UX (3.2):** the "Opponent disconnected — finishing the
+  round" overlay, plus a one-line determinism reassurance if asked ("the result
+  is the same as if they'd stayed").
+- **Abandon/forfeit UX (1.4b):** Forfeit (self), Nudge (≤1/day), Claim-win with
+  a grace window, a returning-opponent "at risk" banner, mutual-inactivity draw,
+  and clear "ended after N days inactivity" messaging.
+- **Onboarding (2.1):** first async match shows a one-liner ("take turns over
+  hours or days; you'll be notified when it's your turn"); first commit shows
+  "locked in — you can close the app."
+- **Notifications-denied (1.7/2.3):** pre-prompt rationale before the OS dialog;
+  if denied, tell the player to check the matches list and badge accordingly.
 
 ---
 
 ## Suggested sequencing
 
-| Phase | Deliverable | Depends on | Risk |
-|---|---|---|---|
-| **1** | Reliability hardening (retry, idempotent commit, self-healing subscription + safety-net poll, race-as-success, abandon timeout) | — | low, high value |
-| **1b** | Server-side `resolve-round` Edge Function (anti-wedge, anti-cheat) | engine headless-clean | medium |
-| **2** | One lobby; host-first-move; matches list; durable drop-in/out; presence | Phase 1 | low |
-| **3** | WebRTC demoted to live-accelerator mirror of the turn log; graceful live→async degradation | Phases 1–2 | medium |
+| Phase | Deliverable | Depends on | Est. | Risk |
+|---|---|---|---|---|
+| **1** | Reliability: retry (1.1), idempotent commit (1.2), self-healing sub + safety-net poll (1.3), race-as-success + stale-seed guard (1.4) | — | 3–5 d | low, high value |
+| **1a** | Abandon/forfeit + scheduled-job infra + `last_move_at` columns (1.4b) | new cron fn | 2–3 d | medium (new infra) |
+| **1b** | Extract `game-core.ts`; server-side `resolve-round` Edge Function (1.5) | core extraction | 3–5 d | medium |
+| **2.0** | Uniform commit-reveal seed for live rounds | 1 | 2–3 d | medium (live protocol change) |
+| **2** | One lobby (2.1), host-first-move (2.2, incl. test rewrite), matches list + drop-in/out (2.3), presence (2.4), UX copy | 1, 2.0 | 1–2 wk | low–medium |
+| **3** | WebRTC live accelerator, round-boundary degradation (gated on latency data) | 1–2 | 1–2 wk | medium |
 
-Phases 1 and 2 deliver the bulk of "seamless and reliable" on their own. Phase 3
-is the latency cherry on top and is the only part touching the WebRTC code.
+Parts 1 + 2 deliver the full ask. 1b and 3 are the heavier, optional pieces.
 
 ---
 
-## Risks & open questions
+## Risks & open questions (with verified facts)
 
-- **Engine must be import-clean for server-side resolution (1b/3).** `resolveRound`
-  is static and headless, but confirm the `game.ts` import graph pulls in no
-  DOM/Pixi modules so it can run in a Deno Edge Function. If it does, extract the
-  pure simulation core into a DOM-free module. (Worth doing regardless.)
-- **Trust model.** Today's "friends don't cheat" stance (client writes
-  `latest_state`) is fine for *play with a friend* but weak for *play a
-  stranger*. Server-side resolution (1b) closes this; decide whether matchmade
-  games require it before launch.
-- **Cost.** Safety-net polling + presence raise Supabase Realtime/DB usage
-  modestly. Bound poll frequency, only poll visible tabs, and stop when a match
-  is terminal. Quantify against the free-tier limits noted in
-  `docs/plans/2026-03-07-online-pvp-design.md`.
-- **Migration.** In-flight async matches must keep working across the schema/flow
-  changes; all Part 2/3 changes are additive to the existing tables (no
-  destructive migration anticipated). New columns (e.g. encrypted stash, last-
-  move timestamps for the timeout) are nullable additions.
-- **Notification timing for "your turn"** already exists (`notify-turn` +
-  `online-push.ts`); make sure the unified flow fires it on every transition to
-  the opponent's-action state, including the new host-first-move case.
+- **Engine not import-clean — confirmed.** `game.ts:7-8` pulls in Pixi via
+  `Renderer`/`PathDrawer`; the simulation core is otherwise DOM-free. Server-side
+  resolution (1b) requires the `game-core.ts` extraction first.
+- **No scheduled-job infra — confirmed.** Abandon timeout (1.4b) is new work
+  (`Deno.cron`/`pg_cron` + columns), not config.
+- **Test harness is ready — confirmed.** `FakeBackend` + `memStash` + injectable
+  `AsyncIO` (`online-async-game.test.ts`) make Parts 1/2.0 testable offline; the
+  host-first-move test at `:438-455` must be rewritten.
+- **Live seed-model change (2.0)** adds one round-trip to live play. Acceptable
+  for a turn-based game, but confirm it doesn't make the live path feel laggy
+  before committing to Phase 3.
+- **Trust model.** Client-written `latest_state` is fine for friends, weak for
+  strangers; the server-side resolver (1b) closes it. Decide whether matchmade
+  games *require* 1b before launch.
+- **Cost/quota.** Bound poll frequency (visible tabs only, stop on terminal),
+  cap concurrent matches, and degrade gracefully (pause poll + banner) near
+  free-tier limits; quantify against `docs/plans/2026-03-07-online-pvp-design.md`.
+- **Migration.** All changes are additive (nullable columns, new tables/fns);
+  in-flight matches must open unchanged — backfill `last_move_at` from
+  `updated_at` lazily rather than via a destructive migration.
+- **Strangers in an async shell — open question.** Even with a short timeout, is
+  matchmade play better served by *live-only* (no durable resume)? Revisit after
+  Part 2 ships and we see real abandon rates.
 
 ---
 
 ## What I'd build first
 
-If we want one concrete, shippable starting point: **Phase 1's self-healing
-subscription + safety-net poll (1.3) and race-as-success (1.4)**, because
-together they eliminate the great majority of "it just got stuck" reports with
-a small, well-contained change to `online-async.ts` and `online-async-game.ts`
-— no schema change, no new infrastructure. Host-first-move (2.2) is the next
-smallest change with the biggest visible "seamless" payoff.
+**Part 1 items 1.3 + 1.4** (self-healing subscription + safety-net poll, plus
+race-as-success with the stale-seed guard): the smallest change — contained to
+`online-async.ts`/`online-async-game.ts`, no schema, no new infra — that
+eliminates the great majority of "it just got stuck" reports. Then **host-first
+move (2.2)** as the biggest visible "seamless" win (budget the UI/test ripple).
+Treat 2.0 + Part 3 as a separate, latency-driven decision.
