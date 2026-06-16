@@ -480,6 +480,11 @@
             sessionStorage.removeItem('7s-pending-join');
             window.dispatchEvent(new CustomEvent('age-verified-join', { detail: pendingJoin }));
           }
+          var pendingAsync = sessionStorage.getItem('7s-pending-async-join');
+          if (pendingAsync) {
+            sessionStorage.removeItem('7s-pending-async-join');
+            window.dispatchEvent(new CustomEvent('age-verified-async-join', { detail: pendingAsync }));
+          }
         };
         document.getElementById('age-gate-no').onclick = function() {
           document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;text-align:center;padding:32px;color:var(--color-text);font-family:system-ui"><p style="font-size:16px;opacity:0.8">Sorry, you must be at least 13 years old to play this game.</p></div>';
@@ -496,6 +501,7 @@
       <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-horde-bg);color:var(--color-btn-horde-text);border:2px solid var(--color-btn-horde-border);border-radius:4px;cursor:pointer">Horde</button>
       <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Online vs Random <span class="beta-tag">BETA</span></button>
       <button id="online-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Online vs Friend</button>
+      <button id="online-async-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Async vs Friend <span class="beta-tag">BETA</span></button>
       <button id="battle-btn">Local PvP</button>
     </div>
     <!-- CTF buttons hidden for now -->
@@ -559,6 +565,11 @@
       <p style="font-size:14px;opacity:0.7;margin:0">Share this link with your opponent:</p>
       <input id="online-share-url" type="text" readonly style="width:100%;box-sizing:border-box;padding:10px;font-size:14px;background:var(--color-online-url-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;text-align:center" />
       <button id="online-copy-btn" style="padding:10px 32px;font-size:15px;font-weight:bold;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer;width:100%">Share Link</button>
+    </div>
+    <div id="async-notify" style="display:none;flex-direction:column;align-items:center;gap:10px;background:var(--color-online-border-subtle);border:1px solid var(--color-online-border);border-radius:8px;padding:16px;max-width:400px;width:90vw">
+      <p style="font-size:13px;opacity:0.7;margin:0;text-align:center">Get notified when it's your turn (optional):</p>
+      <input id="async-email" type="email" placeholder="your@email.com" style="width:100%;box-sizing:border-box;padding:10px;font-size:14px;background:var(--color-online-url-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;text-align:center" />
+      <button id="async-notify-btn" style="padding:8px 24px;font-size:14px;font-weight:bold;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;width:100%">Notify me</button>
     </div>
     <button id="online-cancel-btn" style="padding:8px 24px;font-size:14px;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;opacity:0.7;margin-top:8px">Cancel</button>
   </div>
