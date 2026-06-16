@@ -31,20 +31,25 @@ Landed and unit-tested (330 tests green, production build clean):
   Renderer/PathDrawer + `Renderer.createPathDrawer`), unblocking server-side use.
 - **2.2 Host-first-move** — host plans/commits round 1 before a guest joins;
   `awaitingGuest` flag + "Plan your first move" lobby button.
+- **2.3 Matches list** — `summariseMatch` (pure, tested) + `loadMyMatches`
+  (batched) + a "My Matches" screen with an unread badge; tap to resume any
+  match. Includes a soft concurrent-match cap on creation.
+- **1.5 (short-term half)** — any reopened/polling client already resolves a
+  fully-revealed round it didn't personally play, so the stuck-reveal wedge is
+  closed by the existing resolve flow + the new safety-net poll.
 - **1a Abandon timeout** — `supabase/migrations/0003_reliability.sql`
   (`last_move_at`, `abandon_after`, `expire_abandoned_matches()` + pg_cron).
   Pure SQL; **needs applying in the Supabase dashboard** (no client deploy here).
 
-Not yet implemented (scoped below; larger and/or needs infra I can't verify
-from this environment):
+Not yet implemented (need infra I can't verify here, or rewrite the working live
+WebRTC path which needs browser verification — deliberately not shipped blind):
 
-- **1.5 server-side `resolve-round` Edge Function** — engine is now headless so
-  this is unblocked, but it needs a Deno deploy + reveal webhook wiring.
+- **1.5 (medium-term) server-side `resolve-round` Edge Function** — engine is
+  now headless so it's unblocked, but it needs a Deno bundling/deploy + reveal
+  webhook wiring that can't be validated from this environment.
 - **2.0 uniform commit-reveal seed for live**, **2.1 matchmaking→durable
-  match**, **2.3 matches list**, **Part 3 WebRTC accelerator** — these are the
-  1–2 week items; they rewrite the working live path and/or need browser
-  verification, so they are deliberately left for a follow-up rather than
-  shipped blind.
+  match**, **Part 3 WebRTC accelerator** — the 1–2 week items that rewrite the
+  live path; left for a browser-verified follow-up.
 
 ## The ask
 

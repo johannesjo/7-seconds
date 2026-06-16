@@ -1392,6 +1392,9 @@ function asyncHooks(): AsyncGameHooks {
   };
 }
 
+/** Soft cap on simultaneously in-play async matches per player. */
+const MAX_CONCURRENT_ASYNC_MATCHES = 5;
+
 /** Start an async match: create a new one (host) or open/join an existing one. */
 async function startAsyncGame(roomId: string | null): Promise<void> {
   await initRenderer();
@@ -1409,6 +1412,16 @@ async function startAsyncGame(roomId: string | null): Promise<void> {
 
   let id = roomId;
   if (!id) {
+    // Cap concurrent open matches so a player can't strand a pile of zombies a
+    // friend never joins (and clutter their own list). Existing matches can
+    // always be resumed/forfeited from "My Matches".
+    const mine = await loadMyMatches();
+    const liveCount = mine?.filter(s =>
+      s.match.status === 'open' || s.match.status === 'active').length ?? 0;
+    if (liveCount >= MAX_CONCURRENT_ASYNC_MATCHES) {
+      setOnlineStatus(`You already have ${liveCount} matches on the go. Finish or forfeit one from "My Matches" before starting another.`);
+      return;
+    }
     setOnlineStatus('Creating match...', true);
     const generated = GameEngine.generateInitialState();
     const created = await createAsyncMatch(generated);
