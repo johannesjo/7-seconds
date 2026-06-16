@@ -102,6 +102,21 @@ function setOnlineStatus(text: string, showSpinner = false): void {
   onlineSpinner.style.display = showSpinner ? 'block' : 'none';
 }
 
+const toastEl = document.getElementById('toast')!;
+let toastTimer: number | undefined;
+/** Transient in-app banner that auto-dismisses. Used for the "it's your turn"
+ *  cue while the app is focused; backgrounded users get notify() instead. */
+function showToast(message: string): void {
+  toastEl.textContent = message;
+  toastEl.style.opacity = '1';
+  toastEl.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastEl.style.opacity = '0';
+    toastEl.style.transform = 'translateX(-50%) translateY(20px)';
+  }, 3500);
+}
+
 // State
 let renderer: Renderer | null = null;
 let engine: GameEngine | null = null;
@@ -1268,6 +1283,11 @@ function asyncHooks(): AsyncGameHooks {
       battleHud.style.display = 'none';
       roundCounterEl.textContent = `Round ${round}`;
       showScreen('battle');
+      // It's the player's turn: in-app toast when focused; notify() (OS / native
+      // Capacitor on Android) covers the backgrounded case and self-guards on
+      // visibility, so the two never double-fire.
+      if (document.visibilityState === 'visible') showToast("It's your turn!");
+      notify('7 Seconds', "It's your turn to plan!");
     },
 
     onAwaitOpponent(round) {
