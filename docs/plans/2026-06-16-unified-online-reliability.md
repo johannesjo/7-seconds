@@ -37,16 +37,18 @@ Landed and unit-tested (330 tests green, production build clean):
 - **1.5 (short-term half)** — any reopened/polling client already resolves a
   fully-revealed round it didn't personally play, so the stuck-reveal wedge is
   closed by the existing resolve flow + the new safety-net poll.
+- **1.5 (server-side resolver)** — `supabase/functions/resolve-round/` runs the
+  SAME deterministic engine server-side (vendored bundle via `npm run build:edge`
+  from `src/engine-entry.ts`), idempotent + race-safe. The bundle is proven to
+  reproduce the engine headlessly by `engine-entry.test.ts`. **Needs deploy +
+  a turns-UPDATE webhook** (see `docs/async-play.md` Phase 3).
 - **1a Abandon timeout** — `supabase/migrations/0003_reliability.sql`
   (`last_move_at`, `abandon_after`, `expire_abandoned_matches()` + pg_cron).
   Pure SQL; **needs applying in the Supabase dashboard** (no client deploy here).
 
-Not yet implemented (need infra I can't verify here, or rewrite the working live
-WebRTC path which needs browser verification — deliberately not shipped blind):
+Not yet implemented (rewrite the working live WebRTC path, which needs
+two-browser verification — deliberately not shipped blind):
 
-- **1.5 (medium-term) server-side `resolve-round` Edge Function** — engine is
-  now headless so it's unblocked, but it needs a Deno bundling/deploy + reveal
-  webhook wiring that can't be validated from this environment.
 - **2.0 uniform commit-reveal seed for live**, **2.1 matchmaking→durable
   match**, **Part 3 WebRTC accelerator** — the 1–2 week items that rewrite the
   live path; left for a browser-verified follow-up.
