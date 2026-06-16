@@ -567,9 +567,11 @@
       <button id="online-copy-btn" style="padding:10px 32px;font-size:15px;font-weight:bold;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer;width:100%">Share Link</button>
     </div>
     <div id="async-notify" style="display:none;flex-direction:column;align-items:center;gap:10px;background:var(--color-online-border-subtle);border:1px solid var(--color-online-border);border-radius:8px;padding:16px;max-width:400px;width:90vw">
-      <p style="font-size:13px;opacity:0.7;margin:0;text-align:center">Get notified when it's your turn (optional):</p>
-      <input id="async-email" type="email" placeholder="your@email.com" style="width:100%;box-sizing:border-box;padding:10px;font-size:14px;background:var(--color-online-url-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;text-align:center" />
-      <button id="async-notify-btn" style="padding:8px 24px;font-size:14px;font-weight:bold;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;width:100%">Notify me</button>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+        <input id="async-notify-cb" type="checkbox" style="width:16px;height:16px;cursor:pointer" />
+        <span>Notify me when it's my turn</span>
+      </label>
+      <p id="async-notify-hint" style="font-size:12px;opacity:0.7;margin:0;text-align:center;min-height:1em"></p>
     </div>
     <button id="online-cancel-btn" style="padding:8px 24px;font-size:14px;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;opacity:0.7;margin-top:8px">Cancel</button>
   </div>

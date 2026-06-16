@@ -75,3 +75,23 @@ export async function registerTurnNotifications(opts: { email?: string } = {}): 
   }
   return true;
 }
+
+/** Explicit push opt-in/out from the lobby checkbox. Enabling captures the
+ *  current Web Push subscription and sets notify_push; disabling clears the
+ *  flag so the notify-turn function stops sending. */
+export async function setTurnNotifications(enabled: boolean): Promise<boolean> {
+  const uid = await ensureAuth();
+  if (!uid) return false;
+
+  const row: Record<string, unknown> = { id: uid, notify_push: enabled };
+  if (enabled) {
+    const webPush = await getWebPushSubscription();
+    if (webPush) row.web_push = webPush;
+  }
+  const { error } = await getSupabaseClient().from('players').upsert(row);
+  if (error) {
+    dlog(`push: set notifications failed ${error.message}`);
+    return false;
+  }
+  return true;
+}

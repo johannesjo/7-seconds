@@ -15,7 +15,7 @@ import { findMatch } from './online-matchmaking';
 import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
 import type { PathList } from './online-async-core';
 import { createAsyncMatch, getAsyncJoinId } from './online-async';
-import { registerTurnNotifications } from './online-push';
+import { registerTurnNotifications, setTurnNotifications } from './online-push';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash, isPlausibleGameState } from './online-types';
 import { PathDrawer } from './path-drawer';
@@ -75,8 +75,8 @@ const exitGameBtn = document.getElementById('exit-game-btn')!;
 const onlineBtn = document.getElementById('online-btn')!;
 const onlineAsyncBtn = document.getElementById('online-async-btn')!;
 const asyncNotify = document.getElementById('async-notify')!;
-const asyncEmail = document.getElementById('async-email') as HTMLInputElement;
-const asyncNotifyBtn = document.getElementById('async-notify-btn')!;
+const asyncNotifyCb = document.getElementById('async-notify-cb') as HTMLInputElement;
+const asyncNotifyHint = document.getElementById('async-notify-hint')!;
 const onlineRandomBtn = document.getElementById('online-random-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
 const onlineStatus = document.getElementById('online-status')!;
@@ -1331,6 +1331,9 @@ async function startAsyncGame(roomId: string | null): Promise<void> {
   onlineStatus.style.display = '';
   document.getElementById('online-record')!.style.display = 'none';
   asyncNotify.style.display = 'flex';
+  // Reflect current push state in the checkbox (permission granted ≈ subscribed).
+  asyncNotifyCb.checked = typeof Notification !== 'undefined' && Notification.permission === 'granted';
+  asyncNotifyHint.textContent = '';
   void registerTurnNotifications();
 
   let id = roomId;
@@ -1387,14 +1390,25 @@ onlineAsyncBtn.addEventListener('click', () => {
 });
 
 // Async notification opt-in (email + web push)
-asyncNotifyBtn.addEventListener('click', async () => {
-  // Await the grant before registering: Web Push can only capture a subscription
-  // once permission is 'granted', so the first opt-in must not race it.
+asyncNotifyCb.addEventListener('change', async () => {
+  if (!asyncNotifyCb.checked) {
+    await setTurnNotifications(false);
+    asyncNotifyHint.textContent = '';
+    return;
+  }
+  // Enabling: await the permission grant before subscribing — Web Push can only
+  // capture a subscription once permission is 'granted'.
+  asyncNotifyHint.textContent = 'Enabling…';
   await requestNotificationPermission();
-  asyncNotifyBtn.textContent = 'Saving...';
-  const ok = await registerTurnNotifications({ email: asyncEmail.value });
-  asyncNotifyBtn.textContent = ok ? "You'll be notified ✓" : 'Notifications unavailable';
-  setTimeout(() => { asyncNotifyBtn.textContent = 'Notify me'; }, 3000);
+  const granted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
+  if (!granted) {
+    asyncNotifyCb.checked = false;
+    asyncNotifyHint.textContent = 'Notifications are blocked in your browser settings.';
+    return;
+  }
+  const ok = await setTurnNotifications(true);
+  asyncNotifyCb.checked = ok;
+  asyncNotifyHint.textContent = ok ? "You'll be notified when it's your turn." : 'Could not enable notifications.';
 });
 
 // Online vs Random — client-side matchmaking via Supabase Realtime
