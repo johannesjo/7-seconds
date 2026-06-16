@@ -8,9 +8,12 @@ function isNative(): boolean {
   return Capacitor.isNativePlatform();
 }
 
-export function requestNotificationPermission(): void {
-  if (permissionPromise) return;
-  permissionPromise = doRequestPermission();
+/** Request OS/browser notification permission once. Returns the shared promise
+ *  so callers can await the grant before acting on it (e.g. Web Push needs
+ *  permission resolved before it can subscribe). */
+export function requestNotificationPermission(): Promise<void> {
+  if (!permissionPromise) permissionPromise = doRequestPermission();
+  return permissionPromise;
 }
 
 async function doRequestPermission(): Promise<void> {
