@@ -1362,7 +1362,9 @@ onlineAsyncBtn.addEventListener('click', () => {
 
 // Async notification opt-in (email + web push)
 asyncNotifyBtn.addEventListener('click', async () => {
-  requestNotificationPermission();
+  // Await the grant before registering: Web Push can only capture a subscription
+  // once permission is 'granted', so the first opt-in must not race it.
+  await requestNotificationPermission();
   asyncNotifyBtn.textContent = 'Saving...';
   const ok = await registerTurnNotifications({ email: asyncEmail.value });
   asyncNotifyBtn.textContent = ok ? "You'll be notified ✓" : 'Notifications unavailable';

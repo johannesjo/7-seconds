@@ -6,7 +6,7 @@ import { dlog } from './online-debug';
  *  notifications still work). Set to your VAPID public key to enable it — the
  *  matching private key goes in the notify-turn function's secrets (migration
  *  0002). */
-export const VAPID_PUBLIC_KEY = '';
+export const VAPID_PUBLIC_KEY = 'BOGFapbC8n1znzd3Pdo8-HN--IiKKJO8lDxkiUJcIT4GOKC7lwbmaUO86-y766Q-vE9ulgTLY1NJ1zkk82X2AZs';
 
 /** Convert a base64url VAPID key to the Uint8Array the Push API expects.
  *  Backed by an explicit ArrayBuffer so it satisfies BufferSource. */
