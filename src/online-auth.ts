@@ -39,14 +39,6 @@ async function signIn(): Promise<string | null> {
   }
 }
 
-/** Current authenticated user id, or null if not signed in yet. Synchronous —
- *  call ensureAuth() first to guarantee a session exists. */
-export async function getAuthUserId(): Promise<string | null> {
-  const client = getSupabaseClient();
-  const { data: { session } } = await client.auth.getSession();
-  return session?.user?.id ?? null;
-}
-
 /** Reset cached auth state (tests / sign-out). */
 export function resetAuthCache(): void {
   authPromise = null;

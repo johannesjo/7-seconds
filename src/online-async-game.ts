@@ -6,8 +6,7 @@ import {
   commitTurn, revealTurn, persistRoundResult, subscribeMatch,
   type MatchRecord, type MatchStatus, type RoundTurn,
 } from './online-async';
-import { getAuthUserId } from './online-auth';
-import { dlog } from './online-debug';
+import { ensureAuth } from './online-auth';
 
 export interface PlayRoundInput {
   round: number;
@@ -68,7 +67,9 @@ export interface AsyncIO {
 }
 
 const realIO: AsyncIO = {
-  getUserId: getAuthUserId,
+  // ensureAuth (not a passive session read) so a first-time visitor opening a
+  // share link is signed in anonymously before start() gates on the user id.
+  getUserId: ensureAuth,
   loadMatch,
   joinMatch: joinAsyncMatch,
   fetchTurns,
@@ -98,6 +99,10 @@ export class AsyncGameController {
   private unsubscribe: (() => void) | null = null;
   private evaluating = false;
   private dirty = false;
+  /** Round currently shown to the UI for planning, so we set up the draw UI
+   *  once per round — a re-emit (e.g. when the opponent commits via a realtime
+   *  event while we're still drawing) would wipe the in-progress drawing. */
+  private planningRound: number | null = null;
   /** Round currently handed to the UI for playback, so we animate it once. */
   private playingRound: number | null = null;
   /** Seed used to resolve the round currently being played (persisted atomically
@@ -243,6 +248,8 @@ export class AsyncGameController {
 
     switch (action) {
       case 'commit':
+        if (this.planningRound === round) return; // already planning this round
+        this.planningRound = round;
         this.hooks.onPlanTurn(round, match.latestState, this.myTeam);
         return;
 

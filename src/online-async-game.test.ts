@@ -411,5 +411,26 @@ describe('AsyncGameController', () => {
     expect(be.match.status).toBe('active');
     host.destroy();
   });
+
+  it('does not re-prompt planning when the opponent commits first (preserves in-progress drawing)', async () => {
+    const be = new FakeBackend('m13', 'host-uid');
+    const hostSpy = makeHooks();
+    const host = new AsyncGameController('m13', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m13');
+
+    await host.start();
+    await flush();
+    expect(hostSpy.planTurns).toEqual([1]); // prompted to plan round 1 exactly once
+
+    // Opponent commits while the host is still drawing round 1. The realtime
+    // event re-drives evaluate(), but onPlanTurn must NOT fire again — re-firing
+    // would rebuild the draw UI and wipe the host's in-progress waypoints.
+    await guestIO.commit('m13', 1, 'red', redPlan);
+    await flush();
+    expect(hostSpy.planTurns).toEqual([1]); // still once, not re-prompted
+
+    host.destroy();
+  });
 });
 
