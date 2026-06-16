@@ -16,6 +16,11 @@ export interface PlayRoundInput {
   seed: number;
 }
 
+/** Terminal match statuses: the game is over and no further turns are possible. */
+export function isTerminalStatus(status: MatchStatus): boolean {
+  return status === 'host_won' || status === 'guest_won' || status === 'abandoned';
+}
+
 /** UI/engine boundary. The controller owns the async protocol; the host app
  *  owns drawing paths and animating the battle. */
 export interface AsyncGameHooks {
@@ -82,9 +87,49 @@ const realIO: AsyncIO = {
     subscribeMatch(id, { onTurnChange: () => onChange(), onMatchChange: () => onChange() }),
 };
 
+/** Abstracts the browser timers/visibility the safety-net poll needs, so it can
+ *  be driven deterministically in tests and is a no-op in a headless context. */
+export interface PollEnv {
+  setInterval(fn: () => void, ms: number): unknown;
+  clearInterval(handle: unknown): void;
+  /** True when the app is foregrounded (poll only runs then). */
+  isVisible(): boolean;
+  /** Subscribe to "became visible" / "network back" — fires an immediate poll.
+   *  Returns a teardown. */
+  onResume(fn: () => void): () => void;
+}
+
+/** How often the safety-net poll re-checks the backend while a match is live
+ *  and foregrounded. Realtime push is the fast path; this is the floor that
+ *  guarantees the match can never silently hang if the socket dies. */
+export const POLL_INTERVAL_MS = 15_000;
+
+/** Default poll environment: real timers + Page Visibility, active only in a
+ *  browser. In a headless/test context `document` is undefined and we return a
+ *  no-op env so unit tests never spin real timers. */
+function defaultPollEnv(): PollEnv | null {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return null;
+  return {
+    setInterval: (fn, ms) => window.setInterval(fn, ms),
+    clearInterval: (h) => window.clearInterval(h as number),
+    isVisible: () => document.visibilityState === 'visible',
+    onResume: (fn) => {
+      const vis = () => { if (document.visibilityState === 'visible') fn(); };
+      document.addEventListener('visibilitychange', vis);
+      window.addEventListener('online', fn);
+      return () => {
+        document.removeEventListener('visibilitychange', vis);
+        window.removeEventListener('online', fn);
+      };
+    },
+  };
+}
+
 export interface AsyncGameOptions {
   io?: AsyncIO;
   stash?: PathStash;
+  /** Override the poll environment (tests inject a fake; pass null to disable). */
+  pollEnv?: PollEnv | null;
 }
 
 /** Drives one async match through commit -> reveal -> resolve -> persist,
@@ -94,6 +139,9 @@ export class AsyncGameController {
   private readonly hooks: AsyncGameHooks;
   private readonly io: AsyncIO;
   private readonly stash: PathStash;
+  private readonly pollEnv: PollEnv | null;
+  private pollHandle: unknown = null;
+  private pollResumeOff: (() => void) | null = null;
 
   private match: MatchRecord | null = null;
   private myTeam: AsyncTeam = 'blue';
@@ -117,6 +165,7 @@ export class AsyncGameController {
     this.hooks = hooks;
     this.io = opts.io ?? realIO;
     this.stash = opts.stash ?? localStoragePathStash;
+    this.pollEnv = opts.pollEnv !== undefined ? opts.pollEnv : defaultPollEnv();
   }
 
   /** Open the match (joining as guest if it's open and we're not the host),
@@ -145,8 +194,36 @@ export class AsyncGameController {
     this.myTeam = match.hostPlayer === this.userId ? 'blue' : 'red';
 
     this.unsubscribe = this.io.subscribe(this.id, () => { void this.refresh(); });
+    this.startPoll();
     await this.evaluate();
     return true;
+  }
+
+  /** Safety-net poll: Realtime push is best-effort and can die silently, so
+   *  while the match is live and foregrounded we also re-check the backend on a
+   *  slow interval, plus immediately whenever the app is resumed or the network
+   *  returns. A poll just calls refresh(); fetchTurns() returning null (a
+   *  transient read failure) is already a no-op in step(), so a poll can never
+   *  act on phantom-empty data or re-prompt a redraw. */
+  private startPoll(): void {
+    const env = this.pollEnv;
+    if (!env) return;
+    this.pollHandle = env.setInterval(() => {
+      if (this.destroyed || !env.isVisible()) return;
+      if (this.match && isTerminalStatus(this.match.status)) return;
+      void this.refresh();
+    }, POLL_INTERVAL_MS);
+    this.pollResumeOff = env.onResume(() => {
+      if (this.destroyed) return;
+      if (this.match && isTerminalStatus(this.match.status)) return;
+      void this.refresh();
+    });
+  }
+
+  private stopPoll(): void {
+    if (this.pollHandle != null) { this.pollEnv?.clearInterval(this.pollHandle); this.pollHandle = null; }
+    this.pollResumeOff?.();
+    this.pollResumeOff = null;
   }
 
   private stashKey(round: number): string {
@@ -240,7 +317,7 @@ export class AsyncGameController {
     if (this.destroyed || !this.match) return;
     const match = this.match;
 
-    if (match.status === 'host_won' || match.status === 'guest_won' || match.status === 'abandoned') {
+    if (isTerminalStatus(match.status)) {
       this.hooks.onGameOver(match.status, match.latestState);
       return;
     }
@@ -319,6 +396,7 @@ export class AsyncGameController {
 
   destroy(): void {
     this.destroyed = true;
+    this.stopPoll();
     this.unsubscribe?.();
     this.unsubscribe = null;
   }

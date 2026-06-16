@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { AsyncGameController, type AsyncIO, type PathStash, type AsyncGameHooks, type PlayRoundInput } from './online-async-game';
+import { AsyncGameController, type AsyncIO, type PathStash, type AsyncGameHooks, type PlayRoundInput, type PollEnv } from './online-async-game';
 import { hashPaths, type AsyncTeam, type PathList } from './online-async-core';
 import type { MatchRecord, MatchStatus, RoundTurn } from './online-async';
 import type { OnlineGameState } from './online-types';
@@ -86,6 +86,24 @@ function memStash(): PathStash {
     load: (k) => m.get(k) ?? null,
     clear: (k) => { m.delete(k); },
   };
+}
+
+/** Controllable poll environment: tick() fires the interval, resume() fires a
+ *  visibility/network-back event, and visible toggles foreground state. */
+function fakePollEnv() {
+  let intervalFn: (() => void) | null = null;
+  let resumeFn: (() => void) | null = null;
+  const env: PollEnv & { tick: () => void; resume: () => void; visible: boolean; cleared: boolean } = {
+    visible: true,
+    cleared: false,
+    setInterval: (fn) => { intervalFn = fn; return 1; },
+    clearInterval: () => { env.cleared = true; intervalFn = null; },
+    isVisible: () => env.visible,
+    onResume: (fn) => { resumeFn = fn; return () => { resumeFn = null; }; },
+    tick: () => intervalFn?.(),
+    resume: () => resumeFn?.(),
+  };
+  return env;
 }
 
 interface Spy { hooks: AsyncGameHooks; waiting: number[]; planTurns: number[]; plays: PlayRoundInput[]; gameOver: MatchStatus[]; errors: string[]; }
@@ -432,6 +450,67 @@ describe('AsyncGameController', () => {
     await flush();
     expect(hostSpy.planTurns).toEqual([1]); // still once, not re-prompted
 
+    host.destroy();
+  });
+
+  it('safety-net poll recovers a turn the realtime channel never delivered', async () => {
+    // Simulate a dead subscription: the controller's subscribe is a no-op, so
+    // the only way it learns the opponent moved is the poll.
+    const be = new FakeBackend('m15', 'host-uid');
+    const deadSubIO: AsyncIO = { ...be.ioFor('host-uid'), subscribe: () => () => {} };
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m15');
+
+    const spy = makeHooks();
+    const env = fakePollEnv();
+    const host = new AsyncGameController('m15', spy.hooks, { io: deadSubIO, stash: memStash(), pollEnv: env });
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await flush();
+
+    // Opponent commits+reveals, but no realtime event reaches us.
+    await guestIO.commit('m15', 1, 'red', redPlan);
+    await guestIO.reveal('m15', 1, 'red', redPlan);
+    await flush();
+    expect(spy.plays.length).toBe(0); // nothing delivered the change yet
+
+    // A poll tick picks it up and the round resolves.
+    env.tick();
+    await flush();
+    expect(spy.plays.length).toBe(1);
+    expect(spy.errors).toEqual([]);
+    host.destroy();
+    expect(env.cleared).toBe(true);
+  });
+
+  it('does not poll while backgrounded, and refreshes immediately on resume', async () => {
+    const be = new FakeBackend('m16', 'host-uid');
+    const deadSubIO: AsyncIO = { ...be.ioFor('host-uid'), subscribe: () => () => {} };
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m16');
+
+    const spy = makeHooks();
+    const env = fakePollEnv();
+    const host = new AsyncGameController('m16', spy.hooks, { io: deadSubIO, stash: memStash(), pollEnv: env });
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await guestIO.commit('m16', 1, 'red', redPlan);
+    await guestIO.reveal('m16', 1, 'red', redPlan);
+    await flush();
+
+    // Backgrounded: a tick must do nothing.
+    env.visible = false;
+    env.tick();
+    await flush();
+    expect(spy.plays.length).toBe(0);
+
+    // Resume (visibility back / network back) refreshes immediately.
+    env.visible = true;
+    env.resume();
+    await flush();
+    expect(spy.plays.length).toBe(1);
     host.destroy();
   });
 

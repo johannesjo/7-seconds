@@ -293,30 +293,72 @@ export interface MatchSubscription {
   onMatchChange: (match: MatchRecord) => void;
 }
 
+/** Max channel reconnect attempts before we lean entirely on the safety-net
+ *  poll. Kept small: the poll already guarantees liveness, so this is just to
+ *  recover the low-latency push path opportunistically. */
+const MAX_SUBSCRIBE_RETRIES = 5;
+
 /** Subscribe to Postgres changes for a match. When both players are online
- *  these fire within seconds; when one is away the rows simply wait. Returns
- *  an unsubscribe function. */
+ *  these fire within seconds; when one is away the rows simply wait.
+ *
+ *  Self-healing: Realtime can drop the socket (sleep/resume, network change)
+ *  and never recover on its own — the old code only logged the bad status, so a
+ *  match could hang silently. Here a CHANNEL_ERROR / TIMED_OUT / CLOSED tears
+ *  the channel down and re-subscribes with bounded backoff. The controller's
+ *  safety-net poll is the ultimate guarantee; this just restores instant push.
+ *  Returns an unsubscribe function. */
 export function subscribeMatch(id: string, handlers: MatchSubscription): () => void {
   const client = getSupabaseClient();
-  const channel = client
-    .channel(`match:${id}`)
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'turns', filter: `match_id=eq.${id}` },
-      (payload) => {
-        const row = payload.new as TurnRow;
-        if (row?.round != null) handlers.onTurnChange(mapTurn(row));
-      },
-    )
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${id}` },
-      (payload) => {
-        const row = payload.new as MatchRow;
-        if (row?.id) handlers.onMatchChange(mapMatch(row));
-      },
-    )
-    .subscribe((status) => dlog(`async: match:${id} subscription ${status}`));
+  let channel: ReturnType<typeof client.channel> | null = null;
+  let closed = false;
+  let attempt = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  return () => { client.removeChannel(channel); };
+  const connect = (): void => {
+    if (closed) return;
+    channel = client
+      .channel(`match:${id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'turns', filter: `match_id=eq.${id}` },
+        (payload) => {
+          const row = payload.new as TurnRow;
+          if (row?.round != null) handlers.onTurnChange(mapTurn(row));
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${id}` },
+        (payload) => {
+          const row = payload.new as MatchRow;
+          if (row?.id) handlers.onMatchChange(mapMatch(row));
+        },
+      )
+      .subscribe((status) => {
+        dlog(`async: match:${id} subscription ${status}`);
+        if (status === 'SUBSCRIBED') { attempt = 0; return; }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          scheduleReconnect();
+        }
+      });
+  };
+
+  const scheduleReconnect = (): void => {
+    if (closed || retryTimer || attempt >= MAX_SUBSCRIBE_RETRIES) return;
+    const delay = Math.min(16_000, 1_000 * 2 ** attempt);
+    attempt++;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (channel) { void client.removeChannel(channel); channel = null; }
+      connect();
+    }, delay);
+  };
+
+  connect();
+
+  return () => {
+    closed = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (channel) { void client.removeChannel(channel); channel = null; }
+  };
 }
