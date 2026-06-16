@@ -1183,15 +1183,22 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
   asyncMatchEnded = false;
   asyncRoundFinished = false;
 
+  // Vary the PRNG per round (matches the live path's seed + roundNumber scheme;
+  // resolveRound and the cosmetic engine both start fresh with roundNumber=1, so
+  // without this every round would reuse the same sequence). Applied to BOTH
+  // passes and derived only from (match seed, round) so it's identical on every
+  // client. Round 1 keeps seed+1, so the match seed itself is unchanged.
+  const roundSeed = input.seed + (input.round - 1);
+
   // Authoritative, frame-rate-independent result — identical on every client.
   asyncResult = GameEngine.resolveRound(
-    input.startState, input.bluePaths, input.redPaths, input.seed, ASYNC_ROUND_END_TICK,
+    input.startState, input.bluePaths, input.redPaths, roundSeed, ASYNC_ROUND_END_TICK,
   );
 
   // Cosmetic animated playback (its sampled end state is NOT persisted).
   guestEngine = new GameEngine(null, (type) => {
     if (type === 'end') asyncMatchEnded = true;
-  }, { seed: input.seed });
+  }, { seed: roundSeed });
   guestEngine.loadOnlineGameState(input.startState);
   guestEngine.setBluePaths(input.bluePaths);
   guestEngine.setRedPaths(input.redPaths);
@@ -1259,11 +1266,16 @@ function asyncHooks(): AsyncGameHooks {
 
     onGameOver(status, finalState) {
       destroyAsync();
-      const winner: Team = status === 'guest_won' ? 'red' : 'blue';
-      const iWon = (asyncMyTeam === winner);
-      const color = winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
-      winnerTextEl.innerHTML = `${iWon ? 'You Win!' : 'You Lose'}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
-      winnerTextEl.style.color = color;
+      if (status === 'abandoned') {
+        winnerTextEl.innerHTML = `Match Abandoned<br><span style="font-size:0.5em;opacity:0.7">Your opponent left</span>`;
+        winnerTextEl.style.color = ''; // neutral, not a win/loss color
+      } else {
+        const winner: Team = status === 'guest_won' ? 'red' : 'blue';
+        const iWon = (asyncMyTeam === winner);
+        const color = winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
+        winnerTextEl.innerHTML = `${iWon ? 'You Win!' : 'You Lose'}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
+        winnerTextEl.style.color = color;
+      }
       const blueAlive = finalState.units.filter(u => u.team === 'blue' && u.hp > 0).length;
       const redAlive = finalState.units.filter(u => u.team === 'red' && u.hp > 0).length;
       resultStatsEl.innerHTML = [`Blue survivors: ${blueAlive}`, `Red survivors: ${redAlive}`].join('<br>');

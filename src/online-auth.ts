@@ -38,8 +38,3 @@ async function signIn(): Promise<string | null> {
     return null;
   }
 }
-
-/** Reset cached auth state (tests / sign-out). */
-export function resetAuthCache(): void {
-  authPromise = null;
-}

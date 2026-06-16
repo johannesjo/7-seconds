@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { urlBase64ToUint8Array } from './online-push';
+import { urlBase64ToUint8Array, isValidEmail } from './online-push';
 
 describe('urlBase64ToUint8Array', () => {
   it('decodes a base64url string to the expected bytes', () => {
@@ -22,5 +22,23 @@ describe('urlBase64ToUint8Array', () => {
   it('produces the 65-byte length typical of a VAPID key', () => {
     const key = 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM';
     expect(urlBase64ToUint8Array(key).length).toBe(65);
+  });
+});
+
+describe('isValidEmail', () => {
+  it('accepts ordinary addresses', () => {
+    expect(isValidEmail('a@b.co')).toBe(true);
+    expect(isValidEmail('first.last+tag@sub.example.com')).toBe(true);
+  });
+
+  it('rejects malformed addresses', () => {
+    for (const bad of ['', 'plainstring', 'no@domain', '@no-local.com', 'a b@c.com', 'two@@b.com']) {
+      expect(isValidEmail(bad)).toBe(false);
+    }
+  });
+
+  it('rejects addresses over the 254-char SMTP limit', () => {
+    const long = 'a'.repeat(250) + '@b.com';
+    expect(isValidEmail(long)).toBe(false);
   });
 });

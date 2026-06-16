@@ -117,10 +117,6 @@ export class AsyncGameController {
     this.stash = opts.stash ?? localStoragePathStash;
   }
 
-  get matchRecord(): MatchRecord | null {
-    return this.match;
-  }
-
   /** Open the match (joining as guest if it's open and we're not the host),
    *  subscribe to changes, and drive the first applicable step. */
   async start(): Promise<boolean> {

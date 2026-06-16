@@ -8,7 +8,13 @@
 
 create table if not exists public.players (
   id           uuid primary key,            -- = auth.uid()
-  email        text,
+  -- Basic format/length sanity so junk can't reach the notify-turn email sender,
+  -- even via a direct API call that bypasses the client-side check.
+  email        text check (
+                 email is null
+                 or (char_length(email) <= 254
+                     and email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$')
+               ),
   web_push     jsonb,                        -- browser PushSubscription JSON
   fcm_token    text,                         -- reserved for native Android (FCM)
   notify_email boolean not null default false,

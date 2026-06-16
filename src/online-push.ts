@@ -40,6 +40,13 @@ async function getWebPushSubscription(): Promise<PushSubscriptionJSON | null> {
   }
 }
 
+/** Basic format/length sanity for an email before it's stored and later handed
+ *  to the email sender. Not exhaustive — just rejects junk (mirrors the DB
+ *  CHECK in migration 0002). */
+export function isValidEmail(email: string): boolean {
+  return email.length <= 254 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+}
+
 /** Register how this player wants to be nudged when it's their turn. Stores an
  *  optional email and/or a Web Push subscription in the `players` table. Safe to
  *  call repeatedly; degrades to a no-op if auth/DB is unavailable. */
@@ -52,8 +59,10 @@ export async function registerTurnNotifications(opts: { email?: string } = {}): 
   // the DB on first insert; we only (re)assert it on an explicit opt-in.
   const row: Record<string, unknown> = { id: uid };
   if (opts.email !== undefined) {
-    row.email = opts.email.trim() || null;
-    row.notify_email = !!opts.email.trim();
+    const email = opts.email.trim();
+    if (email && !isValidEmail(email)) return false; // don't store junk
+    row.email = email || null;
+    row.notify_email = !!email;
     row.notify_push = true;
   }
   const webPush = await getWebPushSubscription();

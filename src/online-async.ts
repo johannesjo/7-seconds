@@ -23,11 +23,6 @@ export interface RoundTurn extends TurnRecord {
   player: string;
 }
 
-/** Host plays blue, guest plays red — same convention as live online play. */
-export function teamFor(match: MatchRecord, userId: string): AsyncTeam {
-  return match.hostPlayer === userId ? 'blue' : 'red';
-}
-
 /** Build a share link for an async match. Uses a distinct `amatch` param so
  *  async links are never confused with live `?join` WebRTC rooms. */
 export function getAsyncShareUrl(id: string): string {
