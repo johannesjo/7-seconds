@@ -1226,6 +1226,17 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
 /** Bridge the async protocol controller to the UI / playback engine. */
 function asyncHooks(): AsyncGameHooks {
   return {
+    onWaitingForGuest() {
+      // Match created, no friend yet: keep the share-link lobby up (with the
+      // copy button + notification opt-in) instead of dropping into planning.
+      planningOverlay.classList.remove('active');
+      confirmBtn.classList.remove('active');
+      onlineShareContainer.style.display = '';
+      asyncNotify.style.display = 'flex';
+      onlineLobby.style.display = 'flex';
+      showScreen('battle');
+    },
+
     onPlanTurn(round, startState, myTeam) {
       asyncCurrentRound = round;
       asyncMyTeam = myTeam;
@@ -1334,7 +1345,7 @@ async function startAsyncGame(roomId: string | null): Promise<void> {
     id = created.match.id;
     onlineShareContainer.style.display = '';
     onlineShareUrl.value = created.shareUrl;
-    setOnlineStatus('Share this link with a friend. You can plan your first turn now.', true);
+    setOnlineStatus('Share this link with your friend — the match starts when they join.', true);
   } else {
     setOnlineStatus('Loading match...', true);
   }

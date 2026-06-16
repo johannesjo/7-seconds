@@ -88,15 +88,17 @@ function memStash(): PathStash {
   };
 }
 
-interface Spy { hooks: AsyncGameHooks; planTurns: number[]; plays: PlayRoundInput[]; gameOver: MatchStatus[]; errors: string[]; }
+interface Spy { hooks: AsyncGameHooks; waiting: number[]; planTurns: number[]; plays: PlayRoundInput[]; gameOver: MatchStatus[]; errors: string[]; }
 function makeHooks(): Spy {
+  const waiting: number[] = [];
   const planTurns: number[] = [];
   const plays: PlayRoundInput[] = [];
   const gameOver: MatchStatus[] = [];
   const errors: string[] = [];
   return {
-    planTurns, plays, gameOver, errors,
+    waiting, planTurns, plays, gameOver, errors,
     hooks: {
+      onWaitingForGuest: (round) => { waiting.push(round); },
       onPlanTurn: (round) => { planTurns.push(round); },
       onAwaitOpponent: () => {},
       onPlayRound: (input) => { plays.push(input); },
@@ -429,6 +431,25 @@ describe('AsyncGameController', () => {
     await guestIO.commit('m13', 1, 'red', redPlan);
     await flush();
     expect(hostSpy.planTurns).toEqual([1]); // still once, not re-prompted
+
+    host.destroy();
+  });
+
+  it('keeps the host on the share screen until a guest joins (no premature planning)', async () => {
+    const be = new FakeBackend('m14', 'host-uid'); // status 'open', no guest
+    const hostSpy = makeHooks();
+    const host = new AsyncGameController('m14', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+
+    await host.start();
+    await flush();
+    // No friend yet → wait on the share screen, do NOT prompt planning.
+    expect(hostSpy.waiting).toContain(1);
+    expect(hostSpy.planTurns).toEqual([]);
+
+    // Friend opens the link and joins → host is now prompted to plan round 1.
+    await be.ioFor('guest-uid').joinMatch('m14');
+    await flush();
+    expect(hostSpy.planTurns).toEqual([1]);
 
     host.destroy();
   });

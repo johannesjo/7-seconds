@@ -19,6 +19,8 @@ export interface PlayRoundInput {
 /** UI/engine boundary. The controller owns the async protocol; the host app
  *  owns drawing paths and animating the battle. */
 export interface AsyncGameHooks {
+  /** Match created but no guest has joined yet — keep showing the share link. */
+  onWaitingForGuest(round: number): void;
   /** It's the local player's turn to plan `round`. Call submitPlan() when done. */
   onPlanTurn(round: number, startState: OnlineGameState, myTeam: AsyncTeam): void;
   /** We've submitted; nothing to do until the opponent acts. */
@@ -244,6 +246,11 @@ export class AsyncGameController {
 
     switch (action) {
       case 'commit':
+        // Host created the match but no guest has joined yet ('open'): keep them
+        // on the share-link screen rather than dropping them into planning with
+        // no opponent and no visible invite. A guest joining flips status to
+        // 'active', which re-drives evaluate() and prompts planning then.
+        if (match.status === 'open') { this.hooks.onWaitingForGuest(round); return; }
         if (this.planningRound === round) return; // already planning this round
         this.planningRound = round;
         this.hooks.onPlanTurn(round, match.latestState, this.myTeam);
