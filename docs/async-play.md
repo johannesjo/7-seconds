@@ -154,7 +154,7 @@ changes — Postgres rows + Realtime instead of the WebRTC channel.
 
 | File                          | Responsibility                                            |
 | ----------------------------- | --------------------------------------------------------- |
-| `src/online-auth.ts`          | anonymous auth (`ensureAuth`, `getAuthUserId`)            |
+| `src/online-auth.ts`          | anonymous auth (`ensureAuth`)                             |
 | `src/online-async-core.ts`    | **pure** logic: path hashing, seed derivation, round state machine, verification (unit-tested) |
 | `src/online-async.ts`         | Supabase IO: create/join/load, commit, reveal, subscribe  |
 | `src/online-async-game.ts`    | orchestration controller (commit→reveal→resolve→persist) |
@@ -168,28 +168,63 @@ changes — Postgres rows + Realtime instead of the WebRTC channel.
 - **Phase 1 (this work):** anon auth, schema + RLS, `online-async` transport
   with commit–reveal, snapshot resume. Friend matches can span hours via
   in-app Realtime + manual resume. *No push notifications yet.*
-- **Phase 2 (implemented, pending deployment):** server-initiated "your turn"
+- **Phase 2 (implemented; deployed push-only):** server-initiated "your turn"
   notifications to reach **absent** players. A `players` table
   (`supabase/migrations/0002_*`) stores an optional email and/or Web Push
   subscription; the `notify-turn` Edge Function (`supabase/functions/notify-turn`)
   fires on each commit via a Database Webhook and nudges the opponent if they
   have not yet submitted the round. Client registration lives in
-  `src/online-push.ts`; `public/sw-notify.js` handles the `push` event. Email
-  works out of the box (Resend); Web Push needs a VAPID keypair
-  (`VAPID_PUBLIC_KEY` in `online-push.ts` + function secrets). Native Android
-  FCM is scaffolded in the schema (`players.fcm_token`) but still requires a
-  Firebase project + `@capacitor/push-notifications` — deferred.
+  `src/online-push.ts`; `public/sw-notify.js` handles the `push` event. Two
+  channels are supported: **Web Push** (needs a VAPID keypair —
+  `VAPID_PUBLIC_KEY` in `online-push.ts` + matching function secrets) and
+  **email** (needs a Resend account *and* a verified sender domain to reach
+  anyone but yourself). This deployment is **push-only**; email is left
+  unconfigured. Reach caveat: Web Push covers desktop Chrome/Firefox (browser
+  running) and Android Chrome, but not iOS Safari unless the app is installed as
+  a PWA. Native Android FCM is scaffolded in the schema (`players.fcm_token`)
+  but still requires a Firebase project + `@capacitor/push-notifications` —
+  deferred.
 - **Phase 3:** a "your games" lobby for concurrent matches, turn expiry /
   auto-forfeit, and optional hardening of the reveal step.
 
-### Phase 2 deployment checklist
+### Deployment checklist (as deployed: push-only)
 
-1. Apply `supabase/migrations/0002_players_and_notifications.sql`.
-2. `supabase functions deploy notify-turn` and set its secrets (see the
-   migration header: `RESEND_API_KEY`, `NOTIFY_FROM_EMAIL`, and optionally
-   `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`).
-3. Add a Database Webhook on `public.turns` INSERT → the `notify-turn` function.
-4. For Web Push, set `VAPID_PUBLIC_KEY` in `src/online-push.ts` to the public key.
+Everything below runs against the existing Supabase project (the same one the
+live WebRTC matchmaking uses); the changes are additive.
+
+**Phase 1 — make async matches work:**
+
+1. Apply `supabase/migrations/0001_async_matches.sql` (Dashboard → SQL Editor,
+   or `supabase db push`).
+2. Enable anonymous sign-ins: Dashboard → Authentication → Sign In / Providers
+   → Anonymous.
+
+**Phase 2 — "your turn" Web Push for absent players:**
+
+3. Apply `supabase/migrations/0002_players_and_notifications.sql`.
+4. Generate a VAPID keypair: `npx web-push generate-vapid-keys`.
+5. Set the public key in `src/online-push.ts` (`VAPID_PUBLIC_KEY`).
+6. Deploy the function **from the repo root**:
+   `supabase functions deploy notify-turn --project-ref <ref>`.
+7. Set its secrets: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`
+   (`supabase secrets set …`). `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are
+   auto-injected — don't set them.
+8. Add a Database Webhook on `public.turns` INSERT → `notify-turn`, with the
+   service-role key in the `Authorization: Bearer …` header (the function keeps
+   `verify_jwt` on, so the webhook must authenticate).
+
+*Email (optional, not configured here):* set `RESEND_API_KEY` + `NOTIFY_FROM_EMAIL`
+on the function and verify a sender domain in Resend. The client already collects
+an address in the async lobby, so no client change is needed to add it later.
+
+### Going live
+
+The async UI and the VAPID public key ship in the **client bundle**, so they
+reach players only once the client is rebuilt and redeployed — the backend steps
+above are not enough on their own.
+
+- **Test before merge:** `npm run dev` on this branch against the live backend.
+- **Launch:** merge to `main`, then rebuild + redeploy the client (GitHub Pages).
 
 ## Notes / non-goals
 
