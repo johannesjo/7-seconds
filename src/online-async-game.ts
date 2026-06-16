@@ -188,15 +188,25 @@ export class AsyncGameController {
       this.hooks.onError('Could not resolve the round; please retry.');
       return;
     }
-    await this.io.persist(this.id, {
+    const landed = await this.io.persist(this.id, {
       latestState: endState,
       currentRound: round + 1,
       seed,
       status,
       expectedRound: round,
     });
-    this.stash.clear(this.stashKey(round));
+    // Reload unconditionally. If we LOST the advance race (landed === false
+    // because the peer already advanced the round), this pulls in their
+    // advanced round and the now-set write-once seed, so the next round reuses
+    // that seed instead of re-deriving a divergent one. A lost race is benign,
+    // not an error worth surfacing.
     await this.refresh();
+    // Clear the saved plan only once this round is truly behind us — our write
+    // landed, or a peer's write advanced the match past it. Otherwise keep it
+    // so a transient failure (retries exhausted, still on this round) can retry.
+    if (landed || (this.match != null && this.match.currentRound > round)) {
+      this.stash.clear(this.stashKey(round));
+    }
   }
 
   private winnerStatus(state: OnlineGameState): MatchStatus {

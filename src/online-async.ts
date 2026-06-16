@@ -1,6 +1,7 @@
 import { getSupabaseClient, generateRoomId } from './online';
 import { ensureAuth } from './online-auth';
 import { dlog } from './online-debug';
+import { withRetry } from './online-retry';
 import type { OnlineGameState } from './online-types';
 import type { AsyncTeam, PathList, TurnRecord } from './online-async-core';
 import { hashPaths } from './online-async-core';
@@ -180,25 +181,48 @@ export function turnsForRound(turns: RoundTurn[], round: number): RoundTurn[] {
 
 // --- commit / reveal -----------------------------------------------------
 
-/** Commit step: store only the hash of our paths (paths column stays null). */
+/** Commit step: store only the hash of our paths (paths column stays null).
+ *
+ *  Idempotent: a retried or double-fired commit (network flake, double-tap)
+ *  must not read as failure just because the row already exists. We upsert with
+ *  `ignoreDuplicates` (INSERT ... ON CONFLICT DO NOTHING, so an existing reveal
+ *  is never clobbered), then read the slot back: a matching `commit_hash` —
+ *  including a row we've since revealed — is success; a *different* hash under
+ *  the same (match,round,team) slot is a real conflict we surface. */
 export async function commitTurn(
   id: string, round: number, team: AsyncTeam, paths: PathList,
 ): Promise<boolean> {
   const uid = await ensureAuth();
   if (!uid) return false;
   const client = getSupabaseClient();
-  const { error } = await client.from('turns').insert({
-    match_id: id,
-    round,
-    team,
-    player: uid,
-    commit_hash: hashPaths(paths),
-  });
-  if (error) {
-    dlog(`async: commitTurn r${round}/${team} failed: ${error.message}`);
+  const hash = hashPaths(paths);
+  const ins = await withRetry(
+    () => client.from('turns').upsert(
+      { match_id: id, round, team, player: uid, commit_hash: hash },
+      { onConflict: 'match_id,round,team', ignoreDuplicates: true },
+    ),
+    { label: `commitTurn r${round}/${team}` },
+  );
+  if (ins.error) {
+    dlog(`async: commitTurn r${round}/${team} failed: ${ins.error.message}`);
     return false;
   }
-  return true;
+  // Verify what's actually stored. ignoreDuplicates returns no row on conflict,
+  // so this read is the source of truth for "did my commitment land".
+  const check = await withRetry(
+    () => client.from('turns').select('commit_hash')
+      .eq('match_id', id).eq('round', round).eq('team', team).maybeSingle(),
+    { label: `commitTurn verify r${round}/${team}` },
+  );
+  if (check.error || !check.data) {
+    // Couldn't confirm (transient). The upsert itself reported no error, so
+    // treat as committed rather than prompting a redraw the player already did.
+    return true;
+  }
+  const stored = Number((check.data as { commit_hash: number | string }).commit_hash);
+  if (stored === hash) return true;
+  dlog(`async: commitTurn r${round}/${team} slot holds a different commitment (${stored} != ${hash})`);
+  return false;
 }
 
 /** Reveal step: fill in our paths once both sides have committed. */
@@ -206,12 +230,15 @@ export async function revealTurn(
   id: string, round: number, team: AsyncTeam, paths: PathList,
 ): Promise<boolean> {
   const client = getSupabaseClient();
-  const { error } = await client
-    .from('turns')
-    .update({ paths, revealed_at: new Date().toISOString() })
-    .eq('match_id', id)
-    .eq('round', round)
-    .eq('team', team);
+  const { error } = await withRetry(
+    () => client
+      .from('turns')
+      .update({ paths, revealed_at: new Date().toISOString() })
+      .eq('match_id', id)
+      .eq('round', round)
+      .eq('team', team),
+    { label: `revealTurn r${round}/${team}` },
+  );
   if (error) {
     dlog(`async: revealTurn r${round}/${team} failed: ${error.message}`);
     return false;
@@ -240,15 +267,23 @@ export async function persistRoundResult(
   if (update.seed != null) patch.seed = update.seed;
   if (update.status) patch.status = update.status;
 
-  let query = client.from('matches').update(patch).eq('id', id);
-  if (update.expectedRound != null) query = query.eq('current_round', update.expectedRound);
+  // `.select('id')` returns the rows the update actually touched. With the
+  // optimistic `expectedRound` guard this is 0 rows when another client already
+  // advanced the round — a *benign* lost race, not an error. Returning false
+  // here lets the controller distinguish "my write landed" from "someone beat
+  // me to it" and avoid re-deriving a divergent seed.
+  const res = await withRetry(() => {
+    let query = client.from('matches').update(patch).eq('id', id);
+    if (update.expectedRound != null) query = query.eq('current_round', update.expectedRound);
+    return query.select('id');
+  }, { label: `persistRoundResult ${id}` });
 
-  const { error } = await query;
-  if (error) {
-    dlog(`async: persistRoundResult ${id} failed: ${error.message}`);
+  if (res.error) {
+    dlog(`async: persistRoundResult ${id} failed: ${res.error.message}`);
     return false;
   }
-  return true;
+  const rows = (res.data as unknown[] | null)?.length ?? 0;
+  return rows > 0;
 }
 
 // --- realtime ------------------------------------------------------------
