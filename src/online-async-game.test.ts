@@ -112,20 +112,29 @@ function fakePollEnv() {
   return env;
 }
 
-interface Spy { hooks: AsyncGameHooks; waiting: number[]; planTurns: number[]; plays: PlayRoundInput[]; gameOver: MatchStatus[]; errors: string[]; forfeitable: boolean[]; }
+interface Spy {
+  hooks: AsyncGameHooks;
+  planTurns: number[];
+  planAwaiting: boolean[];
+  awaitOpp: boolean[];
+  plays: PlayRoundInput[];
+  gameOver: MatchStatus[];
+  errors: string[];
+  forfeitable: boolean[];
+}
 function makeHooks(): Spy {
-  const waiting: number[] = [];
   const planTurns: number[] = [];
+  const planAwaiting: boolean[] = [];
+  const awaitOpp: boolean[] = [];
   const plays: PlayRoundInput[] = [];
   const gameOver: MatchStatus[] = [];
   const errors: string[] = [];
   const forfeitable: boolean[] = [];
   return {
-    waiting, planTurns, plays, gameOver, errors, forfeitable,
+    planTurns, planAwaiting, awaitOpp, plays, gameOver, errors, forfeitable,
     hooks: {
-      onWaitingForGuest: (round) => { waiting.push(round); },
-      onPlanTurn: (round) => { planTurns.push(round); },
-      onAwaitOpponent: () => {},
+      onPlanTurn: (round, _s, _t, awaitingGuest) => { planTurns.push(round); planAwaiting.push(awaitingGuest); },
+      onAwaitOpponent: (_round, awaitingGuest) => { awaitOpp.push(awaitingGuest); },
       onPlayRound: (input) => { plays.push(input); },
       onGameOver: (status) => { gameOver.push(status); },
       onError: (msg, canForfeit) => { errors.push(msg); forfeitable.push(!!canForfeit); },
@@ -561,22 +570,32 @@ describe('AsyncGameController', () => {
     host.destroy();
   });
 
-  it('keeps the host on the share screen until a guest joins (no premature planning)', async () => {
+  it('lets the host plan their first move before a guest joins (awaitingGuest)', async () => {
     const be = new FakeBackend('m14', 'host-uid'); // status 'open', no guest
     const hostSpy = makeHooks();
     const host = new AsyncGameController('m14', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
 
     await host.start();
     await flush();
-    // No friend yet → wait on the share screen, do NOT prompt planning.
-    expect(hostSpy.waiting).toContain(1);
-    expect(hostSpy.planTurns).toEqual([]);
-
-    // Friend opens the link and joins → host is now prompted to plan round 1.
-    await be.ioFor('guest-uid').joinMatch('m14');
-    await flush();
+    // No friend yet, but the host is prompted to plan round 1 right away — with
+    // awaitingGuest=true so the UI keeps the share link up.
     expect(hostSpy.planTurns).toEqual([1]);
+    expect(hostSpy.planAwaiting).toEqual([true]);
 
+    // Host commits their first move while still alone → now waiting for a friend
+    // to JOIN (awaitingGuest stays true so the invite stays visible).
+    await host.submitPlan(bluePlan);
+    await flush();
+    expect(hostSpy.awaitOpp).toContain(true);
+
+    // Friend joins and plays → the round resolves for the host.
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m14');
+    await guestIO.commit('m14', 1, 'red', redPlan);
+    await guestIO.reveal('m14', 1, 'red', redPlan);
+    await flush();
+    expect(hostSpy.plays.length).toBe(1);
+    expect(hostSpy.errors).toEqual([]);
     host.destroy();
   });
 });

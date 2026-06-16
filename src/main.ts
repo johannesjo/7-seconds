@@ -77,6 +77,8 @@ const onlineAsyncBtn = document.getElementById('online-async-btn')!;
 const asyncNotify = document.getElementById('async-notify')!;
 const asyncNotifyCb = document.getElementById('async-notify-cb') as HTMLInputElement;
 const asyncNotifyHint = document.getElementById('async-notify-hint')!;
+const asyncFirstMoveBtn = document.getElementById('async-first-move-btn')!;
+const asyncForfeitBtn = document.getElementById('async-forfeit-btn')!;
 const onlineRandomBtn = document.getElementById('online-random-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
 const onlineStatus = document.getElementById('online-status')!;
@@ -1165,7 +1167,25 @@ function destroyAsync(): void {
   renderer?.ticker.remove(asyncTickCallback);
   stopGuestEngine();
   asyncNotify.style.display = 'none';
+  asyncFirstMoveBtn.style.display = 'none';
+  asyncForfeitBtn.style.display = 'none';
 }
+
+// Host's "Plan your first move" button: dismiss the share-link lobby and reveal
+// the planning overlay (set up underneath in onPlanTurn) so the host can draw.
+asyncFirstMoveBtn.addEventListener('click', () => {
+  asyncFirstMoveBtn.style.display = 'none';
+  onlineLobby.style.display = 'none';
+  planningOverlay.classList.add('active');
+  confirmBtn.classList.add('active');
+});
+
+// Forfeit: concede the match to escape an unrecoverable state (or just give up).
+asyncForfeitBtn.addEventListener('click', () => {
+  asyncForfeitBtn.style.display = 'none';
+  setOnlineStatus('Forfeiting…', true);
+  void asyncController?.forfeit();
+});
 
 /** Ticker callback that animates a resolved async round headlessly and, once
  *  it ends deterministically (a side eliminated, or the fixed round duration
@@ -1241,22 +1261,10 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
 /** Bridge the async protocol controller to the UI / playback engine. */
 function asyncHooks(): AsyncGameHooks {
   return {
-    onWaitingForGuest() {
-      // Match created, no friend yet: keep the share-link lobby up (with the
-      // copy button + notification opt-in) instead of dropping into planning.
-      planningOverlay.classList.remove('active');
-      confirmBtn.classList.remove('active');
-      onlineShareContainer.style.display = '';
-      asyncNotify.style.display = 'flex';
-      onlineLobby.style.display = 'flex';
-      showScreen('battle');
-    },
-
-    onPlanTurn(round, startState, myTeam) {
+    onPlanTurn(round, startState, myTeam, awaitingGuest) {
       asyncCurrentRound = round;
       asyncMyTeam = myTeam;
       stopGuestEngine();
-      onlineLobby.style.display = 'none';
 
       document.body.classList.toggle('day-mode', dayModeCb.checked);
       renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
@@ -1278,11 +1286,30 @@ function asyncHooks(): AsyncGameHooks {
       planningLabel.textContent = 'Your Planning';
       planningLabel.style.color = myTeam === 'blue'
         ? 'var(--color-planning-blue)' : 'var(--color-planning-red)';
-      planningOverlay.classList.add('active');
-      confirmBtn.classList.add('active');
       battleHud.style.display = 'none';
       roundCounterEl.textContent = `Round ${round}`;
       showScreen('battle');
+
+      if (awaitingGuest) {
+        // Host's first move before a friend joins. The full-screen lobby would
+        // cover the canvas, so we keep the invite up with a "Plan first move"
+        // button that dismisses the lobby into the (already set-up) planning UI.
+        // No "your turn" notification — the host just opened this themselves.
+        planningOverlay.classList.remove('active');
+        confirmBtn.classList.remove('active');
+        onlineShareContainer.style.display = '';
+        asyncNotify.style.display = 'flex';
+        asyncForfeitBtn.style.display = 'none';
+        asyncFirstMoveBtn.style.display = '';
+        setOnlineStatus('Share this link so a friend can join — or plan your first move now.', false);
+        onlineLobby.style.display = 'flex';
+        return;
+      }
+
+      onlineLobby.style.display = 'none';
+      asyncFirstMoveBtn.style.display = 'none';
+      planningOverlay.classList.add('active');
+      confirmBtn.classList.add('active');
       // It's the player's turn: in-app toast when focused; notify() (OS / native
       // Capacitor on Android) covers the backgrounded case and self-guards on
       // visibility, so the two never double-fire.
@@ -1290,19 +1317,31 @@ function asyncHooks(): AsyncGameHooks {
       notify('7 Seconds', "It's your turn to plan!");
     },
 
-    onAwaitOpponent(round) {
+    onAwaitOpponent(round, awaitingGuest) {
       guestPathDrawer?.destroy();
       guestPathDrawer = null;
       planningOverlay.classList.remove('active');
       confirmBtn.classList.remove('active');
-      onlineShareContainer.style.display = 'none';
-      setOnlineStatus(`Turn submitted (round ${round}). Waiting for your friend — you can safely leave and return later.`, true);
+      asyncFirstMoveBtn.style.display = 'none';
+      asyncForfeitBtn.style.display = 'none';
+      if (awaitingGuest) {
+        // First move locked in, but still nobody to play against — keep the
+        // invite visible so a friend can join and start the match.
+        onlineShareContainer.style.display = '';
+        asyncNotify.style.display = 'flex';
+        setOnlineStatus('First move locked in! Share the link — the match begins when a friend joins.', true);
+      } else {
+        onlineShareContainer.style.display = 'none';
+        setOnlineStatus(`Turn submitted (round ${round}). Waiting for your friend — you can safely leave and return later.`, true);
+      }
       onlineLobby.style.display = 'flex';
       showScreen('battle');
     },
 
     onPlayRound(input) {
       onlineLobby.style.display = 'none';
+      asyncFirstMoveBtn.style.display = 'none';
+      asyncForfeitBtn.style.display = 'none';
       planningOverlay.classList.remove('active');
       confirmBtn.classList.remove('active');
       battleHud.style.display = '';
@@ -1332,9 +1371,13 @@ function asyncHooks(): AsyncGameHooks {
       showScreen('result');
     },
 
-    onError(message) {
+    onError(message, canForfeit) {
       onlineShareContainer.style.display = 'none';
+      asyncFirstMoveBtn.style.display = 'none';
       setOnlineStatus(message);
+      // A forfeitable error (e.g. a lost commit that can never be revealed) is a
+      // dead end otherwise — offer a clean way to concede and end the match.
+      asyncForfeitBtn.style.display = canForfeit ? '' : 'none';
       onlineLobby.style.display = 'flex';
       showScreen('battle');
     },

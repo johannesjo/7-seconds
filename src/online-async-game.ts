@@ -24,12 +24,15 @@ export function isTerminalStatus(status: MatchStatus): boolean {
 /** UI/engine boundary. The controller owns the async protocol; the host app
  *  owns drawing paths and animating the battle. */
 export interface AsyncGameHooks {
-  /** Match created but no guest has joined yet — keep showing the share link. */
-  onWaitingForGuest(round: number): void;
-  /** It's the local player's turn to plan `round`. Call submitPlan() when done. */
-  onPlanTurn(round: number, startState: OnlineGameState, myTeam: AsyncTeam): void;
-  /** We've submitted; nothing to do until the opponent acts. */
-  onAwaitOpponent(round: number): void;
+  /** It's the local player's turn to plan `round`. Call submitPlan() when done.
+   *  `awaitingGuest` is true when no opponent has joined yet (host's first move
+   *  before the friend arrives): the UI should keep the share link / invite up
+   *  alongside planning, and skip the "it's your turn" notification. */
+  onPlanTurn(round: number, startState: OnlineGameState, myTeam: AsyncTeam, awaitingGuest: boolean): void;
+  /** We've submitted; nothing to do until the opponent acts. `awaitingGuest`
+   *  true means we're still waiting for a friend to *join* (keep the share link
+   *  visible), not just to take their turn. */
+  onAwaitOpponent(round: number, awaitingGuest: boolean): void;
   /** Both sides revealed — animate the battle, then call onRoundPlayed(). */
   onPlayRound(input: PlayRoundInput): void;
   /** Match finished. */
@@ -335,22 +338,22 @@ export class AsyncGameController {
     if (allTurns == null) return;
     const turns = turnsForRound(allTurns, round);
     const action = nextRoundAction(turns, this.myTeam);
+    // 'open' means no guest has joined yet (only the host can be here). We still
+    // let the host plan and commit their first move — the commit just waits in
+    // the turn log until a friend joins and plays. The UI keeps the share link
+    // visible via the awaitingGuest flag.
+    const awaitingGuest = match.status === 'open';
 
     switch (action) {
       case 'commit':
-        // Host created the match but no guest has joined yet ('open'): keep them
-        // on the share-link screen rather than dropping them into planning with
-        // no opponent and no visible invite. A guest joining flips status to
-        // 'active', which re-drives evaluate() and prompts planning then.
-        if (match.status === 'open') { this.hooks.onWaitingForGuest(round); return; }
         if (this.planningRound === round) return; // already planning this round
         this.planningRound = round;
-        this.hooks.onPlanTurn(round, match.latestState, this.myTeam);
+        this.hooks.onPlanTurn(round, match.latestState, this.myTeam, awaitingGuest);
         return;
 
       case 'await-commit':
       case 'await-reveal':
-        this.hooks.onAwaitOpponent(round);
+        this.hooks.onAwaitOpponent(round, awaitingGuest);
         return;
 
       case 'reveal': {
