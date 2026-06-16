@@ -5,6 +5,8 @@ import {
   nextRoundAction,
   isRoundResolvable,
   verifyReveal,
+  summariseMatch,
+  outcomeNeedsYou,
   type PathList,
   type TurnRecord,
 } from './online-async-core';
@@ -131,5 +133,52 @@ describe('verifyReveal', () => {
   it('rejects paths that do not match the committed hash', () => {
     const tampered: TurnRecord = { team: 'blue', commitHash: hashPaths(bluePaths), paths: redPaths };
     expect(verifyReveal(tampered)).toBe(false);
+  });
+});
+
+describe('summariseMatch', () => {
+  const commit = (team: 'blue' | 'red'): TurnRecord => ({ team, commitHash: 1, paths: null });
+  const reveal = (team: 'blue' | 'red'): TurnRecord => ({ team, commitHash: 1, paths: [] });
+
+  it('open match: host needs to make the first move, then waits for a guest', () => {
+    expect(summariseMatch('open', true, [])).toBe('your-turn');
+    expect(summariseMatch('open', true, [commit('blue')])).toBe('waiting-for-guest');
+  });
+
+  it('active match: your turn until you commit, then their turn', () => {
+    // Host (blue) hasn't committed.
+    expect(summariseMatch('active', true, [])).toBe('your-turn');
+    expect(summariseMatch('active', true, [commit('red')])).toBe('your-turn');
+    // Host committed, waiting on red.
+    expect(summariseMatch('active', true, [commit('blue')])).toBe('their-turn');
+  });
+
+  it('active match: reveal is still your turn; both revealed is resolving', () => {
+    // Both committed, host (blue) not revealed yet → your turn (to reveal).
+    expect(summariseMatch('active', true, [commit('blue'), commit('red')])).toBe('your-turn');
+    // Host revealed, waiting on red reveal → their turn.
+    expect(summariseMatch('active', true, [reveal('blue'), commit('red')])).toBe('their-turn');
+    // Both revealed → resolving.
+    expect(summariseMatch('active', true, [reveal('blue'), reveal('red')])).toBe('resolving');
+  });
+
+  it('mirrors correctly for the guest (red)', () => {
+    expect(summariseMatch('active', false, [])).toBe('your-turn');
+    expect(summariseMatch('active', false, [commit('red')])).toBe('their-turn');
+  });
+
+  it('terminal statuses resolve to win/loss from my perspective', () => {
+    expect(summariseMatch('host_won', true, [])).toBe('you-won');
+    expect(summariseMatch('host_won', false, [])).toBe('you-lost');
+    expect(summariseMatch('guest_won', true, [])).toBe('you-lost');
+    expect(summariseMatch('guest_won', false, [])).toBe('you-won');
+    expect(summariseMatch('abandoned', true, [])).toBe('abandoned');
+  });
+
+  it('outcomeNeedsYou flags only the your-turn state', () => {
+    expect(outcomeNeedsYou('your-turn')).toBe(true);
+    expect(outcomeNeedsYou('their-turn')).toBe(false);
+    expect(outcomeNeedsYou('waiting-for-guest')).toBe(false);
+    expect(outcomeNeedsYou('you-won')).toBe(false);
   });
 });

@@ -3,8 +3,8 @@ import { ensureAuth } from './online-auth';
 import { dlog } from './online-debug';
 import { withRetry } from './online-retry';
 import type { OnlineGameState } from './online-types';
-import type { AsyncTeam, PathList, TurnRecord } from './online-async-core';
-import { hashPaths } from './online-async-core';
+import type { AsyncTeam, PathList, TurnRecord, MatchOutcome } from './online-async-core';
+import { hashPaths, summariseMatch } from './online-async-core';
 
 export type MatchStatus = 'open' | 'active' | 'host_won' | 'guest_won' | 'abandoned';
 
@@ -177,6 +177,64 @@ export async function fetchTurns(id: string): Promise<RoundTurn[] | null> {
 /** Filter a turn list down to a single round. */
 export function turnsForRound(turns: RoundTurn[], round: number): RoundTurn[] {
   return turns.filter(t => t.round === round);
+}
+
+// --- "my matches" list ---------------------------------------------------
+
+export interface MatchSummary {
+  match: MatchRecord;
+  iAmHost: boolean;
+  outcome: MatchOutcome;
+}
+
+/** Load every match the signed-in player participates in, newest first, each
+ *  collapsed to a single player-facing outcome (your-turn / their-turn / …).
+ *  This is the data behind the "my matches" / resume screen — the durable turn
+ *  log means a player can leave any match and pick it back up from here.
+ *  Returns null on a transient failure (caller shows a retry, not "no matches").
+ */
+export async function loadMyMatches(limit = 40): Promise<MatchSummary[] | null> {
+  const uid = await ensureAuth();
+  if (!uid) return null;
+  const client = getSupabaseClient();
+
+  const res = await withRetry(
+    () => client.from('matches').select()
+      .or(`host_player.eq.${uid},guest_player.eq.${uid}`)
+      .order('updated_at', { ascending: false })
+      .limit(limit),
+    { label: 'loadMyMatches' },
+  );
+  if (res.error || !res.data) {
+    dlog(`async: loadMyMatches failed: ${res.error?.message}`);
+    return null;
+  }
+  const matches = (res.data as MatchRow[]).map(mapMatch);
+
+  // Batch the current-round turns for in-play matches in one query (avoids N+1).
+  const live = matches.filter(m => m.status === 'open' || m.status === 'active');
+  const turnsByMatch = new Map<string, RoundTurn[]>();
+  if (live.length > 0) {
+    const tres = await withRetry(
+      () => client.from('turns').select().in('match_id', live.map(m => m.id)),
+      { label: 'loadMyMatches turns' },
+    );
+    if (tres.error) {
+      dlog(`async: loadMyMatches turns failed: ${tres.error.message}`);
+      return null;
+    }
+    for (const row of (tres.data as (TurnRow & { match_id: string })[] | null) ?? []) {
+      const list = turnsByMatch.get(row.match_id) ?? [];
+      list.push(mapTurn(row));
+      turnsByMatch.set(row.match_id, list);
+    }
+  }
+
+  return matches.map((m) => {
+    const iAmHost = m.hostPlayer === uid;
+    const roundTurns = (turnsByMatch.get(m.id) ?? []).filter(t => t.round === m.currentRound);
+    return { match: m, iAmHost, outcome: summariseMatch(m.status, iAmHost, roundTurns) };
+  });
 }
 
 // --- commit / reveal -----------------------------------------------------

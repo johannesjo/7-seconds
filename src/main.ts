@@ -13,8 +13,10 @@ import { OnlineGuest } from './online-guest';
 import { getJoinRoomId } from './online';
 import { findMatch } from './online-matchmaking';
 import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
-import type { PathList } from './online-async-core';
-import { createAsyncMatch, getAsyncJoinId } from './online-async';
+import type { PathList, MatchOutcome } from './online-async-core';
+import { outcomeNeedsYou } from './online-async-core';
+import { createAsyncMatch, getAsyncJoinId, loadMyMatches } from './online-async';
+import { currentUserId } from './online-auth';
 import { registerTurnNotifications, setTurnNotifications } from './online-push';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash, isPlausibleGameState } from './online-types';
@@ -79,6 +81,12 @@ const asyncNotifyCb = document.getElementById('async-notify-cb') as HTMLInputEle
 const asyncNotifyHint = document.getElementById('async-notify-hint')!;
 const asyncFirstMoveBtn = document.getElementById('async-first-move-btn')!;
 const asyncForfeitBtn = document.getElementById('async-forfeit-btn')!;
+const myMatchesBtn = document.getElementById('my-matches-btn')!;
+const myMatchesBadge = document.getElementById('my-matches-badge')!;
+const matchesScreen = document.getElementById('matches-screen')!;
+const matchesStatus = document.getElementById('matches-status')!;
+const matchesList = document.getElementById('matches-list')!;
+const matchesBackBtn = document.getElementById('matches-back-btn')!;
 const onlineRandomBtn = document.getElementById('online-random-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
 const onlineStatus = document.getElementById('online-status')!;
@@ -1452,6 +1460,75 @@ onlineAsyncBtn.addEventListener('click', () => {
   void startAsyncGame(null);
 });
 
+// --- My Matches: resume any in-flight async match (drop-in / drop-out) -----
+
+const MATCH_OUTCOME_UI: Record<MatchOutcome, { text: string; color: string }> = {
+  'your-turn': { text: 'Your turn', color: 'var(--color-btn-green-text)' },
+  'their-turn': { text: 'Their turn', color: 'var(--color-online-status)' },
+  'waiting-for-guest': { text: 'Waiting for a friend to join', color: 'var(--color-online-status)' },
+  'resolving': { text: 'Playing…', color: 'var(--color-online-status)' },
+  'you-won': { text: 'You won', color: 'var(--color-result-blue)' },
+  'you-lost': { text: 'You lost', color: 'var(--color-result-red)' },
+  'abandoned': { text: 'Abandoned', color: 'var(--color-online-status)' },
+};
+
+/** Reveal the "My Matches" menu entry (with an unread badge) only for players
+ *  who already have a session — never forces an anonymous account on load. */
+async function refreshMatchesBadge(): Promise<void> {
+  if (!(await currentUserId())) { myMatchesBtn.style.display = 'none'; return; }
+  const summaries = await loadMyMatches();
+  if (!summaries || summaries.length === 0) { myMatchesBtn.style.display = 'none'; return; }
+  myMatchesBtn.style.display = '';
+  const needsYou = summaries.filter(s => outcomeNeedsYou(s.outcome)).length;
+  myMatchesBadge.textContent = String(needsYou);
+  myMatchesBadge.style.display = needsYou > 0 ? '' : 'none';
+}
+
+async function openMatchesList(): Promise<void> {
+  matchesScreen.style.display = 'flex';
+  matchesList.innerHTML = '';
+  matchesStatus.style.display = '';
+  matchesStatus.textContent = 'Loading…';
+  const summaries = await loadMyMatches();
+  if (!summaries) {
+    matchesStatus.textContent = 'Could not load your matches. Check your connection and try again.';
+    return;
+  }
+  if (summaries.length === 0) {
+    matchesStatus.textContent = 'No matches yet. Start an Async match to play a friend over time.';
+    return;
+  }
+  matchesStatus.style.display = 'none';
+  // Surface matches that need the player first, newest within each group.
+  const sorted = [...summaries].sort(
+    (a, b) => Number(outcomeNeedsYou(b.outcome)) - Number(outcomeNeedsYou(a.outcome)),
+  );
+  for (const s of sorted) {
+    const ui = MATCH_OUTCOME_UI[s.outcome];
+    const row = document.createElement('button');
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;box-sizing:border-box;padding:14px 16px;font-size:15px;background:var(--color-online-url-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:6px;cursor:pointer;text-align:left';
+    const left = document.createElement('span');
+    left.textContent = `Round ${s.match.currentRound}`;
+    left.style.opacity = '0.8';
+    const right = document.createElement('span');
+    right.textContent = ui.text;
+    right.style.color = ui.color;
+    right.style.fontWeight = 'bold';
+    row.append(left, right);
+    row.addEventListener('click', () => {
+      matchesScreen.style.display = 'none';
+      void startAsyncGame(s.match.id);
+    });
+    matchesList.appendChild(row);
+  }
+}
+
+myMatchesBtn.addEventListener('click', () => { void openMatchesList(); });
+matchesBackBtn.addEventListener('click', () => {
+  matchesScreen.style.display = 'none';
+  void refreshMatchesBadge();
+});
+
 // Async notification opt-in (email + web push)
 asyncNotifyCb.addEventListener('change', async () => {
   if (!asyncNotifyCb.checked) {
@@ -1568,6 +1645,10 @@ window.addEventListener('beforeunload', () => {
   if (dayModeCb.checked) renderer!.setTheme(DAY_THEME);
   showPreview();
   showScreen('prompt');
+
+  // Reveal "My Matches" (with an unread badge) if this player already has
+  // matches — passive session read, so it never signs anyone in on load.
+  void refreshMatchesBadge();
 
   // Async match link (?amatch=) — distinct from live ?join= WebRTC rooms.
   const asyncJoinId = getAsyncJoinId();

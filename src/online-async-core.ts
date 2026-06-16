@@ -112,3 +112,58 @@ export function verifyReveal(turn: TurnRecord): boolean {
   if (turn.paths == null) return false;
   return hashPaths(turn.paths) === turn.commitHash;
 }
+
+// --- match list summary --------------------------------------------------
+
+/** Match statuses as stored in the `matches` row. Mirrors MatchStatus in
+ *  online-async.ts; duplicated here so this pure module stays free of the
+ *  Supabase-coupled layer (and importable in tests without it). */
+export type AsyncMatchStatus = 'open' | 'active' | 'host_won' | 'guest_won' | 'abandoned';
+
+/** A player-facing one-line state for a match in the "my matches" list. */
+export type MatchOutcome =
+  | 'your-turn'           // you need to plan/commit (incl. host's first move)
+  | 'their-turn'          // you've acted; waiting on the opponent
+  | 'waiting-for-guest'   // your first move is in; nobody has joined yet
+  | 'resolving'           // both committed+revealed; the round is being played
+  | 'you-won'
+  | 'you-lost'
+  | 'abandoned';
+
+/** True for outcomes that want the player's attention (drives unread badges and
+ *  the "needs you" filter). */
+export function outcomeNeedsYou(o: MatchOutcome): boolean {
+  return o === 'your-turn';
+}
+
+/** Collapse a match (status + my role + the current round's turns) into a single
+ *  player-facing outcome. Pure and side-effect free so it can be unit-tested and
+ *  reused by both the list screen and any badge counter. */
+export function summariseMatch(
+  status: AsyncMatchStatus,
+  iAmHost: boolean,
+  currentRoundTurns: TurnRecord[],
+): MatchOutcome {
+  if (status === 'abandoned') return 'abandoned';
+  if (status === 'host_won') return iAmHost ? 'you-won' : 'you-lost';
+  if (status === 'guest_won') return iAmHost ? 'you-lost' : 'you-won';
+
+  // Only the host can be on an 'open' match (no guest has joined yet).
+  if (status === 'open') {
+    const blueCommitted = currentRoundTurns.some(t => t.team === 'blue');
+    return blueCommitted ? 'waiting-for-guest' : 'your-turn';
+  }
+
+  // 'active': map the round state machine to a list outcome.
+  const myTeam: AsyncTeam = iAmHost ? 'blue' : 'red';
+  switch (nextRoundAction(currentRoundTurns, myTeam)) {
+    case 'commit':
+    case 'reveal':
+      return 'your-turn';
+    case 'await-commit':
+    case 'await-reveal':
+      return 'their-turn';
+    case 'resolve':
+      return 'resolving';
+  }
+}
