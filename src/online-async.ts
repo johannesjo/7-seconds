@@ -286,6 +286,25 @@ export async function persistRoundResult(
   return rows > 0;
 }
 
+/** Move a match to a terminal status (a player forfeits, or claims an
+ *  abandoned match). Idempotent and race-safe: the update only lands while the
+ *  match is still in play (`open`/`active`), so the first finish wins and a
+ *  second concurrent finish no-ops rather than flipping an already-decided
+ *  result. Returns true iff this call is the one that ended the match. */
+export async function finishMatch(id: string, status: MatchStatus): Promise<boolean> {
+  const client = getSupabaseClient();
+  const res = await withRetry(
+    () => client.from('matches').update({ status })
+      .eq('id', id).in('status', ['open', 'active']).select('id'),
+    { label: `finishMatch ${id}` },
+  );
+  if (res.error) {
+    dlog(`async: finishMatch ${id} -> ${status} failed: ${res.error.message}`);
+    return false;
+  }
+  return ((res.data as unknown[] | null)?.length ?? 0) > 0;
+}
+
 // --- realtime ------------------------------------------------------------
 
 export interface MatchSubscription {

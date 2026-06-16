@@ -71,6 +71,12 @@ class FakeBackend {
         this.notify();
         return true;
       },
+      finish: async (_id, status) => {
+        if (this.match.status !== 'open' && this.match.status !== 'active') return false;
+        this.match = { ...this.match, status };
+        this.notify();
+        return true;
+      },
       subscribe: (_id, onChange) => {
         this.listeners.add(onChange);
         return () => this.listeners.delete(onChange);
@@ -106,22 +112,23 @@ function fakePollEnv() {
   return env;
 }
 
-interface Spy { hooks: AsyncGameHooks; waiting: number[]; planTurns: number[]; plays: PlayRoundInput[]; gameOver: MatchStatus[]; errors: string[]; }
+interface Spy { hooks: AsyncGameHooks; waiting: number[]; planTurns: number[]; plays: PlayRoundInput[]; gameOver: MatchStatus[]; errors: string[]; forfeitable: boolean[]; }
 function makeHooks(): Spy {
   const waiting: number[] = [];
   const planTurns: number[] = [];
   const plays: PlayRoundInput[] = [];
   const gameOver: MatchStatus[] = [];
   const errors: string[] = [];
+  const forfeitable: boolean[] = [];
   return {
-    waiting, planTurns, plays, gameOver, errors,
+    waiting, planTurns, plays, gameOver, errors, forfeitable,
     hooks: {
       onWaitingForGuest: (round) => { waiting.push(round); },
       onPlanTurn: (round) => { planTurns.push(round); },
       onAwaitOpponent: () => {},
       onPlayRound: (input) => { plays.push(input); },
       onGameOver: (status) => { gameOver.push(status); },
-      onError: (msg) => { errors.push(msg); },
+      onError: (msg, canForfeit) => { errors.push(msg); forfeitable.push(!!canForfeit); },
     },
   };
 }
@@ -297,6 +304,46 @@ describe('AsyncGameController', () => {
 
     expect(spy.plays.length).toBe(0);
     expect(spy.errors.some(e => /lost|redraw/i.test(e))).toBe(true);
+    host.destroy();
+  });
+
+  it('offers forfeit when a committed plan is lost, and forfeiting ends the match', async () => {
+    const be = new FakeBackend('m17', 'host-uid');
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m17');
+
+    // Host commit recorded server-side, but this device has no stash entry, and
+    // the opponent has already revealed → host is stuck in reveal with no plan.
+    await be.ioFor('host-uid').commit('m17', 1, 'blue', bluePlan);
+    await guestIO.commit('m17', 1, 'red', redPlan);
+    await guestIO.reveal('m17', 1, 'red', redPlan);
+
+    const spy = makeHooks();
+    const host = new AsyncGameController('m17', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    await host.start();
+    await flush();
+
+    expect(spy.errors.some(e => /lost/i.test(e))).toBe(true);
+    expect(spy.forfeitable).toContain(true); // UI may offer a Forfeit action
+
+    // Forfeiting concedes: host is blue, so the guest (red) wins.
+    await host.forfeit();
+    await flush();
+    expect(be.match.status).toBe('guest_won');
+    expect(spy.gameOver).toContain('guest_won');
+    host.destroy();
+  });
+
+  it('forfeit is a no-op once the match is already decided', async () => {
+    const be = new FakeBackend('m18', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'host_won' };
+    const spy = makeHooks();
+    const host = new AsyncGameController('m18', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    await host.start();
+    await flush();
+    await host.forfeit();
+    await flush();
+    expect(be.match.status).toBe('host_won'); // unchanged
     host.destroy();
   });
 

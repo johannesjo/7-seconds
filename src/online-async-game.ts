@@ -3,7 +3,7 @@ import type { AsyncTeam, PathList } from './online-async-core';
 import { nextRoundAction, verifyReveal, deriveMatchSeed, hashPaths } from './online-async-core';
 import {
   loadMatch, joinAsyncMatch, fetchTurns, turnsForRound,
-  commitTurn, revealTurn, persistRoundResult, subscribeMatch,
+  commitTurn, revealTurn, persistRoundResult, finishMatch, subscribeMatch,
   type MatchRecord, type MatchStatus, type RoundTurn,
 } from './online-async';
 import { ensureAuth } from './online-auth';
@@ -34,8 +34,11 @@ export interface AsyncGameHooks {
   onPlayRound(input: PlayRoundInput): void;
   /** Match finished. */
   onGameOver(status: MatchStatus, finalState: OnlineGameState): void;
-  /** Recoverable problem worth surfacing (e.g. backend unavailable). */
-  onError(message: string): void;
+  /** Recoverable problem worth surfacing (e.g. backend unavailable).
+   *  `canForfeit` is true when the only clean way out is to concede this match
+   *  (e.g. the committed plan was lost and can never pass reveal verification),
+   *  so the UI can offer a Forfeit action that calls forfeit(). */
+  onError(message: string, canForfeit?: boolean): void;
 }
 
 /** Persists drawn paths between the commit and reveal steps so a player can
@@ -70,6 +73,7 @@ export interface AsyncIO {
   commit(id: string, round: number, team: AsyncTeam, paths: PathList): Promise<boolean>;
   reveal(id: string, round: number, team: AsyncTeam, paths: PathList): Promise<boolean>;
   persist(id: string, update: { latestState: OnlineGameState; currentRound: number; seed?: number; status?: MatchStatus; expectedRound?: number }): Promise<boolean>;
+  finish(id: string, status: MatchStatus): Promise<boolean>;
   subscribe(id: string, onChange: () => void): () => void;
 }
 
@@ -83,6 +87,7 @@ const realIO: AsyncIO = {
   commit: commitTurn,
   reveal: revealTurn,
   persist: persistRoundResult,
+  finish: finishMatch,
   subscribe: (id, onChange) =>
     subscribeMatch(id, { onTurnChange: () => onChange(), onMatchChange: () => onChange() }),
 };
@@ -351,8 +356,14 @@ export class AsyncGameController {
       case 'reveal': {
         const mine = this.stash.load(this.stashKey(round));
         if (!mine) {
-          // Paths lost (e.g. localStorage cleared on another device).
-          this.hooks.onError('Your submitted plan was lost; please redraw it.');
+          // Paths lost (e.g. localStorage cleared, or committed on another
+          // device). A redraw can't help: the server already holds our commit
+          // hash, so any new paths would fail reveal verification and wedge the
+          // round forever. Offer Forfeit as the honest, unwedgeable way out.
+          this.hooks.onError(
+            'Your planned move for this round was lost and can no longer be revealed. You can forfeit this match to end it cleanly.',
+            true,
+          );
           return;
         }
         await this.io.reveal(this.id, round, this.myTeam, mine);
@@ -392,6 +403,17 @@ export class AsyncGameController {
       redPaths: red.paths,
       seed,
     });
+  }
+
+  /** Concede the match: the local player loses, the opponent is recorded the
+   *  winner. Used both for a voluntary forfeit and to escape an unrecoverable
+   *  stuck state (e.g. a lost commit that can't be revealed). Idempotent via
+   *  finishMatch's in-play guard. */
+  async forfeit(): Promise<void> {
+    if (this.destroyed || !this.match) return;
+    const status: MatchStatus = this.myTeam === 'blue' ? 'guest_won' : 'host_won';
+    await this.io.finish(this.id, status);
+    await this.refresh();
   }
 
   destroy(): void {
