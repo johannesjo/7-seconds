@@ -12,6 +12,40 @@
 > protocol up front (Part 2) and constrains live↔async handoff to **round
 > boundaries**, which makes the rest tractable.
 
+## Implementation status (2026-06-16)
+
+Landed and unit-tested (330 tests green, production build clean):
+
+- **1.1 Retry transient writes** — `src/online-retry.ts` (`withRetry`, tested),
+  wired into commit/reveal/persist.
+- **1.2 Idempotent commit** — upsert + read-back verify in `commitTurn`.
+- **1.3 Self-healing subscription + safety-net poll** — `subscribeMatch`
+  re-subscribes on channel error; `AsyncGameController` polls (browser-gated,
+  injectable `PollEnv`, tested).
+- **1.4 Race-as-success + stale-seed guard** — `persistRoundResult` reports
+  rows-affected; `onRoundPlayed` reloads before re-deriving a seed.
+- **1.6 Forfeit / lost-stash escape hatch** — `finishMatch` + `forfeit()`,
+  honest lost-plan messaging, Forfeit button.
+- **1.7** — already satisfied: `notify-turn` no-ops when there's no opponent.
+- **1b Headless engine** — `game.ts` is now pixi-free at runtime (type-only
+  Renderer/PathDrawer + `Renderer.createPathDrawer`), unblocking server-side use.
+- **2.2 Host-first-move** — host plans/commits round 1 before a guest joins;
+  `awaitingGuest` flag + "Plan your first move" lobby button.
+- **1a Abandon timeout** — `supabase/migrations/0003_reliability.sql`
+  (`last_move_at`, `abandon_after`, `expire_abandoned_matches()` + pg_cron).
+  Pure SQL; **needs applying in the Supabase dashboard** (no client deploy here).
+
+Not yet implemented (scoped below; larger and/or needs infra I can't verify
+from this environment):
+
+- **1.5 server-side `resolve-round` Edge Function** — engine is now headless so
+  this is unblocked, but it needs a Deno deploy + reveal webhook wiring.
+- **2.0 uniform commit-reveal seed for live**, **2.1 matchmaking→durable
+  match**, **2.3 matches list**, **Part 3 WebRTC accelerator** — these are the
+  1–2 week items; they rewrite the working live path and/or need browser
+  verification, so they are deliberately left for a follow-up rather than
+  shipped blind.
+
 ## The ask
 
 1. **Make async reliable.** Today it stalls: matches wedge, players see
