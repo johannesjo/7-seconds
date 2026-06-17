@@ -245,7 +245,8 @@ above are not enough on their own.
 
 ## Notes / non-goals
 
-- `online-peer.ts` / WebRTC stays for live "vs random" matchmaking; async is for
-  friend matches. The two can converge later but are kept separate in Phase 1.
+- WebRTC has been removed: all online play (friend invites and "vs random"
+  matchmaking) now runs on the async durable turn log. See
+  `docs/plans/2026-06-17-drop-webrtc.md`.
 - Reconstruction prefers the cached `latest_state` snapshot; the full `turns`
   log is retained for replays and audit/anti-cheat verification.

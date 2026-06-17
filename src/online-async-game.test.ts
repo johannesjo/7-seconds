@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AsyncGameController, type AsyncIO, type PathStash, type AsyncGameHooks, type PlayRoundInput, type PollEnv } from './online-async-game';
-import { hashPaths, type AsyncTeam, type PathList } from './online-async-core';
+import { hashPaths, type PathList } from './online-async-core';
 import type { MatchRecord, MatchStatus, RoundTurn } from './online-async';
 import type { OnlineGameState } from './online-types';
 
@@ -467,6 +467,24 @@ describe('AsyncGameController', () => {
     await flush();
     expect(be.match.currentRound).toBe(2); // recovered
     host.destroy();
+  });
+
+  it('reports the authoritative team when a finished match is reopened (no planning hook)', async () => {
+    const be = new FakeBackend('m20', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'host_won' };
+    const spy = makeHooks();
+    // Guest reopens an already-decided match from "My Matches". onGameOver fires
+    // without onPlanTurn, so the UI's own team state would be stale — the
+    // controller must report the correct team (guest = red) so the win/loss is
+    // attributed from the right perspective rather than inverted.
+    const guest = new AsyncGameController('m20', spy.hooks, { io: be.ioFor('guest-uid'), stash: memStash() });
+    await guest.start();
+    await flush();
+    expect(spy.planTurns).toEqual([]);          // no planning hook fired
+    expect(spy.gameOver).toContain('host_won');
+    expect(guest.team).toBe('red');             // authoritative role, not stale UI state
+    expect(guest.opponentId).toBe('host-uid');
+    guest.destroy();
   });
 
   it('reports game over when the match is already abandoned', async () => {

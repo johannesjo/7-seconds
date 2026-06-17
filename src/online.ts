@@ -39,10 +39,6 @@ export function getSupabaseClient(): SupabaseClient {
   return sharedClient;
 }
 
-/** Unique peer ID for this browser tab — shared across WebRTC and relay transports
- *  so fallback doesn't present a different identity to the remote peer. */
-export const localPeerId = safeUUID();
-
 const LOCAL_ID_KEY = '7s-player-id';
 
 /** Get or create a persistent local player ID. */

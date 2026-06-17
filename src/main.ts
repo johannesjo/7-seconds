@@ -877,9 +877,12 @@ function asyncHooks(): AsyncGameHooks {
     },
 
     onGameOver(status, finalState) {
-      // Capture before destroyAsync(): the local win/loss record is keyed by the
-      // opponent's uid and the match id, recorded once per match (this hook can
-      // re-fire when a decided match is reopened from "My Matches").
+      // Capture from the controller before destroyAsync(): use its authoritative
+      // team, not the module-level asyncMyTeam — the latter is only set when WE
+      // plan a round this session, so it's stale (and would invert the result)
+      // when a finished match is reopened from "My Matches". The W/L record is
+      // keyed by opponent uid + match id, recorded once per match.
+      const myTeam = asyncController?.team ?? asyncMyTeam;
       const opponentId = asyncController?.opponentId ?? null;
       const matchId = asyncController?.matchId ?? null;
       destroyAsync();
@@ -888,7 +891,7 @@ function asyncHooks(): AsyncGameHooks {
         winnerTextEl.style.color = ''; // neutral, not a win/loss color
       } else {
         const winner: Team = status === 'guest_won' ? 'red' : 'blue';
-        const iWon = (asyncMyTeam === winner);
+        const iWon = (myTeam === winner);
         if (opponentId && matchId) recordMatchResultOnce(matchId, opponentId, iWon);
         const color = winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
         winnerTextEl.innerHTML = `${iWon ? 'You Win!' : 'You Lose'}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;

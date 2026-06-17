@@ -241,6 +241,11 @@ export class AsyncGameController {
   /** The durable match id (for keying a once-only win/loss record). */
   get matchId(): string { return this.id; }
 
+  /** The local player's team, resolved from the match role at start(). Use this
+   *  for win/loss attribution — it is authoritative even when a finished match
+   *  is reopened (no planning hook fires to set the UI's team in that path). */
+  get team(): AsyncTeam { return this.myTeam; }
+
   /** The opponent's user id, or null if no opponent has joined yet. */
   get opponentId(): string | null {
     if (!this.match) return null;
