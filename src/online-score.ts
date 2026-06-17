@@ -42,6 +42,20 @@ export function recordLoss(opponentId: string): void {
   saveScores(scores);
 }
 
+const SCORED_KEY = '7s-scored-matches';
+
+/** Record a finished match's result at most once. Async game-over can re-fire
+ *  whenever a decided match is reopened (e.g. from "My Matches"), so we key on
+ *  the durable match id and skip any match already scored. */
+export function recordMatchResultOnce(matchId: string, opponentId: string, won: boolean): void {
+  if (!isValidPlayerId(opponentId)) return;
+  let scored: string[];
+  try { scored = JSON.parse(localStorage.getItem(SCORED_KEY) ?? '[]'); } catch { scored = []; }
+  if (scored.includes(matchId)) return;
+  if (won) recordWin(opponentId); else recordLoss(opponentId);
+  try { localStorage.setItem(SCORED_KEY, JSON.stringify([...scored, matchId])); } catch { /* unavailable */ }
+}
+
 export function getScore(opponentId: string): PlayerScore {
   const scores = loadScores();
   return scores[opponentId] ?? { wins: 0, losses: 0 };

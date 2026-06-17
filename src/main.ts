@@ -21,7 +21,7 @@ import { registerTurnNotifications, setTurnNotifications } from './online-push';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash, isPlausibleGameState } from './online-types';
 import { PathDrawer } from './path-drawer';
-import { recordWin, recordLoss, getScore, getOverallScore } from './online-score';
+import { recordWin, recordLoss, recordMatchResultOnce, getScore, getOverallScore } from './online-score';
 import { requestNotificationPermission, notify } from './notify';
 
 // DOM elements
@@ -74,7 +74,6 @@ const replaySpeedToggle = document.getElementById('replay-speed-toggle') as HTML
 const exitGameBtn = document.getElementById('exit-game-btn')!;
 
 // Online lobby elements
-const onlineBtn = document.getElementById('online-btn')!;
 const onlineAsyncBtn = document.getElementById('online-async-btn')!;
 const asyncNotify = document.getElementById('async-notify')!;
 const asyncNotifyCb = document.getElementById('async-notify-cb') as HTMLInputElement;
@@ -1360,6 +1359,11 @@ function asyncHooks(): AsyncGameHooks {
     },
 
     onGameOver(status, finalState) {
+      // Capture before destroyAsync(): the local win/loss record is keyed by the
+      // opponent's uid and the match id, recorded once per match (this hook can
+      // re-fire when a decided match is reopened from "My Matches").
+      const opponentId = asyncController?.opponentId ?? null;
+      const matchId = asyncController?.matchId ?? null;
       destroyAsync();
       if (status === 'abandoned') {
         winnerTextEl.innerHTML = `Match Abandoned<br><span style="font-size:0.5em;opacity:0.7">Your opponent left</span>`;
@@ -1367,6 +1371,7 @@ function asyncHooks(): AsyncGameHooks {
       } else {
         const winner: Team = status === 'guest_won' ? 'red' : 'blue';
         const iWon = (asyncMyTeam === winner);
+        if (opponentId && matchId) recordMatchResultOnce(matchId, opponentId, iWon);
         const color = winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
         winnerTextEl.innerHTML = `${iWon ? 'You Win!' : 'You Lose'}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
         winnerTextEl.style.color = color;
@@ -1411,7 +1416,7 @@ async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean
   onlineLobby.style.display = 'flex';
   onlineShareContainer.style.display = 'none';
   onlineStatus.style.display = '';
-  document.getElementById('online-record')!.style.display = 'none';
+  showOnlineRecord(); // overall W/L (self-hides when there are no games yet)
   asyncNotify.style.display = 'flex';
   // Reflect current push state in the checkbox (permission granted ≈ subscribed).
   asyncNotifyCb.checked = typeof Notification !== 'undefined' && Notification.permission === 'granted';
@@ -1450,32 +1455,8 @@ async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean
   if (!ok) { asyncController = null; }
 }
 
-// Online PvP button (host flow)
-onlineBtn.addEventListener('click', async () => {
-  onlineActive = true;
-  onlineRole = 'host';
-  requestNotificationPermission();
-
-  await initRenderer();
-
-  onlineLobby.style.display = 'flex';
-  onlineShareContainer.style.display = 'none';
-  showOnlineRecord();
-  setOnlineStatus('Creating room...', true);
-
-  onlineHost = new OnlineHost(createHostCallbacks({
-    onShareUrl(url: string) {
-      onlineShareContainer.style.display = '';
-      onlineShareUrl.value = url;
-    },
-    waitingStatus: 'Waiting for opponent...',
-    errorStatus: 'Timed out. No opponent joined. Try creating a new room.',
-  }));
-
-  await onlineHost.createRoom();
-});
-
-// Async vs Friend — create a play-by-mail match (turns persisted server-side)
+// Play a Friend — create a durable match and share its link. Live when the
+// friend is also present (Realtime), play-by-mail when they're not.
 onlineAsyncBtn.addEventListener('click', () => {
   requestNotificationPermission();
   void startAsyncGame(null);

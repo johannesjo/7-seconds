@@ -238,6 +238,15 @@ export class AsyncGameController {
     return `7s-async-${this.id}-r${round}-${this.myTeam}`;
   }
 
+  /** The durable match id (for keying a once-only win/loss record). */
+  get matchId(): string { return this.id; }
+
+  /** The opponent's user id, or null if no opponent has joined yet. */
+  get opponentId(): string | null {
+    if (!this.match) return null;
+    return (this.myTeam === 'blue' ? this.match.guestPlayer : this.match.hostPlayer) ?? null;
+  }
+
   /** Local player finished drawing paths for the current round. */
   async submitPlan(paths: PathList): Promise<void> {
     if (this.destroyed || !this.match) return;
