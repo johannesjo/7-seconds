@@ -487,6 +487,22 @@ describe('AsyncGameController', () => {
     guest.destroy();
   });
 
+  it('refuses to play an implausible match state (offers forfeit, never feeds the engine)', async () => {
+    const be = new FakeBackend('m21', 'host-uid');
+    // A participant-written latest_state with a non-positive map dimension — the
+    // kind of garbage a malicious/buggy matchmade stranger could write.
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active', latestState: { ...initial, mapWidth: -1 } };
+    const spy = makeHooks();
+    const host = new AsyncGameController('m21', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    await host.start();
+    await flush();
+    expect(spy.plays).toEqual([]);             // never handed to playback
+    expect(spy.planTurns).toEqual([]);          // never handed to the planner
+    expect(spy.errors.some(e => /invalid game state/i.test(e))).toBe(true);
+    expect(spy.forfeitable).toContain(true);    // clean exit offered
+    host.destroy();
+  });
+
   it('reports game over when the match is already abandoned', async () => {
     const be = new FakeBackend('m10', 'host-uid');
     be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'abandoned' };

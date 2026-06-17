@@ -1,4 +1,5 @@
 import type { Vec2 } from './types';
+import type { OnlineGameState } from './online-types';
 
 /** A team's planned movement for one round: waypoints per unit. */
 export type PathList = { unitId: string; waypoints: Vec2[] }[];
@@ -54,6 +55,13 @@ export function hashPaths(paths: PathList): number {
     }
   }
   return h >>> 0; // unsigned 32-bit
+}
+
+/** True when blue still has a unit standing. Blue is the host, so this decides
+ *  the winner. Single source of truth shared by the client controller and the
+ *  server-side resolver (engine-entry → resolve-round) so the two can't drift. */
+export function blueAlive(state: OnlineGameState): boolean {
+  return state.units.some(u => u.team === 'blue' && u.hp > 0);
 }
 
 /** Derive the match seed from both round-1 commit hashes. Because both commits

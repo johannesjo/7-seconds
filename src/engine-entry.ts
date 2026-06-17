@@ -15,11 +15,13 @@ export {
   canonicalisePaths,
   deriveMatchSeed,
   verifyReveal,
+  blueAlive,
   type PathList,
   type TurnRecord,
   type AsyncTeam,
 } from './online-async-core';
 export { ROUND_DURATION_S } from './constants';
+export { isPlausibleGameState } from './online-types';
 export type { OnlineGameState } from './online-types';
 
 /** Authoritative, frame-rate-independent round resolution — a pure function of
@@ -32,10 +34,4 @@ export function resolveRound(
   maxTicks: number,
 ): { endState: OnlineGameState; gameOver: boolean } {
   return GameEngine.resolveRound(startState, bluePaths, redPaths, seed, maxTicks);
-}
-
-/** True when blue still has a unit standing in the given state — used to decide
- *  the winner (host=blue) exactly as the client's winnerStatus does. */
-export function blueAlive(state: OnlineGameState): boolean {
-  return state.units.some((u) => u.team === 'blue' && u.hp > 0);
 }

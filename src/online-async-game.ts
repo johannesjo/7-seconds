@@ -1,6 +1,6 @@
-import type { OnlineGameState } from './online-types';
+import { isPlausibleGameState, type OnlineGameState } from './online-types';
 import type { AsyncTeam, PathList } from './online-async-core';
-import { nextRoundAction, verifyReveal, deriveMatchSeed, hashPaths } from './online-async-core';
+import { nextRoundAction, verifyReveal, deriveMatchSeed, hashPaths, blueAlive } from './online-async-core';
 import {
   loadMatch, joinAsyncMatch, fetchTurns, turnsForRound,
   commitTurn, revealTurn, persistRoundResult, finishMatch, subscribeMatch,
@@ -318,8 +318,7 @@ export class AsyncGameController {
   }
 
   private winnerStatus(state: OnlineGameState): MatchStatus {
-    const blueAlive = state.units.some(u => u.team === 'blue' && u.hp > 0);
-    return blueAlive ? 'host_won' : 'guest_won';
+    return blueAlive(state) ? 'host_won' : 'guest_won';
   }
 
   /** Reload match + turns from the backend, then re-evaluate. */
@@ -350,6 +349,16 @@ export class AsyncGameController {
 
     if (isTerminalStatus(match.status)) {
       this.hooks.onGameOver(match.status, match.latestState);
+      return;
+    }
+
+    // The match row (incl. latest_state) is written by participants — for a
+    // matchmade stranger that's an untrusted peer. Before feeding it to the
+    // engine/renderer (planning and resolve both consume match.latestState),
+    // reject an implausible snapshot so a malicious/buggy state can't hang or
+    // crash this client. Forfeit is the clean exit (the state can't be fixed).
+    if (!isPlausibleGameState(match.latestState)) {
+      this.hooks.onError('This match has an invalid game state and can no longer be played.', true);
       return;
     }
 

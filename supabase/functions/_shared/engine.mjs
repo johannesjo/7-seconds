@@ -35,6 +35,19 @@ var CTF_ARMY_COMPOSITION = [
 var MAX_ONLINE_UNITS = 100;
 var MAX_ONLINE_OBSTACLES = 300;
 var MAX_ONLINE_ELEVATION_ZONES = 300;
+var VALID_TEAMS = /* @__PURE__ */ new Set(["blue", "red"]);
+function isFiniteNumber(n) {
+  return typeof n === "number" && Number.isFinite(n);
+}
+function isValidRect(r) {
+  return !!r && isFiniteNumber(r.x) && isFiniteNumber(r.y) && isFiniteNumber(r.w) && r.w >= 0 && isFiniteNumber(r.h) && r.h >= 0;
+}
+function isValidUnit(u) {
+  return !!u && typeof u.id === "string" && typeof u.type === "string" && Object.prototype.hasOwnProperty.call(UNIT_STATS, u.type) && VALID_TEAMS.has(u.team) && isFiniteNumber(u.x) && isFiniteNumber(u.y) && isFiniteNumber(u.hp) && u.hp >= 0 && isFiniteNumber(u.maxHp) && u.maxHp > 0 && isFiniteNumber(u.radius) && u.radius >= 0 && isFiniteNumber(u.speed) && u.speed >= 0 && isFiniteNumber(u.range) && u.range >= 0 && isFiniteNumber(u.gunAngle);
+}
+function isPlausibleGameState(state) {
+  return !!state && Array.isArray(state.units) && state.units.length <= MAX_ONLINE_UNITS && Array.isArray(state.obstacles) && state.obstacles.length <= MAX_ONLINE_OBSTACLES && Array.isArray(state.elevationZones) && state.elevationZones.length <= MAX_ONLINE_ELEVATION_ZONES && Number.isFinite(state.mapWidth) && state.mapWidth > 0 && Number.isFinite(state.mapHeight) && state.mapHeight > 0 && state.units.every(isValidUnit) && state.obstacles.every(isValidRect) && state.elevationZones.every(isValidRect);
+}
 
 // src/units.ts
 function segmentHitsRect(a, b, rect, padding) {
@@ -1840,6 +1853,9 @@ function hashPaths(paths) {
   }
   return h >>> 0;
 }
+function blueAlive(state) {
+  return state.units.some((u) => u.team === "blue" && u.hp > 0);
+}
 function deriveMatchSeed(roomId, blueHash, redHash) {
   let h = 2166136261;
   h = fnv1aString(h, roomId);
@@ -1856,15 +1872,13 @@ function verifyReveal(turn) {
 function resolveRound(startState, bluePaths, redPaths, seed, maxTicks) {
   return GameEngine.resolveRound(startState, bluePaths, redPaths, seed, maxTicks);
 }
-function blueAlive(state) {
-  return state.units.some((u) => u.team === "blue" && u.hp > 0);
-}
 export {
   ROUND_DURATION_S,
   blueAlive,
   canonicalisePaths,
   deriveMatchSeed,
   hashPaths,
+  isPlausibleGameState,
   resolveRound,
   verifyReveal
 };

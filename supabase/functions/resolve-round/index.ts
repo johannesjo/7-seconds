@@ -25,7 +25,7 @@
 // @ts-nocheck
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  resolveRound, deriveMatchSeed, verifyReveal, blueAlive, ROUND_DURATION_S,
+  resolveRound, deriveMatchSeed, verifyReveal, blueAlive, isPlausibleGameState, ROUND_DURATION_S,
 } from '../_shared/engine.mjs';
 
 const ROUND_END_TICK = Math.round(ROUND_DURATION_S * 60);
@@ -35,8 +35,33 @@ const admin = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
 
+// Optional shared-secret gate. The function URL is public, so if WEBHOOK_SECRET
+// is configured, require the Database Webhook to send it (set a custom header
+// `Authorization: Bearer <secret>`). Constant-time compare avoids timing leaks.
+// If the secret isn't set we proceed (so the function works before it's wired),
+// but log loudly — configure it in production.
+const WEBHOOK_SECRET = Deno.env.get('WEBHOOK_SECRET') ?? '';
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function authorized(req: Request): boolean {
+  if (!WEBHOOK_SECRET) {
+    console.warn('resolve-round: WEBHOOK_SECRET not set — accepting unauthenticated request');
+    return true;
+  }
+  const header = req.headers.get('authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : header;
+  return timingSafeEqual(token, WEBHOOK_SECRET);
+}
+
 Deno.serve(async (req) => {
   try {
+    if (!authorized(req)) return new Response('unauthorized', { status: 401 });
     const payload = await req.json();
     const record = payload.record ?? payload.new;
     const matchId = record?.match_id;
@@ -50,6 +75,13 @@ Deno.serve(async (req) => {
     if (!match) return new Response('no match', { status: 200 });
     if (match.status !== 'open' && match.status !== 'active') {
       return new Response('not in play', { status: 200 });
+    }
+    // latest_state is participant-written (an untrusted stranger in a matchmade
+    // game). Refuse to simulate an implausible snapshot — it can't be resolved
+    // and a huge/garbage state would burn the service-role function's CPU.
+    if (!isPlausibleGameState(match.latest_state)) {
+      console.error(`resolve-round: implausible latest_state for ${matchId}`);
+      return new Response('invalid state', { status: 200 });
     }
 
     const round = match.current_round;
