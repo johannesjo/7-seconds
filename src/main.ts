@@ -896,6 +896,14 @@ function asyncHooks(): AsyncGameHooks {
       const opponentId = asyncController?.opponentId ?? null;
       const matchId = asyncController?.matchId ?? null;
       destroyAsync();
+      // When a match ends without round playback the lobby overlay was never
+      // dismissed by onPlayRound, so hide it here or it covers the result screen
+      // (z-index:25) and the match looks stuck. Three such paths: forfeit
+      // (finish -> onGameOver directly), reopening an already-finished match
+      // from "My Matches", and a poll/realtime detecting the opponent abandoned
+      // while we sit on the await screen. Hiding the lobby also hides the share
+      // box nested inside it.
+      onlineLobby.style.display = 'none';
       if (status === 'abandoned') {
         winnerTextEl.innerHTML = `Match Abandoned<br><span style="font-size:0.5em;opacity:0.7">Your opponent left</span>`;
         winnerTextEl.style.color = ''; // neutral, not a win/loss color
