@@ -5,15 +5,16 @@ import type { OnlineGameState } from './online-types';
 
 // Proves the lockstep fix: the host transmits the *per-round* seed and the guest
 // simulates with it, so both peers produce identical state for EVERY round — not
-// just round 1. A red zombie chasing a blue unit consumes RNG via its "shamble"
-// wobble (units.ts) on every move step, so any seed difference shows up in the
-// state hash. Without that RNG consumer the seed would be invisible and these
-// tests would be false passes.
+// just round 1. A red zombie moving along its drawn path consumes RNG via its
+// "shamble" wobble (units.ts) on every move step, so any seed difference shows up
+// in the state hash. Without that RNG consumer the seed would be invisible and
+// these tests would be false passes. (A guest-style headless engine is human-
+// controlled, so units follow paths rather than the AI-only chase logic.)
 
 function makeSnapshot(): OnlineGameState {
   return {
     units: [
-      // Red zombie chases the nearest enemy via the engine's chase AI (no paths).
+      // Red zombie shambles along its path toward the enemy (set in runRound).
       { id: 'red1', type: 'zombie', team: 'red', x: 500, y: 700, hp: 100, maxHp: 100, radius: 7, speed: 60, range: 0, gunAngle: 0 },
       { id: 'blue1', type: 'soldier', team: 'blue', x: 500, y: 250, hp: 100, maxHp: 100, radius: 6, speed: 80, range: 120, gunAngle: 0 },
     ],
@@ -29,7 +30,7 @@ function runRound(roundSeed: number, steps: number): number {
   const eng = new GameEngine(null, () => {}, { seed: roundSeed });
   eng.loadOnlineGameState(makeSnapshot());
   eng.setBluePaths([]); // blue holds position
-  eng.setRedPaths([]);  // zombie chases via AI
+  eng.setRedPaths([{ unitId: 'red1', waypoints: [{ x: 500, y: 250 }] }]); // zombie advances, shambling
   eng.startPlaying(roundSeed);
   for (let i = 0; i < steps; i++) eng.externalTick(1000 / 60);
   return hashGameState(eng.getUnits());
@@ -59,7 +60,7 @@ describe('lockstep determinism', () => {
       const eng = new GameEngine(null, () => {}, { seed: 999 });
       eng.loadOnlineGameState(makeSnapshot());
       eng.setBluePaths([]);
-      eng.setRedPaths([]);
+      eng.setRedPaths([{ unitId: 'red1', waypoints: [{ x: 500, y: 250 }] }]);
       eng.startPlaying(12347); // explicit round seed
       for (let i = 0; i < 40; i++) eng.externalTick(1000 / 60);
       return hashGameState(eng.getUnits());
