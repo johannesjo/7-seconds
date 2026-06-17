@@ -421,6 +421,54 @@ describe('AsyncGameController', () => {
     guest.destroy();
   });
 
+  it('recovers (no wedge) when persisting a resolved round fails transiently', async () => {
+    const be = new FakeBackend('m19', 'host-uid');
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m19');
+
+    // A persist that blips once (transient error, retries already exhausted) and
+    // succeeds thereafter — distinct from a lost race, since the round does NOT
+    // advance behind us.
+    const hostIO = be.ioFor('host-uid');
+    let failPersistOnce = true;
+    const flakyIO: AsyncIO = {
+      ...hostIO,
+      persist: async (id, update) => {
+        if (failPersistOnce) { failPersistOnce = false; return false; }
+        return hostIO.persist(id, update);
+      },
+    };
+
+    const spy = makeHooks();
+    const env = fakePollEnv();
+    const host = new AsyncGameController('m19', spy.hooks, { io: flakyIO, stash: memStash(), pollEnv: env });
+
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await guestIO.commit('m19', 1, 'red', redPlan);
+    await guestIO.reveal('m19', 1, 'red', redPlan);
+    await flush();
+    expect(spy.plays.length).toBe(1); // round 1 resolved and handed to playback
+
+    // Playback finishes; the persist write blips. The round must NOT advance and
+    // the session must NOT wedge — no dead-end error, and the latch is released.
+    await host.onRoundPlayed(1, makeState(80, 60), false);
+    await flush();
+    expect(be.match.currentRound).toBe(1); // write failed → not advanced
+    expect(spy.errors).toEqual([]);        // no dead-end surfaced
+
+    // A poll tick re-drives resolution; this time the persist lands and the
+    // round advances. Without the latch reset, resolve() would never re-emit.
+    env.tick();
+    await flush();
+    expect(spy.plays.length).toBe(2);      // re-emitted playback for the retry
+    await host.onRoundPlayed(1, makeState(80, 60), false);
+    await flush();
+    expect(be.match.currentRound).toBe(2); // recovered
+    host.destroy();
+  });
+
   it('reports game over when the match is already abandoned', async () => {
     const be = new FakeBackend('m10', 'host-uid');
     be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'abandoned' };

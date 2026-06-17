@@ -31,10 +31,14 @@ create index if not exists matches_abandon_idx
   on public.matches(status, last_move_at);
 
 -- ---------------------------------------------------------------------------
--- Keep last_move_at fresh on every commit
+-- Keep last_move_at fresh on every player action (commit AND reveal)
 --
--- A turn insert is a "move": touch the parent match's clock. SECURITY DEFINER
--- so it runs regardless of the committing player's row-level update rights
+-- A turn insert (commit) and a turn update (reveal) are both real "moves", so
+-- touch the parent match's clock for both. Firing only on insert would let a
+-- match that's slowly working through the reveal phase look idle — and once a
+-- short abandon_after is set for stranger games, get wrongly auto-abandoned
+-- mid-round. NEW.match_id is present and unchanged on insert and update alike.
+-- SECURITY DEFINER so it runs regardless of the player's row-level update rights
 -- (they are a participant, but this keeps the trigger robust to policy changes).
 -- ---------------------------------------------------------------------------
 
@@ -47,7 +51,7 @@ end;
 $$;
 
 drop trigger if exists turns_touch_match on public.turns;
-create trigger turns_touch_match after insert on public.turns
+create trigger turns_touch_match after insert or update on public.turns
   for each row execute function public.touch_match_activity();
 
 -- ---------------------------------------------------------------------------
@@ -75,6 +79,12 @@ begin
   return expired;
 end;
 $$;
+
+-- This is SECURITY DEFINER and flips other players' matches to 'abandoned', so
+-- it must not be callable by every signed-in user via RPC. Only the scheduler
+-- (pg_cron / service role) should run it; the owner and service_role keep
+-- execute rights, anon/authenticated lose theirs.
+revoke execute on function public.expire_abandoned_matches() from public;
 
 -- Schedule hourly via pg_cron when available. pg_cron must be enabled first
 -- (Dashboard -> Database -> Extensions -> pg_cron). If it isn't enabled, this

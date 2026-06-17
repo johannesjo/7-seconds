@@ -291,6 +291,15 @@ export class AsyncGameController {
     // so a transient failure (retries exhausted, still on this round) can retry.
     if (landed || (this.match != null && this.match.currentRound > round)) {
       this.stash.clear(this.stashKey(round));
+    } else if (this.match != null && this.match.currentRound === round) {
+      // Neither our write nor a peer's advanced the round: the persist failed
+      // transiently (retries are already exhausted inside persistRoundResult).
+      // Release the playback latch so the safety-net poll / next realtime event
+      // re-resolves this round and re-attempts the write. Without this reset
+      // playingRound stays pinned to this round, resolve() can never re-emit,
+      // and the session wedges — the one hang the safety-net poll can't undo.
+      this.playingRound = null;
+      this.playingSeed = null;
     }
   }
 
