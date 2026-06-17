@@ -334,7 +334,10 @@ export class GameEngine {
     this.simulationTick++;
 
     const redDelayed = this.updateHordeDelay(dt);
-    this.updateChaseAI();
+    // Chase AI drives the AI opponent's red units. Skip it when red is human-
+    // controlled (online guest, local/CTF hotseat) — otherwise their drawn paths
+    // get overwritten and units appear to move on their own.
+    if (this.aiMode) this.updateChaseAI();
     this.updateMovement(dt, redDelayed);
     this.updateCombat(dt);
     const hits = this.updateProjectiles(dt);
@@ -356,7 +359,9 @@ export class GameEngine {
     return redDelayed;
   }
 
-  /** Zombies, shielders, and bombers on the red team always chase closest enemy. */
+  /** AI-mode only: zombies, shielders, and bombers on the red team chase the
+   *  closest enemy. Gated by aiMode at the call site — never overrides the paths
+   *  of a human-controlled red team. */
   private updateChaseAI(): void {
     for (const unit of this.units) {
       if (!unit.alive || unit.team !== 'red' || (unit.type !== 'zombie' && unit.type !== 'shielder' && unit.type !== 'bomber')) continue;
