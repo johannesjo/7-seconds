@@ -39,6 +39,7 @@ const planningOverlay = document.getElementById('planning-overlay')!;
 const planningLabel = document.getElementById('planning-label')!;
 const confirmBtn = document.getElementById('confirm-btn')!;
 const coverScreen = document.getElementById('cover-screen')!;
+const countInEl = document.getElementById('count-in')!;
 const roundCounterEl = document.getElementById('round-counter')!;
 
 const winnerTextEl = document.getElementById('winner-text')!;
@@ -679,6 +680,7 @@ replaySpeedToggle.addEventListener('click', () => {
 /** Tear down the headless playback engine used to animate a resolved async
  *  round (shared teardown for the async match playback). */
 function stopPlaybackEngine(): void {
+  cancelCountIn(); // drop any pending count-in so it can't start a torn-down round
   if (playbackEngine) {
     playbackEngine.stop();
     playbackEngine = null;
@@ -756,6 +758,38 @@ function asyncTickCallback(ticker: { deltaMS: number }): void {
   }
 }
 
+/** Per-number duration of the pre-playback count-in (ms). */
+const COUNT_IN_STEP_MS = 700;
+let countInTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Cancel a running 3-2-1 count-in and hide its overlay. Safe anytime (e.g.
+ *  when playback is torn down mid-count). */
+function cancelCountIn(): void {
+  if (countInTimer !== null) { clearTimeout(countInTimer); countInTimer = null; }
+  countInEl.style.display = 'none';
+}
+
+/** Count "3, 2, 1" over the (already painted) board, then run `onDone` — a beat
+ *  to read the starting positions before the round animates. */
+function runCountIn(onDone: () => void): void {
+  cancelCountIn();
+  let n = 3;
+  const show = (): void => {
+    countInEl.textContent = String(n);
+    countInEl.style.display = 'flex';
+    // Re-trigger the pop animation for each number (a reflow restarts it).
+    countInEl.classList.remove('pop');
+    void countInEl.offsetWidth;
+    countInEl.classList.add('pop');
+    countInTimer = setTimeout(() => {
+      n -= 1;
+      if (n >= 1) show();
+      else { cancelCountIn(); onDone(); }
+    }, COUNT_IN_STEP_MS);
+  };
+  show();
+}
+
 /** Run a resolved round: compute the authoritative outcome deterministically,
  *  then animate the same round for the player to watch. */
 function startAsyncRoundPlayback(input: PlayRoundInput): void {
@@ -782,10 +816,20 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
   playbackEngine.loadOnlineGameState(input.startState);
   playbackEngine.setBluePaths(input.bluePaths);
   playbackEngine.setRedPaths(input.redPaths);
-  playbackEngine.startPlaying();
-  playbackEffectIndex = 0;
   roundCounterEl.textContent = `Round ${input.round}`;
-  renderer!.ticker.add(asyncTickCallback);
+
+  // Paint the starting positions so the player can read the board, then count
+  // in 3-2-1 before the action animates — a beat to orient on who's where
+  // before "what happened" replays. startPlaying() is deferred to the count's end.
+  renderer!.renderElevationZones(input.startState.elevationZones);
+  renderer!.renderObstacles(input.startState.obstacles);
+  renderer!.renderUnits(playbackEngine.getUnits());
+  runCountIn(() => {
+    if (!playbackEngine) return; // left the match during the count-in
+    playbackEffectIndex = 0;
+    playbackEngine.startPlaying();
+    renderer!.ticker.add(asyncTickCallback);
+  });
 }
 
 /** Bridge the async protocol controller to the UI / playback engine. */

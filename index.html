@@ -251,6 +251,27 @@
     }
     #cover-screen.active { display: flex; }
 
+    /* 3-2-1 count-in shown over the board before an async round replays. */
+    #count-in {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 14;
+      font-size: 120px;
+      font-weight: bold;
+      color: var(--color-text);
+      text-shadow: 0 2px 28px rgba(0, 0, 0, 0.85);
+    }
+    #count-in.pop { animation: countInPop 700ms ease-out; }
+    @keyframes countInPop {
+      0%   { transform: scale(2.2); opacity: 0; }
+      25%  { opacity: 1; }
+      100% { transform: scale(0.7); opacity: 0; }
+    }
+
     /* Result Screen */
     #result-screen {
       position: absolute;
@@ -534,6 +555,8 @@
       <button id="exit-game-btn" title="Exit game" style="position:absolute;top:calc(4px + var(--sat));right:4px;background:none;border:none;color:var(--color-text);font-size:18px;cursor:pointer;opacity:0.5;padding:4px 8px;z-index:11">&#x2715;</button>
     </div>
     <div id="pixi-container"></div>
+
+    <div id="count-in" aria-hidden="true"></div>
 
     <div id="planning-overlay">
       <span id="planning-label">Blue Planning</span>
