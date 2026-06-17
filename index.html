@@ -131,7 +131,7 @@
       border-radius: 4px;
       cursor: pointer;
     }
-    #battle-btn:hover, #ai-btn:hover, #online-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
+    #battle-btn:hover, #ai-btn:hover, #online-async-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
     .beta-tag { font-size: 10px; vertical-align: super; opacity: 0.6; letter-spacing: 1px; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -474,12 +474,7 @@
         document.getElementById('age-gate-yes').onclick = function() {
           localStorage.setItem('7s-age-verified', '1');
           gate.style.display = 'none';
-          // If a join link was deferred, trigger guest mode now
-          var pendingJoin = sessionStorage.getItem('7s-pending-join');
-          if (pendingJoin) {
-            sessionStorage.removeItem('7s-pending-join');
-            window.dispatchEvent(new CustomEvent('age-verified-join', { detail: pendingJoin }));
-          }
+          // If an async match link was deferred, trigger it now
           var pendingAsync = sessionStorage.getItem('7s-pending-async-join');
           if (pendingAsync) {
             sessionStorage.removeItem('7s-pending-async-join');
