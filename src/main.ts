@@ -137,15 +137,16 @@ let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null 
 let hordeAppliedUpgrades = new Map<string, number>();
 
 // Online state. `onlineActive` flags an online flow in progress (matchmaking or
-// an async match), so the matchmaking search can be cancelled. The guest* state
-// is the shared headless engine used to animate a resolved async round.
+// an async match), so the matchmaking search can be cancelled. The playback*
+// state is the local player's board: drawn during planning and animated by the
+// headless engine when a resolved round plays back.
 let onlineActive = false;
-let guestPathDrawer: PathDrawer | null = null;
-let guestUnits: Unit[] = [];
-let guestElevationZones: ElevationZone[] = [];
+let playbackPathDrawer: PathDrawer | null = null;
+let playbackUnits: Unit[] = [];
+let playbackElevationZones: ElevationZone[] = [];
 let cancelMatchmaking: (() => void) | null = null;
-let guestEngine: GameEngine | null = null;
-let guestEffectIndex = 0;
+let playbackEngine: GameEngine | null = null;
+let playbackEffectIndex = 0;
 
 // Async ("play-by-mail") state
 let asyncController: AsyncGameController | null = null;
@@ -559,11 +560,11 @@ ctfPvpBtn.addEventListener('click', async () => {
 });
 
 confirmBtn.addEventListener('click', () => {
-  if (asyncController && guestPathDrawer) {
-    const myUnits = guestUnits.filter(u => u.team === asyncMyTeam);
+  if (asyncController && playbackPathDrawer) {
+    const myUnits = playbackUnits.filter(u => u.team === asyncMyTeam);
     const paths: PathList = myUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] }));
-    guestPathDrawer.destroy();
-    guestPathDrawer = null;
+    playbackPathDrawer.destroy();
+    playbackPathDrawer = null;
     confirmBtn.classList.remove('active');
     planningOverlay.classList.remove('active');
     planningLabel.textContent = 'Waiting for opponent...';
@@ -674,10 +675,10 @@ replaySpeedToggle.addEventListener('click', () => {
 
 /** Tear down the headless playback engine used to animate a resolved async
  *  round (shared teardown for the async match playback). */
-function stopGuestEngine(): void {
-  if (guestEngine) {
-    guestEngine.stop();
-    guestEngine = null;
+function stopPlaybackEngine(): void {
+  if (playbackEngine) {
+    playbackEngine.stop();
+    playbackEngine = null;
   }
   renderer?.ticker.remove(asyncTickCallback);
   renderer?.renderProjectiles([]);
@@ -692,7 +693,7 @@ function destroyAsync(): void {
   asyncController?.destroy();
   asyncController = null;
   renderer?.ticker.remove(asyncTickCallback);
-  stopGuestEngine();
+  stopPlaybackEngine();
   asyncNotify.style.display = 'none';
   asyncFirstMoveBtn.style.display = 'none';
   asyncForfeitBtn.style.display = 'none';
@@ -718,36 +719,36 @@ asyncForfeitBtn.addEventListener('click', () => {
  *  it ends deterministically (a side eliminated, or the fixed round duration
  *  elapses), reports the authoritative end state back to the controller. */
 function asyncTickCallback(ticker: { deltaMS: number }): void {
-  if (!guestEngine || !renderer) return;
-  guestEngine.externalTick(ticker.deltaMS);
+  if (!playbackEngine || !renderer) return;
+  playbackEngine.externalTick(ticker.deltaMS);
 
-  const units = guestEngine.getUnits();
+  const units = playbackEngine.getUnits();
   const dt = ticker.deltaMS / 1000;
-  renderer.renderUnits(units, dt, undefined, guestEngine.phase === 'playing');
-  renderer.renderProjectiles(guestEngine.getProjectiles());
+  renderer.renderUnits(units, dt, undefined, playbackEngine.phase === 'playing');
+  renderer.renderProjectiles(playbackEngine.getProjectiles());
 
-  const { events, nextIndex } = guestEngine.getReplayEventsSince(guestEffectIndex);
+  const { events, nextIndex } = playbackEngine.getReplayEventsSince(playbackEffectIndex);
   if (events.length > 0) {
     renderer.effects?.dispatchEvents(events);
-    guestEffectIndex = nextIndex;
+    playbackEffectIndex = nextIndex;
   }
   renderer.effects?.update(dt);
 
-  const counts = guestEngine.getAliveCount();
+  const counts = playbackEngine.getAliveCount();
   blueCountEl.textContent = `Blue: ${counts.blue}`;
   redCountEl.textContent = `Red: ${counts.red}`;
 
   if (asyncRoundFinished) return;
-  const tick = guestEngine.getSimulationTick();
+  const tick = playbackEngine.getSimulationTick();
   // The animation's end timing is cosmetic; the persisted result is the
   // deterministic one computed in startAsyncRoundPlayback (frame-independent).
   if (asyncMatchEnded || tick >= ASYNC_ROUND_END_TICK) {
     asyncRoundFinished = true;
     renderer.ticker.remove(asyncTickCallback);
-    lastReplayData = guestEngine.getReplayData() ?? lastReplayData;
+    lastReplayData = playbackEngine.getReplayData() ?? lastReplayData;
     const round = asyncCurrentRound;
     const result = asyncResult;
-    stopGuestEngine();
+    stopPlaybackEngine();
     if (result) void asyncController?.onRoundPlayed(round, result.endState, result.gameOver);
   }
 }
@@ -755,7 +756,7 @@ function asyncTickCallback(ticker: { deltaMS: number }): void {
 /** Run a resolved round: compute the authoritative outcome deterministically,
  *  then animate the same round for the player to watch. */
 function startAsyncRoundPlayback(input: PlayRoundInput): void {
-  stopGuestEngine();
+  stopPlaybackEngine();
   asyncMatchEnded = false;
   asyncRoundFinished = false;
 
@@ -772,14 +773,14 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
   );
 
   // Cosmetic animated playback (its sampled end state is NOT persisted).
-  guestEngine = new GameEngine(null, (type) => {
+  playbackEngine = new GameEngine(null, (type) => {
     if (type === 'end') asyncMatchEnded = true;
   }, { seed: roundSeed });
-  guestEngine.loadOnlineGameState(input.startState);
-  guestEngine.setBluePaths(input.bluePaths);
-  guestEngine.setRedPaths(input.redPaths);
-  guestEngine.startPlaying();
-  guestEffectIndex = 0;
+  playbackEngine.loadOnlineGameState(input.startState);
+  playbackEngine.setBluePaths(input.bluePaths);
+  playbackEngine.setRedPaths(input.redPaths);
+  playbackEngine.startPlaying();
+  playbackEffectIndex = 0;
   roundCounterEl.textContent = `Round ${input.round}`;
   renderer!.ticker.add(asyncTickCallback);
 }
@@ -790,7 +791,7 @@ function asyncHooks(): AsyncGameHooks {
     onPlanTurn(round, startState, myTeam, awaitingGuest) {
       asyncCurrentRound = round;
       asyncMyTeam = myTeam;
-      stopGuestEngine();
+      stopPlaybackEngine();
 
       document.body.classList.toggle('day-mode', dayModeCb.checked);
       renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
@@ -798,15 +799,15 @@ function asyncHooks(): AsyncGameHooks {
       renderer!.effects?.clear();
       renderer!.clearDyingUnits();
 
-      guestUnits = startState.units.map(u => createUnitFromState(u));
-      guestElevationZones = startState.elevationZones;
+      playbackUnits = startState.units.map(u => createUnitFromState(u));
+      playbackElevationZones = startState.elevationZones;
       renderer!.renderElevationZones(startState.elevationZones);
       renderer!.renderObstacles(startState.obstacles);
-      renderer!.renderUnits(guestUnits);
+      renderer!.renderUnits(playbackUnits);
 
-      guestPathDrawer?.destroy();
-      guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
-      guestPathDrawer.enable(myTeam, guestUnits, guestElevationZones);
+      playbackPathDrawer?.destroy();
+      playbackPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
+      playbackPathDrawer.enable(myTeam, playbackUnits, playbackElevationZones);
 
       planningLabel.textContent = 'Your Planning';
       planningLabel.style.color = myTeam === 'blue'
@@ -845,8 +846,8 @@ function asyncHooks(): AsyncGameHooks {
     },
 
     onAwaitOpponent(round, awaitingGuest) {
-      guestPathDrawer?.destroy();
-      guestPathDrawer = null;
+      playbackPathDrawer?.destroy();
+      playbackPathDrawer = null;
       planningOverlay.classList.remove('active');
       confirmBtn.classList.remove('active');
       asyncFirstMoveBtn.style.display = 'none';
