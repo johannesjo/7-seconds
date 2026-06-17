@@ -1,9 +1,9 @@
-import type { OnlineGameState } from './online-types';
+import { isPlausibleGameState, type OnlineGameState } from './online-types';
 import type { AsyncTeam, PathList } from './online-async-core';
-import { nextRoundAction, verifyReveal, deriveMatchSeed, hashPaths } from './online-async-core';
+import { nextRoundAction, verifyReveal, deriveMatchSeed, hashPaths, blueAlive } from './online-async-core';
 import {
   loadMatch, joinAsyncMatch, fetchTurns, turnsForRound,
-  commitTurn, revealTurn, persistRoundResult, subscribeMatch,
+  commitTurn, revealTurn, persistRoundResult, finishMatch, subscribeMatch,
   type MatchRecord, type MatchStatus, type RoundTurn,
 } from './online-async';
 import { ensureAuth } from './online-auth';
@@ -16,21 +16,32 @@ export interface PlayRoundInput {
   seed: number;
 }
 
+/** Terminal match statuses: the game is over and no further turns are possible. */
+export function isTerminalStatus(status: MatchStatus): boolean {
+  return status === 'host_won' || status === 'guest_won' || status === 'abandoned';
+}
+
 /** UI/engine boundary. The controller owns the async protocol; the host app
  *  owns drawing paths and animating the battle. */
 export interface AsyncGameHooks {
-  /** Match created but no guest has joined yet — keep showing the share link. */
-  onWaitingForGuest(round: number): void;
-  /** It's the local player's turn to plan `round`. Call submitPlan() when done. */
-  onPlanTurn(round: number, startState: OnlineGameState, myTeam: AsyncTeam): void;
-  /** We've submitted; nothing to do until the opponent acts. */
-  onAwaitOpponent(round: number): void;
+  /** It's the local player's turn to plan `round`. Call submitPlan() when done.
+   *  `awaitingGuest` is true when no opponent has joined yet (host's first move
+   *  before the friend arrives): the UI should keep the share link / invite up
+   *  alongside planning, and skip the "it's your turn" notification. */
+  onPlanTurn(round: number, startState: OnlineGameState, myTeam: AsyncTeam, awaitingGuest: boolean): void;
+  /** We've submitted; nothing to do until the opponent acts. `awaitingGuest`
+   *  true means we're still waiting for a friend to *join* (keep the share link
+   *  visible), not just to take their turn. */
+  onAwaitOpponent(round: number, awaitingGuest: boolean): void;
   /** Both sides revealed — animate the battle, then call onRoundPlayed(). */
   onPlayRound(input: PlayRoundInput): void;
   /** Match finished. */
   onGameOver(status: MatchStatus, finalState: OnlineGameState): void;
-  /** Recoverable problem worth surfacing (e.g. backend unavailable). */
-  onError(message: string): void;
+  /** Recoverable problem worth surfacing (e.g. backend unavailable).
+   *  `canForfeit` is true when the only clean way out is to concede this match
+   *  (e.g. the committed plan was lost and can never pass reveal verification),
+   *  so the UI can offer a Forfeit action that calls forfeit(). */
+  onError(message: string, canForfeit?: boolean): void;
 }
 
 /** Persists drawn paths between the commit and reveal steps so a player can
@@ -65,6 +76,7 @@ export interface AsyncIO {
   commit(id: string, round: number, team: AsyncTeam, paths: PathList): Promise<boolean>;
   reveal(id: string, round: number, team: AsyncTeam, paths: PathList): Promise<boolean>;
   persist(id: string, update: { latestState: OnlineGameState; currentRound: number; seed?: number; status?: MatchStatus; expectedRound?: number }): Promise<boolean>;
+  finish(id: string, status: MatchStatus): Promise<boolean>;
   subscribe(id: string, onChange: () => void): () => void;
 }
 
@@ -78,13 +90,54 @@ const realIO: AsyncIO = {
   commit: commitTurn,
   reveal: revealTurn,
   persist: persistRoundResult,
+  finish: finishMatch,
   subscribe: (id, onChange) =>
     subscribeMatch(id, { onTurnChange: () => onChange(), onMatchChange: () => onChange() }),
 };
 
+/** Abstracts the browser timers/visibility the safety-net poll needs, so it can
+ *  be driven deterministically in tests and is a no-op in a headless context. */
+export interface PollEnv {
+  setInterval(fn: () => void, ms: number): unknown;
+  clearInterval(handle: unknown): void;
+  /** True when the app is foregrounded (poll only runs then). */
+  isVisible(): boolean;
+  /** Subscribe to "became visible" / "network back" — fires an immediate poll.
+   *  Returns a teardown. */
+  onResume(fn: () => void): () => void;
+}
+
+/** How often the safety-net poll re-checks the backend while a match is live
+ *  and foregrounded. Realtime push is the fast path; this is the floor that
+ *  guarantees the match can never silently hang if the socket dies. */
+export const POLL_INTERVAL_MS = 15_000;
+
+/** Default poll environment: real timers + Page Visibility, active only in a
+ *  browser. In a headless/test context `document` is undefined and we return a
+ *  no-op env so unit tests never spin real timers. */
+function defaultPollEnv(): PollEnv | null {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return null;
+  return {
+    setInterval: (fn, ms) => window.setInterval(fn, ms),
+    clearInterval: (h) => window.clearInterval(h as number),
+    isVisible: () => document.visibilityState === 'visible',
+    onResume: (fn) => {
+      const vis = () => { if (document.visibilityState === 'visible') fn(); };
+      document.addEventListener('visibilitychange', vis);
+      window.addEventListener('online', fn);
+      return () => {
+        document.removeEventListener('visibilitychange', vis);
+        window.removeEventListener('online', fn);
+      };
+    },
+  };
+}
+
 export interface AsyncGameOptions {
   io?: AsyncIO;
   stash?: PathStash;
+  /** Override the poll environment (tests inject a fake; pass null to disable). */
+  pollEnv?: PollEnv | null;
 }
 
 /** Drives one async match through commit -> reveal -> resolve -> persist,
@@ -94,6 +147,9 @@ export class AsyncGameController {
   private readonly hooks: AsyncGameHooks;
   private readonly io: AsyncIO;
   private readonly stash: PathStash;
+  private readonly pollEnv: PollEnv | null;
+  private pollHandle: unknown = null;
+  private pollResumeOff: (() => void) | null = null;
 
   private match: MatchRecord | null = null;
   private myTeam: AsyncTeam = 'blue';
@@ -117,6 +173,7 @@ export class AsyncGameController {
     this.hooks = hooks;
     this.io = opts.io ?? realIO;
     this.stash = opts.stash ?? localStoragePathStash;
+    this.pollEnv = opts.pollEnv !== undefined ? opts.pollEnv : defaultPollEnv();
   }
 
   /** Open the match (joining as guest if it's open and we're not the host),
@@ -145,12 +202,54 @@ export class AsyncGameController {
     this.myTeam = match.hostPlayer === this.userId ? 'blue' : 'red';
 
     this.unsubscribe = this.io.subscribe(this.id, () => { void this.refresh(); });
+    this.startPoll();
     await this.evaluate();
     return true;
   }
 
+  /** Safety-net poll: Realtime push is best-effort and can die silently, so
+   *  while the match is live and foregrounded we also re-check the backend on a
+   *  slow interval, plus immediately whenever the app is resumed or the network
+   *  returns. A poll just calls refresh(); fetchTurns() returning null (a
+   *  transient read failure) is already a no-op in step(), so a poll can never
+   *  act on phantom-empty data or re-prompt a redraw. */
+  private startPoll(): void {
+    const env = this.pollEnv;
+    if (!env) return;
+    this.pollHandle = env.setInterval(() => {
+      if (this.destroyed || !env.isVisible()) return;
+      if (this.match && isTerminalStatus(this.match.status)) return;
+      void this.refresh();
+    }, POLL_INTERVAL_MS);
+    this.pollResumeOff = env.onResume(() => {
+      if (this.destroyed) return;
+      if (this.match && isTerminalStatus(this.match.status)) return;
+      void this.refresh();
+    });
+  }
+
+  private stopPoll(): void {
+    if (this.pollHandle != null) { this.pollEnv?.clearInterval(this.pollHandle); this.pollHandle = null; }
+    this.pollResumeOff?.();
+    this.pollResumeOff = null;
+  }
+
   private stashKey(round: number): string {
     return `7s-async-${this.id}-r${round}-${this.myTeam}`;
+  }
+
+  /** The durable match id (for keying a once-only win/loss record). */
+  get matchId(): string { return this.id; }
+
+  /** The local player's team, resolved from the match role at start(). Use this
+   *  for win/loss attribution — it is authoritative even when a finished match
+   *  is reopened (no planning hook fires to set the UI's team in that path). */
+  get team(): AsyncTeam { return this.myTeam; }
+
+  /** The opponent's user id, or null if no opponent has joined yet. */
+  get opponentId(): string | null {
+    if (!this.match) return null;
+    return (this.myTeam === 'blue' ? this.match.guestPlayer : this.match.hostPlayer) ?? null;
   }
 
   /** Local player finished drawing paths for the current round. */
@@ -188,20 +287,38 @@ export class AsyncGameController {
       this.hooks.onError('Could not resolve the round; please retry.');
       return;
     }
-    await this.io.persist(this.id, {
+    const landed = await this.io.persist(this.id, {
       latestState: endState,
       currentRound: round + 1,
       seed,
       status,
       expectedRound: round,
     });
-    this.stash.clear(this.stashKey(round));
+    // Reload unconditionally. If we LOST the advance race (landed === false
+    // because the peer already advanced the round), this pulls in their
+    // advanced round and the now-set write-once seed, so the next round reuses
+    // that seed instead of re-deriving a divergent one. A lost race is benign,
+    // not an error worth surfacing.
     await this.refresh();
+    // Clear the saved plan only once this round is truly behind us — our write
+    // landed, or a peer's write advanced the match past it. Otherwise keep it
+    // so a transient failure (retries exhausted, still on this round) can retry.
+    if (landed || (this.match != null && this.match.currentRound > round)) {
+      this.stash.clear(this.stashKey(round));
+    } else if (this.match != null && this.match.currentRound === round) {
+      // Neither our write nor a peer's advanced the round: the persist failed
+      // transiently (retries are already exhausted inside persistRoundResult).
+      // Release the playback latch so the safety-net poll / next realtime event
+      // re-resolves this round and re-attempts the write. Without this reset
+      // playingRound stays pinned to this round, resolve() can never re-emit,
+      // and the session wedges — the one hang the safety-net poll can't undo.
+      this.playingRound = null;
+      this.playingSeed = null;
+    }
   }
 
   private winnerStatus(state: OnlineGameState): MatchStatus {
-    const blueAlive = state.units.some(u => u.team === 'blue' && u.hp > 0);
-    return blueAlive ? 'host_won' : 'guest_won';
+    return blueAlive(state) ? 'host_won' : 'guest_won';
   }
 
   /** Reload match + turns from the backend, then re-evaluate. */
@@ -230,8 +347,18 @@ export class AsyncGameController {
     if (this.destroyed || !this.match) return;
     const match = this.match;
 
-    if (match.status === 'host_won' || match.status === 'guest_won' || match.status === 'abandoned') {
+    if (isTerminalStatus(match.status)) {
       this.hooks.onGameOver(match.status, match.latestState);
+      return;
+    }
+
+    // The match row (incl. latest_state) is written by participants — for a
+    // matchmade stranger that's an untrusted peer. Before feeding it to the
+    // engine/renderer (planning and resolve both consume match.latestState),
+    // reject an implausible snapshot so a malicious/buggy state can't hang or
+    // crash this client. Forfeit is the clean exit (the state can't be fixed).
+    if (!isPlausibleGameState(match.latestState)) {
+      this.hooks.onError('This match has an invalid game state and can no longer be played.', true);
       return;
     }
 
@@ -243,29 +370,35 @@ export class AsyncGameController {
     if (allTurns == null) return;
     const turns = turnsForRound(allTurns, round);
     const action = nextRoundAction(turns, this.myTeam);
+    // 'open' means no guest has joined yet (only the host can be here). We still
+    // let the host plan and commit their first move — the commit just waits in
+    // the turn log until a friend joins and plays. The UI keeps the share link
+    // visible via the awaitingGuest flag.
+    const awaitingGuest = match.status === 'open';
 
     switch (action) {
       case 'commit':
-        // Host created the match but no guest has joined yet ('open'): keep them
-        // on the share-link screen rather than dropping them into planning with
-        // no opponent and no visible invite. A guest joining flips status to
-        // 'active', which re-drives evaluate() and prompts planning then.
-        if (match.status === 'open') { this.hooks.onWaitingForGuest(round); return; }
         if (this.planningRound === round) return; // already planning this round
         this.planningRound = round;
-        this.hooks.onPlanTurn(round, match.latestState, this.myTeam);
+        this.hooks.onPlanTurn(round, match.latestState, this.myTeam, awaitingGuest);
         return;
 
       case 'await-commit':
       case 'await-reveal':
-        this.hooks.onAwaitOpponent(round);
+        this.hooks.onAwaitOpponent(round, awaitingGuest);
         return;
 
       case 'reveal': {
         const mine = this.stash.load(this.stashKey(round));
         if (!mine) {
-          // Paths lost (e.g. localStorage cleared on another device).
-          this.hooks.onError('Your submitted plan was lost; please redraw it.');
+          // Paths lost (e.g. localStorage cleared, or committed on another
+          // device). A redraw can't help: the server already holds our commit
+          // hash, so any new paths would fail reveal verification and wedge the
+          // round forever. Offer Forfeit as the honest, unwedgeable way out.
+          this.hooks.onError(
+            'Your planned move for this round was lost and can no longer be revealed. You can forfeit this match to end it cleanly.',
+            true,
+          );
           return;
         }
         await this.io.reveal(this.id, round, this.myTeam, mine);
@@ -307,8 +440,20 @@ export class AsyncGameController {
     });
   }
 
+  /** Concede the match: the local player loses, the opponent is recorded the
+   *  winner. Used both for a voluntary forfeit and to escape an unrecoverable
+   *  stuck state (e.g. a lost commit that can't be revealed). Idempotent via
+   *  finishMatch's in-play guard. */
+  async forfeit(): Promise<void> {
+    if (this.destroyed || !this.match) return;
+    const status: MatchStatus = this.myTeam === 'blue' ? 'guest_won' : 'host_won';
+    await this.io.finish(this.id, status);
+    await this.refresh();
+  }
+
   destroy(): void {
     this.destroyed = true;
+    this.stopPoll();
     this.unsubscribe?.();
     this.unsubscribe = null;
   }

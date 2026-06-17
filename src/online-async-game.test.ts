@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { AsyncGameController, type AsyncIO, type PathStash, type AsyncGameHooks, type PlayRoundInput } from './online-async-game';
-import { hashPaths, type AsyncTeam, type PathList } from './online-async-core';
+import { AsyncGameController, type AsyncIO, type PathStash, type AsyncGameHooks, type PlayRoundInput, type PollEnv } from './online-async-game';
+import { hashPaths, type PathList } from './online-async-core';
 import type { MatchRecord, MatchStatus, RoundTurn } from './online-async';
 import type { OnlineGameState } from './online-types';
 
@@ -71,6 +71,12 @@ class FakeBackend {
         this.notify();
         return true;
       },
+      finish: async (_id, status) => {
+        if (this.match.status !== 'open' && this.match.status !== 'active') return false;
+        this.match = { ...this.match, status };
+        this.notify();
+        return true;
+      },
       subscribe: (_id, onChange) => {
         this.listeners.add(onChange);
         return () => this.listeners.delete(onChange);
@@ -88,22 +94,50 @@ function memStash(): PathStash {
   };
 }
 
-interface Spy { hooks: AsyncGameHooks; waiting: number[]; planTurns: number[]; plays: PlayRoundInput[]; gameOver: MatchStatus[]; errors: string[]; }
+/** Controllable poll environment: tick() fires the interval, resume() fires a
+ *  visibility/network-back event, and visible toggles foreground state. */
+function fakePollEnv() {
+  let intervalFn: (() => void) | null = null;
+  let resumeFn: (() => void) | null = null;
+  const env: PollEnv & { tick: () => void; resume: () => void; visible: boolean; cleared: boolean } = {
+    visible: true,
+    cleared: false,
+    setInterval: (fn) => { intervalFn = fn; return 1; },
+    clearInterval: () => { env.cleared = true; intervalFn = null; },
+    isVisible: () => env.visible,
+    onResume: (fn) => { resumeFn = fn; return () => { resumeFn = null; }; },
+    tick: () => intervalFn?.(),
+    resume: () => resumeFn?.(),
+  };
+  return env;
+}
+
+interface Spy {
+  hooks: AsyncGameHooks;
+  planTurns: number[];
+  planAwaiting: boolean[];
+  awaitOpp: boolean[];
+  plays: PlayRoundInput[];
+  gameOver: MatchStatus[];
+  errors: string[];
+  forfeitable: boolean[];
+}
 function makeHooks(): Spy {
-  const waiting: number[] = [];
   const planTurns: number[] = [];
+  const planAwaiting: boolean[] = [];
+  const awaitOpp: boolean[] = [];
   const plays: PlayRoundInput[] = [];
   const gameOver: MatchStatus[] = [];
   const errors: string[] = [];
+  const forfeitable: boolean[] = [];
   return {
-    waiting, planTurns, plays, gameOver, errors,
+    planTurns, planAwaiting, awaitOpp, plays, gameOver, errors, forfeitable,
     hooks: {
-      onWaitingForGuest: (round) => { waiting.push(round); },
-      onPlanTurn: (round) => { planTurns.push(round); },
-      onAwaitOpponent: () => {},
+      onPlanTurn: (round, _s, _t, awaitingGuest) => { planTurns.push(round); planAwaiting.push(awaitingGuest); },
+      onAwaitOpponent: (_round, awaitingGuest) => { awaitOpp.push(awaitingGuest); },
       onPlayRound: (input) => { plays.push(input); },
       onGameOver: (status) => { gameOver.push(status); },
-      onError: (msg) => { errors.push(msg); },
+      onError: (msg, canForfeit) => { errors.push(msg); forfeitable.push(!!canForfeit); },
     },
   };
 }
@@ -282,6 +316,46 @@ describe('AsyncGameController', () => {
     host.destroy();
   });
 
+  it('offers forfeit when a committed plan is lost, and forfeiting ends the match', async () => {
+    const be = new FakeBackend('m17', 'host-uid');
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m17');
+
+    // Host commit recorded server-side, but this device has no stash entry, and
+    // the opponent has already revealed → host is stuck in reveal with no plan.
+    await be.ioFor('host-uid').commit('m17', 1, 'blue', bluePlan);
+    await guestIO.commit('m17', 1, 'red', redPlan);
+    await guestIO.reveal('m17', 1, 'red', redPlan);
+
+    const spy = makeHooks();
+    const host = new AsyncGameController('m17', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    await host.start();
+    await flush();
+
+    expect(spy.errors.some(e => /lost/i.test(e))).toBe(true);
+    expect(spy.forfeitable).toContain(true); // UI may offer a Forfeit action
+
+    // Forfeiting concedes: host is blue, so the guest (red) wins.
+    await host.forfeit();
+    await flush();
+    expect(be.match.status).toBe('guest_won');
+    expect(spy.gameOver).toContain('guest_won');
+    host.destroy();
+  });
+
+  it('forfeit is a no-op once the match is already decided', async () => {
+    const be = new FakeBackend('m18', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'host_won' };
+    const spy = makeHooks();
+    const host = new AsyncGameController('m18', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    await host.start();
+    await flush();
+    await host.forfeit();
+    await flush();
+    expect(be.match.status).toBe('host_won'); // unchanged
+    host.destroy();
+  });
+
   it('carries state into round 2 and reuses the round-1 seed', async () => {
     const be = new FakeBackend('m8', 'host-uid');
     const hostSpy = makeHooks();
@@ -345,6 +419,88 @@ describe('AsyncGameController', () => {
     expect(be.match.currentRound).toBe(2);
     host.destroy();
     guest.destroy();
+  });
+
+  it('recovers (no wedge) when persisting a resolved round fails transiently', async () => {
+    const be = new FakeBackend('m19', 'host-uid');
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m19');
+
+    // A persist that blips once (transient error, retries already exhausted) and
+    // succeeds thereafter — distinct from a lost race, since the round does NOT
+    // advance behind us.
+    const hostIO = be.ioFor('host-uid');
+    let failPersistOnce = true;
+    const flakyIO: AsyncIO = {
+      ...hostIO,
+      persist: async (id, update) => {
+        if (failPersistOnce) { failPersistOnce = false; return false; }
+        return hostIO.persist(id, update);
+      },
+    };
+
+    const spy = makeHooks();
+    const env = fakePollEnv();
+    const host = new AsyncGameController('m19', spy.hooks, { io: flakyIO, stash: memStash(), pollEnv: env });
+
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await guestIO.commit('m19', 1, 'red', redPlan);
+    await guestIO.reveal('m19', 1, 'red', redPlan);
+    await flush();
+    expect(spy.plays.length).toBe(1); // round 1 resolved and handed to playback
+
+    // Playback finishes; the persist write blips. The round must NOT advance and
+    // the session must NOT wedge — no dead-end error, and the latch is released.
+    await host.onRoundPlayed(1, makeState(80, 60), false);
+    await flush();
+    expect(be.match.currentRound).toBe(1); // write failed → not advanced
+    expect(spy.errors).toEqual([]);        // no dead-end surfaced
+
+    // A poll tick re-drives resolution; this time the persist lands and the
+    // round advances. Without the latch reset, resolve() would never re-emit.
+    env.tick();
+    await flush();
+    expect(spy.plays.length).toBe(2);      // re-emitted playback for the retry
+    await host.onRoundPlayed(1, makeState(80, 60), false);
+    await flush();
+    expect(be.match.currentRound).toBe(2); // recovered
+    host.destroy();
+  });
+
+  it('reports the authoritative team when a finished match is reopened (no planning hook)', async () => {
+    const be = new FakeBackend('m20', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'host_won' };
+    const spy = makeHooks();
+    // Guest reopens an already-decided match from "My Matches". onGameOver fires
+    // without onPlanTurn, so the UI's own team state would be stale — the
+    // controller must report the correct team (guest = red) so the win/loss is
+    // attributed from the right perspective rather than inverted.
+    const guest = new AsyncGameController('m20', spy.hooks, { io: be.ioFor('guest-uid'), stash: memStash() });
+    await guest.start();
+    await flush();
+    expect(spy.planTurns).toEqual([]);          // no planning hook fired
+    expect(spy.gameOver).toContain('host_won');
+    expect(guest.team).toBe('red');             // authoritative role, not stale UI state
+    expect(guest.opponentId).toBe('host-uid');
+    guest.destroy();
+  });
+
+  it('refuses to play an implausible match state (offers forfeit, never feeds the engine)', async () => {
+    const be = new FakeBackend('m21', 'host-uid');
+    // A participant-written latest_state with a non-positive map dimension — the
+    // kind of garbage a malicious/buggy matchmade stranger could write.
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active', latestState: { ...initial, mapWidth: -1 } };
+    const spy = makeHooks();
+    const host = new AsyncGameController('m21', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    await host.start();
+    await flush();
+    expect(spy.plays).toEqual([]);             // never handed to playback
+    expect(spy.planTurns).toEqual([]);          // never handed to the planner
+    expect(spy.errors.some(e => /invalid game state/i.test(e))).toBe(true);
+    expect(spy.forfeitable).toContain(true);    // clean exit offered
+    host.destroy();
   });
 
   it('reports game over when the match is already abandoned', async () => {
@@ -435,22 +591,93 @@ describe('AsyncGameController', () => {
     host.destroy();
   });
 
-  it('keeps the host on the share screen until a guest joins (no premature planning)', async () => {
+  it('safety-net poll recovers a turn the realtime channel never delivered', async () => {
+    // Simulate a dead subscription: the controller's subscribe is a no-op, so
+    // the only way it learns the opponent moved is the poll.
+    const be = new FakeBackend('m15', 'host-uid');
+    const deadSubIO: AsyncIO = { ...be.ioFor('host-uid'), subscribe: () => () => {} };
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m15');
+
+    const spy = makeHooks();
+    const env = fakePollEnv();
+    const host = new AsyncGameController('m15', spy.hooks, { io: deadSubIO, stash: memStash(), pollEnv: env });
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await flush();
+
+    // Opponent commits+reveals, but no realtime event reaches us.
+    await guestIO.commit('m15', 1, 'red', redPlan);
+    await guestIO.reveal('m15', 1, 'red', redPlan);
+    await flush();
+    expect(spy.plays.length).toBe(0); // nothing delivered the change yet
+
+    // A poll tick picks it up and the round resolves.
+    env.tick();
+    await flush();
+    expect(spy.plays.length).toBe(1);
+    expect(spy.errors).toEqual([]);
+    host.destroy();
+    expect(env.cleared).toBe(true);
+  });
+
+  it('does not poll while backgrounded, and refreshes immediately on resume', async () => {
+    const be = new FakeBackend('m16', 'host-uid');
+    const deadSubIO: AsyncIO = { ...be.ioFor('host-uid'), subscribe: () => () => {} };
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m16');
+
+    const spy = makeHooks();
+    const env = fakePollEnv();
+    const host = new AsyncGameController('m16', spy.hooks, { io: deadSubIO, stash: memStash(), pollEnv: env });
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await guestIO.commit('m16', 1, 'red', redPlan);
+    await guestIO.reveal('m16', 1, 'red', redPlan);
+    await flush();
+
+    // Backgrounded: a tick must do nothing.
+    env.visible = false;
+    env.tick();
+    await flush();
+    expect(spy.plays.length).toBe(0);
+
+    // Resume (visibility back / network back) refreshes immediately.
+    env.visible = true;
+    env.resume();
+    await flush();
+    expect(spy.plays.length).toBe(1);
+    host.destroy();
+  });
+
+  it('lets the host plan their first move before a guest joins (awaitingGuest)', async () => {
     const be = new FakeBackend('m14', 'host-uid'); // status 'open', no guest
     const hostSpy = makeHooks();
     const host = new AsyncGameController('m14', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
 
     await host.start();
     await flush();
-    // No friend yet → wait on the share screen, do NOT prompt planning.
-    expect(hostSpy.waiting).toContain(1);
-    expect(hostSpy.planTurns).toEqual([]);
-
-    // Friend opens the link and joins → host is now prompted to plan round 1.
-    await be.ioFor('guest-uid').joinMatch('m14');
-    await flush();
+    // No friend yet, but the host is prompted to plan round 1 right away — with
+    // awaitingGuest=true so the UI keeps the share link up.
     expect(hostSpy.planTurns).toEqual([1]);
+    expect(hostSpy.planAwaiting).toEqual([true]);
 
+    // Host commits their first move while still alone → now waiting for a friend
+    // to JOIN (awaitingGuest stays true so the invite stays visible).
+    await host.submitPlan(bluePlan);
+    await flush();
+    expect(hostSpy.awaitOpp).toContain(true);
+
+    // Friend joins and plays → the round resolves for the host.
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m14');
+    await guestIO.commit('m14', 1, 'red', redPlan);
+    await guestIO.reveal('m14', 1, 'red', redPlan);
+    await flush();
+    expect(hostSpy.plays.length).toBe(1);
+    expect(hostSpy.errors).toEqual([]);
     host.destroy();
   });
 });

@@ -1,6 +1,5 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
-import { hashGameState } from './online-sync';
 import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
 import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team } from './types';
@@ -8,18 +7,17 @@ import { ARMY_COMPOSITION, HORDE_MAX_WAVES, ROUND_DURATION_S } from './constants
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
-import { OnlineHost } from './online-host';
-import { OnlineGuest } from './online-guest';
-import { getJoinRoomId } from './online';
 import { findMatch } from './online-matchmaking';
 import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
-import type { PathList } from './online-async-core';
-import { createAsyncMatch, getAsyncJoinId } from './online-async';
+import type { PathList, MatchOutcome } from './online-async-core';
+import { outcomeNeedsYou } from './online-async-core';
+import { createAsyncMatch, loadMatch, getAsyncJoinId, loadMyMatches } from './online-async';
+import { currentUserId } from './online-auth';
 import { registerTurnNotifications, setTurnNotifications } from './online-push';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
-import { OnlineConnectionState, OnlineGameState, OnlinePhase, OnlineRoundResult, OnlinePathData, OnlineWaypointData, OnlineSyncHash, isPlausibleGameState } from './online-types';
+import { OnlineGameState } from './online-types';
 import { PathDrawer } from './path-drawer';
-import { recordWin, recordLoss, getScore, getOverallScore } from './online-score';
+import { recordMatchResultOnce, getOverallScore } from './online-score';
 import { requestNotificationPermission, notify } from './notify';
 
 // DOM elements
@@ -72,11 +70,18 @@ const replaySpeedToggle = document.getElementById('replay-speed-toggle') as HTML
 const exitGameBtn = document.getElementById('exit-game-btn')!;
 
 // Online lobby elements
-const onlineBtn = document.getElementById('online-btn')!;
 const onlineAsyncBtn = document.getElementById('online-async-btn')!;
 const asyncNotify = document.getElementById('async-notify')!;
 const asyncNotifyCb = document.getElementById('async-notify-cb') as HTMLInputElement;
 const asyncNotifyHint = document.getElementById('async-notify-hint')!;
+const asyncFirstMoveBtn = document.getElementById('async-first-move-btn')!;
+const asyncForfeitBtn = document.getElementById('async-forfeit-btn')!;
+const myMatchesBtn = document.getElementById('my-matches-btn')!;
+const myMatchesBadge = document.getElementById('my-matches-badge')!;
+const matchesScreen = document.getElementById('matches-screen')!;
+const matchesStatus = document.getElementById('matches-status')!;
+const matchesList = document.getElementById('matches-list')!;
+const matchesBackBtn = document.getElementById('matches-back-btn')!;
 const onlineRandomBtn = document.getElementById('online-random-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
 const onlineStatus = document.getElementById('online-status')!;
@@ -131,24 +136,17 @@ let hordeUnits: Unit[] = [];
 let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
 let hordeAppliedUpgrades = new Map<string, number>();
 
-// Online state
-let onlineHost: OnlineHost | null = null;
-let onlineGuest: OnlineGuest | null = null;
+// Online state. `onlineActive` flags an online flow in progress (matchmaking or
+// an async match), so the matchmaking search can be cancelled. The playback*
+// state is the local player's board: drawn during planning and animated by the
+// headless engine when a resolved round plays back.
 let onlineActive = false;
-let onlineRole: 'host' | 'guest' | null = null;
-let guestPathDrawer: PathDrawer | null = null;
-let guestUnits: Unit[] = [];
-let guestElevationZones: ElevationZone[] = [];
-let guestObstacles: Obstacle[] = [];
-let opponentPlayerId: string | null = null;
-let localRematchRequested = false;
+let playbackPathDrawer: PathDrawer | null = null;
+let playbackUnits: Unit[] = [];
+let playbackElevationZones: ElevationZone[] = [];
 let cancelMatchmaking: (() => void) | null = null;
-let guestEngine: GameEngine | null = null;
-let guestLastGameState: OnlineGameState | null = null;
-let guestEffectIndex = 0;
-let pendingSyncHashes: OnlineSyncHash[] = [];
-/** Set once a desync is detected in the current round to avoid console spam. */
-let guestDesyncWarned = false;
+let playbackEngine: GameEngine | null = null;
+let playbackEffectIndex = 0;
 
 // Async ("play-by-mail") state
 let asyncController: AsyncGameController | null = null;
@@ -181,28 +179,6 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
 }
 
 function onPhaseChange(phase: TurnPhase): void {
-  if (onlineActive && onlineRole === 'host') {
-    if (phase === 'red-planning') {
-      // Check if guest paths already arrived while host was planning
-      const pathData = onlineHost?.consumeGuestPaths();
-      if (pathData) {
-        // Guest was faster — apply paths and start battle immediately
-        engine?.setRedPaths(pathData.paths);
-        engine?.confirmPlan();
-        return;
-      }
-      planningLabel.textContent = 'Waiting for opponent...';
-      planningOverlay.classList.add('active');
-      confirmBtn.classList.remove('active');
-      battleHud.style.display = 'none';
-      return;
-    }
-    if (phase === 'cover') {
-      // Cover is skipped in online host mode, no action needed
-      return;
-    }
-  }
-
   const planning = phase === 'blue-planning' || phase === 'red-planning';
 
   // Hide HUD during planning so the Done button doesn't overlap
@@ -245,11 +221,6 @@ function onGameEvent(
   }
 
   if (event === 'update' && engine) {
-    // Host: periodically send sync hash to guest
-    if (onlineActive && onlineRole === 'host') {
-      hostSendSyncHash();
-    }
-
     const counts = engine.getAliveCount();
     blueCountEl.textContent = `Blue: ${counts.blue}`;
     redCountEl.textContent = `Red: ${counts.red}`;
@@ -302,21 +273,6 @@ function onGameEvent(
     captureReplayData();
     const result = data as BattleResult;
 
-    if (onlineActive && onlineRole === 'host' && onlineHost) {
-      onlineHost.sendResult({
-        winner: result.winner,
-        blueAlive: result.blueAlive,
-        redAlive: result.redAlive,
-        duration: result.duration,
-        gameOver: true,
-      });
-      // Record score — host is blue (skip draws)
-      if (opponentPlayerId) {
-        if (result.winner === 'blue') recordWin(opponentPlayerId);
-        else if (result.winner === 'red') recordLoss(opponentPlayerId);
-      }
-    }
-
     // Horde defeat
     if (hordeActive) {
       showHordeResult(false);
@@ -357,14 +313,8 @@ function onGameEvent(
       `Blue survivors: ${result.blueAlive}/${blueTotal}`,
       `Red survivors: ${result.redAlive}/${redTotal}`,
     ];
-    // Show score for online games
-    if (onlineActive && opponentPlayerId) {
-      const score = getScore(opponentPlayerId);
-      statsLines.push(`Score: ${score.wins} - ${score.losses}`);
-    }
     resultStatsEl.innerHTML = statsLines.join('<br>');
 
-    localRematchRequested = false;
     rematchBtn.textContent = 'Rematch';
     rematchBtn.style.opacity = '1';
     rematchBtn.style.display = '';
@@ -610,27 +560,15 @@ ctfPvpBtn.addEventListener('click', async () => {
 });
 
 confirmBtn.addEventListener('click', () => {
-  if (asyncController && !onlineActive && guestPathDrawer) {
-    const myUnits = guestUnits.filter(u => u.team === asyncMyTeam);
+  if (asyncController && playbackPathDrawer) {
+    const myUnits = playbackUnits.filter(u => u.team === asyncMyTeam);
     const paths: PathList = myUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] }));
-    guestPathDrawer.destroy();
-    guestPathDrawer = null;
+    playbackPathDrawer.destroy();
+    playbackPathDrawer = null;
     confirmBtn.classList.remove('active');
     planningOverlay.classList.remove('active');
     planningLabel.textContent = 'Waiting for opponent...';
     void asyncController.submitPlan(paths);
-    return;
-  }
-  if (onlineActive && onlineRole === 'guest' && guestPathDrawer) {
-    const redUnits = guestUnits.filter(u => u.team === 'red');
-    const paths: OnlinePathData = {
-      paths: redUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] })),
-    };
-    onlineGuest?.sendPaths(paths);
-    guestPathDrawer.destroy();
-    guestPathDrawer = null;
-    confirmBtn.classList.remove('active');
-    planningLabel.textContent = 'Waiting for opponent...';
     return;
   }
   engine?.confirmPlan();
@@ -651,25 +589,6 @@ speedToggle.addEventListener('click', () => {
 
 rematchBtn.addEventListener('click', async () => {
   await initRenderer();
-  if (onlineActive) {
-    // Online rematch: send request and wait for both players
-    localRematchRequested = true;
-    rematchBtn.textContent = 'Waiting...';
-    rematchBtn.style.opacity = '0.5';
-
-    if (onlineRole === 'host') {
-      onlineHost?.sendRematchRequest();
-      if (onlineHost?.guestWantsRematch) {
-        startOnlineRematch();
-      }
-    } else {
-      onlineGuest?.sendRematchRequest();
-      if (onlineGuest?.hostWantsRematch) {
-        // Host will start the game — guest just waits
-      }
-    }
-    return;
-  }
   if (ctfActive) {
     startCtfGame();
   } else if (hordeActive) {
@@ -690,16 +609,8 @@ newBattleBtn.addEventListener('click', () => {
   lastReplayData = null;
 
   // Reset online state
-  onlineHost?.destroy();
-  onlineHost = null;
-  onlineGuest?.destroy();
-  onlineGuest = null;
   destroyAsync();
-  guestLastGameState = null;
   onlineActive = false;
-  onlineRole = null;
-  opponentPlayerId = null;
-  localRematchRequested = false;
   onlineLobby.style.display = 'none';
 
   // Reset horde state
@@ -762,396 +673,15 @@ replaySpeedToggle.addEventListener('click', () => {
   replaySpeedToggle.textContent = isActive ? '1x' : '3x';
 });
 
-// --- Online PvP functions ---
-
-function startOnlineRematch(): void {
-  localRematchRequested = false;
-  onlineHost?.resetRematch();
-  onlineGuest?.resetRematch();
-  startOnlineHostGame();
-}
-
-/** Track the last hash tick sent so we send once per sync interval. */
-let hostLastHashTick = -1;
-const SYNC_INTERVAL = 60; // send hash every 60 simulation ticks (1 second)
-
-function startOnlineHostGame(): void {
-  lastReplayData = null;
-  engine?.stop();
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
-  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
-  renderer!.effects?.clear();
-  renderer!.clearDyingUnits();
-  hostLastHashTick = -1;
-  engine = new GameEngine(renderer!, onGameEvent, {
-    aiMode: false,
-    onlineHost: true,
-    onPhaseChange(phase: TurnPhase) {
-      let onlinePhase: OnlinePhase;
-      if (phase === 'cover' || phase === 'red-planning') {
-        onlinePhase = 'red-planning';
-      } else if (phase === 'blue-planning') {
-        onlinePhase = 'blue-planning';
-        // Re-send game state so guest has updated unit positions for next round
-        if (engine) onlineHost?.sendGameState(engine.getOnlineGameState());
-      } else if (phase === 'playing') {
-        onlinePhase = 'playing';
-        // Send blue waypoints + seed to guest for lockstep simulation
-        if (engine && onlineHost) {
-          const blueUnits = engine.getUnits().filter(u => u.team === 'blue');
-          onlineHost.sendWaypoints({
-            bluePaths: blueUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] })),
-            // Send the per-round seed (base + round number), not the base seed —
-            // otherwise the guest desyncs from round 2 onward.
-            seed: engine.getRoundSeed(),
-          });
-        }
-      } else {
-        onlinePhase = 'round-end';
-      }
-      onlineHost?.sendPhase(onlinePhase);
-    },
-  });
-  showScreen('battle');
-  speedToggle.classList.remove('active');
-  speedToggle.dataset.speed = '1';
-  speedToggle.textContent = '3x';
-  roundCounterEl.textContent = 'Round 1';
-  engine.startBattle();
-  // Game state is already sent by the onPhaseChange('blue-planning') callback
-  // inside startBattle(). Do NOT send it again here — a duplicate would replace
-  // guestUnits on the guest side after PathDrawer already references them,
-  // causing drawn waypoints to be lost.
-}
-
-/** Called from host's game update loop to periodically send sync hashes. */
-function hostSendSyncHash(): void {
-  if (!engine || !onlineHost) return;
-  const tick = engine.getSimulationTick();
-  if (tick > 0 && tick % SYNC_INTERVAL === 0 && tick !== hostLastHashTick) {
-    hostLastHashTick = tick;
-    const hash = hashGameState(engine.getUnits());
-    onlineHost.sendSyncHash({ tick, hash });
+/** Tear down the headless playback engine used to animate a resolved async
+ *  round (shared teardown for the async match playback). */
+function stopPlaybackEngine(): void {
+  if (playbackEngine) {
+    playbackEngine.stop();
+    playbackEngine = null;
   }
-}
-
-/** Guest ticker callback — drives headless engine and renders its state. */
-function guestTickCallback(ticker: { deltaMS: number }): void {
-  if (!guestEngine || !renderer) return;
-  guestEngine.externalTick(ticker.deltaMS);
-
-  const units = guestEngine.getUnits();
-  const dt = ticker.deltaMS / 1000;
-  renderer.renderUnits(units, dt, undefined, guestEngine.phase === 'playing');
-  renderer.renderProjectiles(guestEngine.getProjectiles());
-
-  // Dispatch visual effects from engine replay events
-  const { events, nextIndex } = guestEngine.getReplayEventsSince(guestEffectIndex);
-  if (events.length > 0) {
-    renderer.effects?.dispatchEvents(events);
-    guestEffectIndex = nextIndex;
-  }
-  renderer.effects?.update(dt);
-
-  // Check all queued sync hashes the guest has reached
-  const currentTick = guestEngine.getSimulationTick();
-  while (pendingSyncHashes.length > 0 && currentTick >= pendingSyncHashes[0].tick) {
-    const expected = pendingSyncHashes.shift()!;
-    const guestHash = hashGameState(guestEngine.getUnits());
-    if (guestHash !== expected.hash && !guestDesyncWarned) {
-      // Warn once per round — host stays authoritative for the result and
-      // re-sends a fresh snapshot next round, so a mid-round desync is visual
-      // only. Logging every tick afterward would just spam the console.
-      guestDesyncWarned = true;
-      console.warn(`[lockstep] desync at tick ${expected.tick}: host=${expected.hash.toString(16)} guest=${guestHash.toString(16)} — guest view may diverge until next round`);
-    }
-  }
-
-  // Update HUD
-  if (guestEngine.phase === 'playing') {
-    const counts = guestEngine.getAliveCount();
-    blueCountEl.textContent = `Blue: ${counts.blue}`;
-    redCountEl.textContent = `Red: ${counts.red}`;
-  }
-}
-
-function stopGuestEngine(): void {
-  if (guestEngine) {
-    guestEngine.stop();
-    guestEngine = null;
-  }
-  renderer?.ticker.remove(guestTickCallback);
   renderer?.ticker.remove(asyncTickCallback);
   renderer?.renderProjectiles([]);
-  pendingSyncHashes = [];
-}
-
-async function startOnlineGuestMode(roomId: string): Promise<void> {
-  onlineActive = true;
-  onlineRole = 'guest';
-  requestNotificationPermission();
-
-  await initRenderer();
-  showScreen('battle');
-
-  onlineLobby.style.display = 'flex';
-  onlineShareContainer.style.display = 'none';
-  showOnlineRecord();
-  setOnlineStatus('Connecting to host...', true);
-
-  onlineGuest = new OnlineGuest({
-    onConnectionStateChange(state: OnlineConnectionState) {
-      if (state === 'connected') {
-        setOnlineStatus('Connected! Waiting for game...', true);
-      } else if (state === 'connecting') {
-        setOnlineStatus('Connecting...', true);
-      } else if (state === 'reconnecting') {
-        // Show reconnecting status — don't kill the game yet
-        setOnlineStatus('Reconnecting...', true);
-      } else if (state === 'disconnected') {
-        stopGuestEngine();
-        planningOverlay.classList.remove('active');
-        confirmBtn.classList.remove('active');
-        winnerTextEl.innerHTML = 'Opponent Disconnected';
-        winnerTextEl.style.color = 'var(--color-hud-neutral)';
-        resultStatsEl.innerHTML = '';
-        rematchBtn.style.display = 'none';
-        replayBtn.style.display = 'none';
-        newBattleBtn.textContent = 'Back';
-        showScreen('result');
-      } else if (state === 'error') {
-        setOnlineStatus('Could not connect. Ask host to create a new room.');
-      }
-    },
-
-    onGameState(state: OnlineGameState) {
-      // The host is untrusted (especially vs. random opponents) — drop snapshots
-      // with absurd sizes so a malicious/buggy peer can't exhaust the renderer.
-      if (!isPlausibleGameState(state)) {
-        console.warn('[online] dropped implausible game state from host');
-        return;
-      }
-      onlineLobby.style.display = 'none';
-      document.body.classList.toggle('day-mode', dayModeCb.checked);
-      renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
-      renderer!.adaptToRemoteMap(state.mapWidth, state.mapHeight);
-
-      // Store state for headless engine initialization
-      guestLastGameState = state;
-      guestElevationZones = state.elevationZones;
-      guestObstacles = state.obstacles;
-
-      // Update units in-place to preserve PathDrawer references.
-      // On rematch/new game, unit IDs change — detect and recreate.
-      const idsMatch = guestUnits.length === state.units.length
-        && state.units.every(su => guestUnits.some(gu => gu.id === su.id));
-      if (guestUnits.length === 0 || !idsMatch) {
-        // First state or new game — create unit objects
-        renderer!.effects?.clear();
-        renderer!.clearDyingUnits();
-        guestUnits = state.units.map(u => createUnitFromState(u));
-      } else {
-        // Same game, updated positions — update in-place to keep PathDrawer refs
-        for (const su of state.units) {
-          const existing = guestUnits.find(u => u.id === su.id);
-          if (existing) {
-            existing.pos.x = su.x;
-            existing.pos.y = su.y;
-            existing.gunAngle = su.gunAngle;
-            existing.hp = su.hp;
-            existing.maxHp = su.maxHp;
-            existing.alive = su.hp > 0;
-            existing.speed = su.speed;
-            existing.range = su.range;
-            existing.waypoints = [];
-          }
-        }
-      }
-
-      renderer!.renderElevationZones(state.elevationZones);
-      renderer!.renderObstacles(state.obstacles);
-      renderer!.renderUnits(guestUnits);
-
-      showScreen('battle');
-    },
-
-    onPhaseChange(phase: OnlinePhase) {
-      if (phase === 'blue-planning') {
-        // Stop previous round's engine so its stale unit positions
-        // don't overwrite the fresh guestUnits from onGameState
-        stopGuestEngine();
-
-        notify('7 Seconds', "It's your turn to plan!");
-        guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
-        guestPathDrawer.enable('red', guestUnits, guestElevationZones);
-        planningLabel.textContent = 'Your Planning';
-        planningLabel.style.color = 'var(--color-planning-red)';
-        planningOverlay.classList.add('active');
-        confirmBtn.classList.add('active');
-        battleHud.style.display = 'none';
-      } else if (phase === 'red-planning') {
-        // Host confirmed but guest may still be planning — no change needed
-      } else if (phase === 'playing') {
-        if (guestPathDrawer) {
-          guestPathDrawer.destroy();
-          guestPathDrawer = null;
-        }
-        planningOverlay.classList.remove('active');
-        confirmBtn.classList.remove('active');
-        battleHud.style.display = '';
-        // Simulation start is triggered by onWaypoints, not by phase change
-      }
-    },
-
-    onWaypoints(data: OnlineWaypointData) {
-      if (!guestLastGameState) return;
-
-      // Stop any previous guest engine
-      stopGuestEngine();
-
-      // Clear stale sync hashes from previous round
-      pendingSyncHashes = [];
-
-      // Create headless engine with no-op event handler (host is authoritative)
-      guestEngine = new GameEngine(null, () => {}, {
-        seed: data.seed,
-      });
-
-      // Load the game state and apply waypoints from both sides
-      guestEngine.loadOnlineGameState(guestLastGameState);
-      guestEngine.setBluePaths(data.bluePaths);
-
-      // Apply guest's red paths (from guestUnits which had paths drawn on them)
-      const redPaths = guestUnits
-        .filter(u => u.team === 'red')
-        .map(u => ({ unitId: u.id, waypoints: [...u.waypoints] }));
-      guestEngine.setRedPaths(redPaths);
-
-      // Start simulation with the host's per-round seed for lockstep determinism.
-      guestEngine.startPlaying(data.seed);
-      guestEffectIndex = 0;
-      guestDesyncWarned = false;
-
-      // Drive the headless engine from the renderer's ticker
-      renderer!.ticker.add(guestTickCallback);
-    },
-
-    onSyncHash(data: OnlineSyncHash) {
-      // Queue the hash — it will be checked in guestTickCallback when we reach that tick
-      pendingSyncHashes.push(data);
-    },
-
-    onResult(result: OnlineRoundResult) {
-      // Capture replay data before stopping the engine
-      lastReplayData = guestEngine?.getReplayData() ?? null;
-      stopGuestEngine();
-
-      // Record score — guest is red (skip draws)
-      if (opponentPlayerId) {
-        if (result.winner === 'red') recordWin(opponentPlayerId);
-        else if (result.winner === 'blue') recordLoss(opponentPlayerId);
-      }
-
-      const color = result.winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
-      const winnerLabel = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
-      winnerTextEl.innerHTML = `${winnerLabel}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
-      winnerTextEl.style.color = color;
-
-      const statsLines = [
-        `Duration: ${result.duration.toFixed(1)}s`,
-        `Blue survivors: ${result.blueAlive}`,
-        `Red survivors: ${result.redAlive}`,
-      ];
-      if (opponentPlayerId) {
-        const score = getScore(opponentPlayerId);
-        statsLines.push(`Score: ${score.wins} - ${score.losses}`);
-      }
-      resultStatsEl.innerHTML = statsLines.join('<br>');
-
-      localRematchRequested = false;
-      rematchBtn.textContent = 'Rematch';
-      rematchBtn.style.opacity = '1';
-      rematchBtn.style.display = '';
-      replayBtn.style.display = lastReplayData ? '' : 'none';
-      newBattleBtn.textContent = 'Back';
-      returnToScreen = 'result';
-
-      showScreen('result');
-    },
-    onHostRematchRequested() {
-      if (localRematchRequested) {
-        // Both want rematch — host will start the game, guest just waits
-        rematchBtn.textContent = 'Starting...';
-      } else {
-        rematchBtn.textContent = 'Rematch (opponent ready)';
-      }
-    },
-    onHostIdentity(playerId: string) {
-      opponentPlayerId = playerId;
-    },
-  });
-
-  await onlineGuest.joinRoom(roomId);
-}
-
-/** Build OnlineHost callbacks. Customization points are passed as overrides. */
-function createHostCallbacks(overrides: {
-  onShareUrl: (url: string) => void;
-  waitingStatus: string;
-  errorStatus: string;
-}): ConstructorParameters<typeof OnlineHost>[0] {
-  return {
-    onConnectionStateChange(state: OnlineConnectionState) {
-      if (state === 'connected') {
-        if (engine) {
-          notify('7 Seconds', 'Reconnected!');
-        } else {
-          notify('7 Seconds', 'Your opponent has joined!');
-          onlineLobby.style.display = 'none';
-          startOnlineHostGame();
-        }
-      } else if (state === 'reconnecting') {
-        setOnlineStatus('Reconnecting...', true);
-      } else if (state === 'disconnected') {
-        engine?.stop();
-        planningOverlay.classList.remove('active');
-        confirmBtn.classList.remove('active');
-        winnerTextEl.innerHTML = 'Opponent Disconnected';
-        winnerTextEl.style.color = 'var(--color-hud-neutral)';
-        resultStatsEl.innerHTML = '';
-        rematchBtn.style.display = 'none';
-        replayBtn.style.display = 'none';
-        newBattleBtn.textContent = 'Back';
-        showScreen('result');
-      } else if (state === 'waiting') {
-        setOnlineStatus(overrides.waitingStatus, true);
-      } else if (state === 'error') {
-        setOnlineStatus(overrides.errorStatus);
-      }
-    },
-    onShareUrl: overrides.onShareUrl,
-    onGuestPathsReceived() {
-      if (!engine || !onlineHost) return;
-      if (engine.phase === 'red-planning') {
-        const pathData = onlineHost.consumeGuestPaths();
-        if (pathData) {
-          engine.setRedPaths(pathData.paths);
-          engine.confirmPlan();
-          planningOverlay.classList.remove('active');
-        }
-      }
-    },
-    onGuestRematchRequested() {
-      if (localRematchRequested) {
-        startOnlineRematch();
-      } else {
-        rematchBtn.textContent = 'Rematch (opponent ready)';
-      }
-    },
-    onGuestIdentity(playerId: string) {
-      opponentPlayerId = playerId;
-    },
-  };
 }
 
 // --- Async ("play-by-mail") online matches -------------------------------
@@ -1163,44 +693,62 @@ function destroyAsync(): void {
   asyncController?.destroy();
   asyncController = null;
   renderer?.ticker.remove(asyncTickCallback);
-  stopGuestEngine();
+  stopPlaybackEngine();
   asyncNotify.style.display = 'none';
+  asyncFirstMoveBtn.style.display = 'none';
+  asyncForfeitBtn.style.display = 'none';
 }
+
+// Host's "Plan your first move" button: dismiss the share-link lobby and reveal
+// the planning overlay (set up underneath in onPlanTurn) so the host can draw.
+asyncFirstMoveBtn.addEventListener('click', () => {
+  asyncFirstMoveBtn.style.display = 'none';
+  onlineLobby.style.display = 'none';
+  planningOverlay.classList.add('active');
+  confirmBtn.classList.add('active');
+});
+
+// Forfeit: concede the match to escape an unrecoverable state (or just give up).
+asyncForfeitBtn.addEventListener('click', () => {
+  asyncForfeitBtn.style.display = 'none';
+  setOnlineStatus('Forfeiting…', true);
+  void asyncController?.forfeit();
+});
 
 /** Ticker callback that animates a resolved async round headlessly and, once
  *  it ends deterministically (a side eliminated, or the fixed round duration
  *  elapses), reports the authoritative end state back to the controller. */
 function asyncTickCallback(ticker: { deltaMS: number }): void {
-  if (!guestEngine || !renderer) return;
-  guestEngine.externalTick(ticker.deltaMS);
+  if (!playbackEngine || !renderer) return;
+  playbackEngine.externalTick(ticker.deltaMS);
 
-  const units = guestEngine.getUnits();
+  const units = playbackEngine.getUnits();
   const dt = ticker.deltaMS / 1000;
-  renderer.renderUnits(units, dt, undefined, guestEngine.phase === 'playing');
-  renderer.renderProjectiles(guestEngine.getProjectiles());
+  renderer.renderUnits(units, dt, undefined, playbackEngine.phase === 'playing');
+  renderer.renderProjectiles(playbackEngine.getProjectiles());
 
-  const { events, nextIndex } = guestEngine.getReplayEventsSince(guestEffectIndex);
+  const { events, nextIndex } = playbackEngine.getReplayEventsSince(playbackEffectIndex);
   if (events.length > 0) {
     renderer.effects?.dispatchEvents(events);
-    guestEffectIndex = nextIndex;
+    playbackEffectIndex = nextIndex;
   }
   renderer.effects?.update(dt);
 
-  const counts = guestEngine.getAliveCount();
+  const counts = playbackEngine.getAliveCount();
   blueCountEl.textContent = `Blue: ${counts.blue}`;
   redCountEl.textContent = `Red: ${counts.red}`;
 
   if (asyncRoundFinished) return;
-  const tick = guestEngine.getSimulationTick();
+  const tick = playbackEngine.getSimulationTick();
   // The animation's end timing is cosmetic; the persisted result is the
   // deterministic one computed in startAsyncRoundPlayback (frame-independent).
   if (asyncMatchEnded || tick >= ASYNC_ROUND_END_TICK) {
     asyncRoundFinished = true;
     renderer.ticker.remove(asyncTickCallback);
-    lastReplayData = guestEngine.getReplayData() ?? lastReplayData;
+    lastReplayData = playbackEngine.getReplayData() ?? lastReplayData;
     const round = asyncCurrentRound;
     const result = asyncResult;
-    stopGuestEngine();
+    stopPlaybackEngine();
     if (result) void asyncController?.onRoundPlayed(round, result.endState, result.gameOver);
   }
 }
@@ -1208,8 +756,7 @@ function asyncTickCallback(ticker: { deltaMS: number }): void {
 /** Run a resolved round: compute the authoritative outcome deterministically,
  *  then animate the same round for the player to watch. */
 function startAsyncRoundPlayback(input: PlayRoundInput): void {
-  stopGuestEngine();
-  pendingSyncHashes = [];
+  stopPlaybackEngine();
   asyncMatchEnded = false;
   asyncRoundFinished = false;
 
@@ -1226,14 +773,14 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
   );
 
   // Cosmetic animated playback (its sampled end state is NOT persisted).
-  guestEngine = new GameEngine(null, (type) => {
+  playbackEngine = new GameEngine(null, (type) => {
     if (type === 'end') asyncMatchEnded = true;
   }, { seed: roundSeed });
-  guestEngine.loadOnlineGameState(input.startState);
-  guestEngine.setBluePaths(input.bluePaths);
-  guestEngine.setRedPaths(input.redPaths);
-  guestEngine.startPlaying();
-  guestEffectIndex = 0;
+  playbackEngine.loadOnlineGameState(input.startState);
+  playbackEngine.setBluePaths(input.bluePaths);
+  playbackEngine.setRedPaths(input.redPaths);
+  playbackEngine.startPlaying();
+  playbackEffectIndex = 0;
   roundCounterEl.textContent = `Round ${input.round}`;
   renderer!.ticker.add(asyncTickCallback);
 }
@@ -1241,22 +788,10 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
 /** Bridge the async protocol controller to the UI / playback engine. */
 function asyncHooks(): AsyncGameHooks {
   return {
-    onWaitingForGuest() {
-      // Match created, no friend yet: keep the share-link lobby up (with the
-      // copy button + notification opt-in) instead of dropping into planning.
-      planningOverlay.classList.remove('active');
-      confirmBtn.classList.remove('active');
-      onlineShareContainer.style.display = '';
-      asyncNotify.style.display = 'flex';
-      onlineLobby.style.display = 'flex';
-      showScreen('battle');
-    },
-
-    onPlanTurn(round, startState, myTeam) {
+    onPlanTurn(round, startState, myTeam, awaitingGuest) {
       asyncCurrentRound = round;
       asyncMyTeam = myTeam;
-      stopGuestEngine();
-      onlineLobby.style.display = 'none';
+      stopPlaybackEngine();
 
       document.body.classList.toggle('day-mode', dayModeCb.checked);
       renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
@@ -1264,25 +799,45 @@ function asyncHooks(): AsyncGameHooks {
       renderer!.effects?.clear();
       renderer!.clearDyingUnits();
 
-      guestUnits = startState.units.map(u => createUnitFromState(u));
-      guestElevationZones = startState.elevationZones;
-      guestObstacles = startState.obstacles;
+      playbackUnits = startState.units.map(u => createUnitFromState(u));
+      playbackElevationZones = startState.elevationZones;
       renderer!.renderElevationZones(startState.elevationZones);
       renderer!.renderObstacles(startState.obstacles);
-      renderer!.renderUnits(guestUnits);
+      renderer!.renderUnits(playbackUnits);
 
-      guestPathDrawer?.destroy();
-      guestPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
-      guestPathDrawer.enable(myTeam, guestUnits, guestElevationZones);
+      playbackPathDrawer?.destroy();
+      playbackPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
+      playbackPathDrawer.enable(myTeam, playbackUnits, playbackElevationZones);
 
       planningLabel.textContent = 'Your Planning';
       planningLabel.style.color = myTeam === 'blue'
         ? 'var(--color-planning-blue)' : 'var(--color-planning-red)';
-      planningOverlay.classList.add('active');
-      confirmBtn.classList.add('active');
       battleHud.style.display = 'none';
       roundCounterEl.textContent = `Round ${round}`;
       showScreen('battle');
+
+      if (awaitingGuest && !asyncMatchmade) {
+        // Host's first move before a friend joins. The full-screen lobby would
+        // cover the canvas, so we keep the invite up with a "Plan first move"
+        // button that dismisses the lobby into the (already set-up) planning UI.
+        // No "your turn" notification — the host just opened this themselves.
+        // (Matchmade games skip this: the stranger is already arriving, so the
+        // host just plans — no share link.)
+        planningOverlay.classList.remove('active');
+        confirmBtn.classList.remove('active');
+        onlineShareContainer.style.display = '';
+        asyncNotify.style.display = 'flex';
+        asyncForfeitBtn.style.display = 'none';
+        asyncFirstMoveBtn.style.display = '';
+        setOnlineStatus('Share this link so a friend can join — or plan your first move now.', false);
+        onlineLobby.style.display = 'flex';
+        return;
+      }
+
+      onlineLobby.style.display = 'none';
+      asyncFirstMoveBtn.style.display = 'none';
+      planningOverlay.classList.add('active');
+      confirmBtn.classList.add('active');
       // It's the player's turn: in-app toast when focused; notify() (OS / native
       // Capacitor on Android) covers the backgrounded case and self-guards on
       // visibility, so the two never double-fire.
@@ -1290,19 +845,31 @@ function asyncHooks(): AsyncGameHooks {
       notify('7 Seconds', "It's your turn to plan!");
     },
 
-    onAwaitOpponent(round) {
-      guestPathDrawer?.destroy();
-      guestPathDrawer = null;
+    onAwaitOpponent(round, awaitingGuest) {
+      playbackPathDrawer?.destroy();
+      playbackPathDrawer = null;
       planningOverlay.classList.remove('active');
       confirmBtn.classList.remove('active');
-      onlineShareContainer.style.display = 'none';
-      setOnlineStatus(`Turn submitted (round ${round}). Waiting for your friend — you can safely leave and return later.`, true);
+      asyncFirstMoveBtn.style.display = 'none';
+      asyncForfeitBtn.style.display = 'none';
+      if (awaitingGuest && !asyncMatchmade) {
+        // First move locked in, but still nobody to play against — keep the
+        // invite visible so a friend can join and start the match.
+        onlineShareContainer.style.display = '';
+        asyncNotify.style.display = 'flex';
+        setOnlineStatus('First move locked in! Share the link — the match begins when a friend joins.', true);
+      } else {
+        onlineShareContainer.style.display = 'none';
+        setOnlineStatus(`Turn submitted (round ${round}). Waiting for your friend — you can safely leave and return later.`, true);
+      }
       onlineLobby.style.display = 'flex';
       showScreen('battle');
     },
 
     onPlayRound(input) {
       onlineLobby.style.display = 'none';
+      asyncFirstMoveBtn.style.display = 'none';
+      asyncForfeitBtn.style.display = 'none';
       planningOverlay.classList.remove('active');
       confirmBtn.classList.remove('active');
       battleHud.style.display = '';
@@ -1311,13 +878,22 @@ function asyncHooks(): AsyncGameHooks {
     },
 
     onGameOver(status, finalState) {
+      // Capture from the controller before destroyAsync(): use its authoritative
+      // team, not the module-level asyncMyTeam — the latter is only set when WE
+      // plan a round this session, so it's stale (and would invert the result)
+      // when a finished match is reopened from "My Matches". The W/L record is
+      // keyed by opponent uid + match id, recorded once per match.
+      const myTeam = asyncController?.team ?? asyncMyTeam;
+      const opponentId = asyncController?.opponentId ?? null;
+      const matchId = asyncController?.matchId ?? null;
       destroyAsync();
       if (status === 'abandoned') {
         winnerTextEl.innerHTML = `Match Abandoned<br><span style="font-size:0.5em;opacity:0.7">Your opponent left</span>`;
         winnerTextEl.style.color = ''; // neutral, not a win/loss color
       } else {
         const winner: Team = status === 'guest_won' ? 'red' : 'blue';
-        const iWon = (asyncMyTeam === winner);
+        const iWon = (myTeam === winner);
+        if (opponentId && matchId) recordMatchResultOnce(matchId, opponentId, iWon);
         const color = winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
         winnerTextEl.innerHTML = `${iWon ? 'You Win!' : 'You Lose'}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
         winnerTextEl.style.color = color;
@@ -1332,24 +908,37 @@ function asyncHooks(): AsyncGameHooks {
       showScreen('result');
     },
 
-    onError(message) {
+    onError(message, canForfeit) {
       onlineShareContainer.style.display = 'none';
+      asyncFirstMoveBtn.style.display = 'none';
       setOnlineStatus(message);
+      // A forfeitable error (e.g. a lost commit that can never be revealed) is a
+      // dead end otherwise — offer a clean way to concede and end the match.
+      asyncForfeitBtn.style.display = canForfeit ? '' : 'none';
       onlineLobby.style.display = 'flex';
       showScreen('battle');
     },
   };
 }
 
+/** Soft cap on simultaneously in-play async matches per player. */
+const MAX_CONCURRENT_ASYNC_MATCHES = 5;
+
+/** True while the current async match was created via stranger matchmaking, so
+ *  both players are already present: the host should plan immediately rather
+ *  than see the friend-invite "share this link / plan your first move" UX. */
+let asyncMatchmade = false;
+
 /** Start an async match: create a new one (host) or open/join an existing one. */
-async function startAsyncGame(roomId: string | null): Promise<void> {
+async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean } = {}): Promise<void> {
+  asyncMatchmade = opts.matchmade ?? false;
   await initRenderer();
   destroyAsync();
   showScreen('battle');
   onlineLobby.style.display = 'flex';
   onlineShareContainer.style.display = 'none';
   onlineStatus.style.display = '';
-  document.getElementById('online-record')!.style.display = 'none';
+  showOnlineRecord(); // overall W/L (self-hides when there are no games yet)
   asyncNotify.style.display = 'flex';
   // Reflect current push state in the checkbox (permission granted ≈ subscribed).
   asyncNotifyCb.checked = typeof Notification !== 'undefined' && Notification.permission === 'granted';
@@ -1358,6 +947,16 @@ async function startAsyncGame(roomId: string | null): Promise<void> {
 
   let id = roomId;
   if (!id) {
+    // Cap concurrent open matches so a player can't strand a pile of zombies a
+    // friend never joins (and clutter their own list). Existing matches can
+    // always be resumed/forfeited from "My Matches".
+    const mine = await loadMyMatches();
+    const liveCount = mine?.filter(s =>
+      s.match.status === 'open' || s.match.status === 'active').length ?? 0;
+    if (liveCount >= MAX_CONCURRENT_ASYNC_MATCHES) {
+      setOnlineStatus(`You already have ${liveCount} matches on the go. Finish or forfeit one from "My Matches" before starting another.`);
+      return;
+    }
     setOnlineStatus('Creating match...', true);
     const generated = GameEngine.generateInitialState();
     const created = await createAsyncMatch(generated);
@@ -1378,35 +977,80 @@ async function startAsyncGame(roomId: string | null): Promise<void> {
   if (!ok) { asyncController = null; }
 }
 
-// Online PvP button (host flow)
-onlineBtn.addEventListener('click', async () => {
-  onlineActive = true;
-  onlineRole = 'host';
-  requestNotificationPermission();
-
-  await initRenderer();
-
-  onlineLobby.style.display = 'flex';
-  onlineShareContainer.style.display = 'none';
-  showOnlineRecord();
-  setOnlineStatus('Creating room...', true);
-
-  onlineHost = new OnlineHost(createHostCallbacks({
-    onShareUrl(url: string) {
-      onlineShareContainer.style.display = '';
-      onlineShareUrl.value = url;
-    },
-    waitingStatus: 'Waiting for opponent...',
-    errorStatus: 'Timed out. No opponent joined. Try creating a new room.',
-  }));
-
-  await onlineHost.createRoom();
-});
-
-// Async vs Friend — create a play-by-mail match (turns persisted server-side)
+// Play a Friend — create a durable match and share its link. Live when the
+// friend is also present (Realtime), play-by-mail when they're not.
 onlineAsyncBtn.addEventListener('click', () => {
   requestNotificationPermission();
   void startAsyncGame(null);
+});
+
+// --- My Matches: resume any in-flight async match (drop-in / drop-out) -----
+
+const MATCH_OUTCOME_UI: Record<MatchOutcome, { text: string; color: string }> = {
+  'your-turn': { text: 'Your turn', color: 'var(--color-btn-green-text)' },
+  'their-turn': { text: 'Their turn', color: 'var(--color-online-status)' },
+  'waiting-for-guest': { text: 'Waiting for a friend to join', color: 'var(--color-online-status)' },
+  'resolving': { text: 'Playing…', color: 'var(--color-online-status)' },
+  'you-won': { text: 'You won', color: 'var(--color-result-blue)' },
+  'you-lost': { text: 'You lost', color: 'var(--color-result-red)' },
+  'abandoned': { text: 'Abandoned', color: 'var(--color-online-status)' },
+};
+
+/** Reveal the "My Matches" menu entry (with an unread badge) only for players
+ *  who already have a session — never forces an anonymous account on load. */
+async function refreshMatchesBadge(): Promise<void> {
+  if (!(await currentUserId())) { myMatchesBtn.style.display = 'none'; return; }
+  const summaries = await loadMyMatches();
+  if (!summaries || summaries.length === 0) { myMatchesBtn.style.display = 'none'; return; }
+  myMatchesBtn.style.display = '';
+  const needsYou = summaries.filter(s => outcomeNeedsYou(s.outcome)).length;
+  myMatchesBadge.textContent = String(needsYou);
+  myMatchesBadge.style.display = needsYou > 0 ? '' : 'none';
+}
+
+async function openMatchesList(): Promise<void> {
+  matchesScreen.style.display = 'flex';
+  matchesList.innerHTML = '';
+  matchesStatus.style.display = '';
+  matchesStatus.textContent = 'Loading…';
+  const summaries = await loadMyMatches();
+  if (!summaries) {
+    matchesStatus.textContent = 'Could not load your matches. Check your connection and try again.';
+    return;
+  }
+  if (summaries.length === 0) {
+    matchesStatus.textContent = 'No matches yet. Start an Async match to play a friend over time.';
+    return;
+  }
+  matchesStatus.style.display = 'none';
+  // Surface matches that need the player first, newest within each group.
+  const sorted = [...summaries].sort(
+    (a, b) => Number(outcomeNeedsYou(b.outcome)) - Number(outcomeNeedsYou(a.outcome)),
+  );
+  for (const s of sorted) {
+    const ui = MATCH_OUTCOME_UI[s.outcome];
+    const row = document.createElement('button');
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;box-sizing:border-box;padding:14px 16px;font-size:15px;background:var(--color-online-url-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:6px;cursor:pointer;text-align:left';
+    const left = document.createElement('span');
+    left.textContent = `Round ${s.match.currentRound}`;
+    left.style.opacity = '0.8';
+    const right = document.createElement('span');
+    right.textContent = ui.text;
+    right.style.color = ui.color;
+    right.style.fontWeight = 'bold';
+    row.append(left, right);
+    row.addEventListener('click', () => {
+      matchesScreen.style.display = 'none';
+      void startAsyncGame(s.match.id);
+    });
+    matchesList.appendChild(row);
+  }
+}
+
+myMatchesBtn.addEventListener('click', () => { void openMatchesList(); });
+matchesBackBtn.addEventListener('click', () => {
+  matchesScreen.style.display = 'none';
+  void refreshMatchesBadge();
 });
 
 // Async notification opt-in (email + web push)
@@ -1431,6 +1075,12 @@ asyncNotifyCb.addEventListener('change', async () => {
   asyncNotifyHint.textContent = ok ? "You'll be notified when it's your turn." : 'Could not enable notifications.';
 });
 
+// How long a matchmade guest waits for the host's freshly-created match row to
+// replicate into view before giving up: up to JOIN_LAG_TRIES probes spaced
+// JOIN_LAG_INTERVAL_MS apart (~4s total; normally resolves on the first probe).
+const JOIN_LAG_TRIES = 8;
+const JOIN_LAG_INTERVAL_MS = 500;
+
 // Online vs Random — client-side matchmaking via Supabase Realtime
 onlineRandomBtn.addEventListener('click', async () => {
   onlineActive = true;
@@ -1450,18 +1100,33 @@ onlineRandomBtn.addEventListener('click', async () => {
     const result = await promise;
     cancelMatchmaking = null;
 
+    // Both peers paired on the same room id via presence. Run the stranger game
+    // on the durable log too: the host creates the match under that id; the
+    // guest joins it. No WebRTC — a present opponent just makes the turn log
+    // resolve within seconds (Realtime), and a leaver degrades to play-by-mail.
     if (result.role === 'host') {
-      onlineRole = 'host';
       setOnlineStatus('Opponent found! Setting up game...', true);
-      onlineHost = new OnlineHost(createHostCallbacks({
-        onShareUrl() { /* no-op for random match */ },
-        waitingStatus: 'Waiting for opponent to connect...',
-        errorStatus: 'Connection failed. Try again.',
-      }));
-      await onlineHost.createRoomWithId(result.roomId);
+      const created = await createAsyncMatch(GameEngine.generateInitialState(), result.roomId);
+      if (!created) {
+        if (onlineActive) setOnlineStatus('Could not start the match. Try again.');
+        return;
+      }
+      await startAsyncGame(result.roomId, { matchmade: true });
     } else {
-      // Guest flow — reuse existing startOnlineGuestMode
-      startOnlineGuestMode(result.roomId);
+      setOnlineStatus('Opponent found! Joining game...', true);
+      // The host writes the match row right after pairing; tolerate the brief
+      // replication lag before it's queryable (also rides out a transient read).
+      let exists = false;
+      for (let i = 0; i < JOIN_LAG_TRIES && onlineActive && !exists; i++) {
+        exists = (await loadMatch(result.roomId)) != null;
+        // No sleep after the final probe — we're about to give up anyway.
+        if (!exists && i < JOIN_LAG_TRIES - 1) await new Promise((r) => setTimeout(r, JOIN_LAG_INTERVAL_MS));
+      }
+      if (!exists) {
+        if (onlineActive) setOnlineStatus('Could not join the match. Try again.');
+        return;
+      }
+      await startAsyncGame(result.roomId, { matchmade: true });
     }
   } catch {
     cancelMatchmaking = null;
@@ -1491,21 +1156,11 @@ onlineCopyBtn.addEventListener('click', async () => {
 onlineCancelBtn.addEventListener('click', () => {
   cancelMatchmaking?.();
   cancelMatchmaking = null;
-  onlineHost?.destroy();
-  onlineHost = null;
-  onlineGuest?.destroy();
-  onlineGuest = null;
   destroyAsync();
   onlineActive = false;
-  onlineRole = null;
   onlineLobby.style.display = 'none';
   showScreen('prompt');
 });
-
-// Handle deferred join after age gate verification
-window.addEventListener('age-verified-join', ((e: CustomEvent<string>) => {
-  startOnlineGuestMode(e.detail);
-}) as EventListener);
 
 window.addEventListener('age-verified-async-join', ((e: CustomEvent<string>) => {
   void startAsyncGame(e.detail);
@@ -1513,8 +1168,6 @@ window.addEventListener('age-verified-async-join', ((e: CustomEvent<string>) => 
 
 // Clean up online connections on tab close to avoid zombie Supabase channels
 window.addEventListener('beforeunload', () => {
-  onlineHost?.destroy();
-  onlineGuest?.destroy();
   asyncController?.destroy();
 });
 
@@ -1525,6 +1178,10 @@ window.addEventListener('beforeunload', () => {
   if (dayModeCb.checked) renderer!.setTheme(DAY_THEME);
   showPreview();
   showScreen('prompt');
+
+  // Reveal "My Matches" (with an unread badge) if this player already has
+  // matches — passive session read, so it never signs anyone in on load.
+  void refreshMatchesBadge();
 
   // Async match link (?amatch=) — distinct from live ?join= WebRTC rooms.
   const asyncJoinId = getAsyncJoinId();
@@ -1538,20 +1195,5 @@ window.addEventListener('beforeunload', () => {
       sessionStorage.setItem('7s-pending-async-join', asyncJoinId);
     }
     return;
-  }
-
-  // Check URL for join param (works for both web links and Android deep links)
-  const joinRoomId = getJoinRoomId();
-  if (joinRoomId) {
-    const cleanUrl = new URL(window.location.href);
-    cleanUrl.searchParams.delete('join');
-    window.history.replaceState({}, '', cleanUrl.toString());
-    // Wait for age gate before starting guest flow
-    if (localStorage.getItem('7s-age-verified')) {
-      startOnlineGuestMode(joinRoomId);
-    } else {
-      // Store join room ID so the age gate can trigger it after verification
-      sessionStorage.setItem('7s-pending-join', joinRoomId);
-    }
   }
 })();

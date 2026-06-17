@@ -16,6 +16,19 @@ export function ensureAuth(): Promise<string | null> {
   return authPromise;
 }
 
+/** Read the user id from an existing persisted session WITHOUT creating one.
+ *  Lets the menu decide whether to show "My Matches" without forcing an
+ *  anonymous account on a player who has never used online play. */
+export async function currentUserId(): Promise<string | null> {
+  const client = getSupabaseClient();
+  try {
+    const { data: { session } } = await client.auth.getSession();
+    return session?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function signIn(): Promise<string | null> {
   const client = getSupabaseClient();
   try {

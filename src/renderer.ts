@@ -1,4 +1,5 @@
 import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
+import { PathDrawer } from './path-drawer';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS } from './constants';
 import { EffectsManager } from './effects';
@@ -615,6 +616,16 @@ export class Renderer {
 
   get canvas(): HTMLCanvasElement {
     return this.app.canvas;
+  }
+
+  /** Build a PathDrawer bound to this renderer's stage/canvas, themed to match.
+   *  Owning the construction here keeps the concrete (pixi-dependent) PathDrawer
+   *  out of game.ts's import graph, so the simulation core stays headless and
+   *  importable in a non-DOM context (e.g. a Deno Edge Function). */
+  createPathDrawer(onZoneHighlight?: (pos: Vec2 | null) => void): PathDrawer {
+    const drawer = new PathDrawer(this.app.stage, this.app.canvas, onZoneHighlight);
+    drawer.theme = this.currentTheme;
+    return drawer;
   }
 
   get stage() {

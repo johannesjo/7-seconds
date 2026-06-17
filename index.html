@@ -131,7 +131,7 @@
       border-radius: 4px;
       cursor: pointer;
     }
-    #battle-btn:hover, #ai-btn:hover, #online-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
+    #battle-btn:hover, #ai-btn:hover, #online-async-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
     .beta-tag { font-size: 10px; vertical-align: super; opacity: 0.6; letter-spacing: 1px; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -474,12 +474,7 @@
         document.getElementById('age-gate-yes').onclick = function() {
           localStorage.setItem('7s-age-verified', '1');
           gate.style.display = 'none';
-          // If a join link was deferred, trigger guest mode now
-          var pendingJoin = sessionStorage.getItem('7s-pending-join');
-          if (pendingJoin) {
-            sessionStorage.removeItem('7s-pending-join');
-            window.dispatchEvent(new CustomEvent('age-verified-join', { detail: pendingJoin }));
-          }
+          // If an async match link was deferred, trigger it now
           var pendingAsync = sessionStorage.getItem('7s-pending-async-join');
           if (pendingAsync) {
             sessionStorage.removeItem('7s-pending-async-join');
@@ -499,9 +494,9 @@
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
       <button id="ai-btn">vs AI</button>
       <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-horde-bg);color:var(--color-btn-horde-text);border:2px solid var(--color-btn-horde-border);border-radius:4px;cursor:pointer">Horde</button>
-      <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Online vs Random <span class="beta-tag">BETA</span></button>
-      <button id="online-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Online vs Friend</button>
-      <button id="online-async-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Async vs Friend <span class="beta-tag">BETA</span></button>
+      <button id="online-async-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Friend</button>
+      <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Stranger <span class="beta-tag">BETA</span></button>
+      <button id="my-matches-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-bg);color:var(--color-text);border:2px solid var(--color-btn-border);border-radius:4px;cursor:pointer;display:none">My Matches <span id="my-matches-badge" style="display:none;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border-radius:10px;padding:1px 8px;font-size:12px;margin-left:4px">0</span></button>
       <button id="battle-btn">Local PvP</button>
     </div>
     <!-- CTF buttons hidden for now -->
@@ -573,7 +568,16 @@
       </label>
       <p id="async-notify-hint" style="font-size:12px;opacity:0.7;margin:0;text-align:center;min-height:1em"></p>
     </div>
+    <button id="async-first-move-btn" style="display:none;padding:12px 32px;font-size:16px;font-weight:bold;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Plan your first move →</button>
+    <button id="async-forfeit-btn" style="display:none;padding:10px 28px;font-size:14px;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;opacity:0.85">Forfeit match</button>
     <button id="online-cancel-btn" style="padding:8px 24px;font-size:14px;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;opacity:0.7;margin-top:8px">Cancel</button>
+  </div>
+
+  <div id="matches-screen" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;gap:16px;background:var(--color-overlay-lobby);z-index:30;padding:calc(24px + var(--sat)) 16px calc(24px + var(--sab));overflow-y:auto">
+    <h2 style="font-size:26px;letter-spacing:3px;text-transform:uppercase;color:var(--color-online-title);margin:0">My Matches</h2>
+    <p id="matches-status" style="font-size:14px;color:var(--color-online-status);margin:0">Loading…</p>
+    <div id="matches-list" style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:440px"></div>
+    <button id="matches-back-btn" style="padding:10px 28px;font-size:14px;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;margin-top:8px">Back</button>
   </div>
 
   <div id="cover-screen">

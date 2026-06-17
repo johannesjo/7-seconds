@@ -217,6 +217,23 @@ live WebRTC matchmaking uses); the changes are additive.
 on the function and verify a sender domain in Resend. The client already collects
 an address in the async lobby, so no client change is needed to add it later.
 
+**Phase 3 — reliability (see `docs/plans/2026-06-16-unified-online-reliability.md`):**
+
+9. Apply `supabase/migrations/0003_reliability.sql` (inactivity timeout +
+   `last_move_at`/`abandon_after`). Enable `pg_cron` (Dashboard → Database →
+   Extensions) so `expire_abandoned_matches()` runs hourly; otherwise call it
+   from any external scheduler.
+10. *(Optional, recommended)* Server-authoritative round resolution. Build the
+    engine bundle (`npm run build:edge`, vendored at
+    `supabase/functions/_shared/engine.mjs`), deploy the function
+    (`supabase functions deploy resolve-round --project-ref <ref>`), and add a
+    Database Webhook on `public.turns` **UPDATE** → `resolve-round` (service-role
+    auth, same pattern as `notify-turn`). The server then resolves each round
+    with the same deterministic engine the clients run — a match can't wedge if
+    no client reopens, and clients can't forge `latest_state`. Idempotent: it
+    no-ops once the round has advanced, so it coexists with client resolution.
+    Re-run `npm run build:edge` whenever the simulation changes.
+
 ### Going live
 
 The async UI and the VAPID public key ship in the **client bundle**, so they
@@ -228,7 +245,8 @@ above are not enough on their own.
 
 ## Notes / non-goals
 
-- `online-peer.ts` / WebRTC stays for live "vs random" matchmaking; async is for
-  friend matches. The two can converge later but are kept separate in Phase 1.
+- WebRTC has been removed: all online play (friend invites and "vs random"
+  matchmaking) now runs on the async durable turn log. See
+  `docs/plans/2026-06-17-drop-webrtc.md`.
 - Reconstruction prefers the cached `latest_state` snapshot; the full `turns`
   log is retained for replays and audit/anti-cheat verification.

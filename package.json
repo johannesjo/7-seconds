@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:edge": "node scripts/build-edge-engine.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "cap:sync": "npx cap sync",

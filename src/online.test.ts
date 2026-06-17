@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { generateRoomId, getShareUrl, safeUUID } from './online';
+import { describe, it, expect, afterEach } from 'vitest';
+import { generateRoomId, safeUUID } from './online';
 
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -52,29 +52,5 @@ describe('generateRoomId', () => {
     const ids = new Set(Array.from({ length: 100 }, () => generateRoomId()));
     // With 30^6 possible IDs, 100 calls should produce at least 95 unique
     expect(ids.size).toBeGreaterThanOrEqual(95);
-  });
-});
-
-describe('getShareUrl', () => {
-  beforeEach(() => {
-    Object.defineProperty(globalThis, 'window', {
-      value: { location: { href: 'https://example.com/game' } },
-      writable: true,
-      configurable: true,
-    });
-  });
-
-  it('appends join param to current URL', () => {
-    const url = getShareUrl('abc123');
-    const parsed = new URL(url);
-    expect(parsed.searchParams.get('join')).toBe('abc123');
-  });
-
-  it('preserves existing URL structure', () => {
-    const url = getShareUrl('xyz789');
-    const parsed = new URL(url);
-    expect(parsed.searchParams.get('join')).toBe('xyz789');
-    expect(parsed.origin).toBe('https://example.com');
-    expect(parsed.pathname).toBe('/game');
   });
 });

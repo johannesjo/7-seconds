@@ -4,8 +4,13 @@ import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELE
 import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
-import { PathDrawer } from './path-drawer';
-import { Renderer } from './renderer';
+// Type-only: the concrete Renderer / PathDrawer pull in pixi.js. Keeping them
+// out of the runtime import graph lets this module (and its static headless
+// helpers resolveRound / generateInitialState) run in a non-DOM context such as
+// a Deno Edge Function. The live game injects a real Renderer via the ctor and
+// builds its PathDrawer through renderer.createPathDrawer().
+import type { PathDrawer } from './path-drawer';
+import type { Renderer } from './renderer';
 import { scorePosition, generateCandidates } from './ai-scoring';
 import { createRng } from './rng';
 
@@ -132,8 +137,7 @@ export class GameEngine {
     this.running = true;
 
     if (this.renderer) {
-      this.pathDrawer = new PathDrawer(this.renderer.stage, this.renderer.canvas, (pos) => this.renderer!.highlightZonesAt(pos));
-      this.pathDrawer.theme = this.renderer.currentTheme;
+      this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer!.highlightZonesAt(pos));
 
       // Render initial state — hills under obstacles
       this.renderer.renderElevationZones(this.elevationZones);
