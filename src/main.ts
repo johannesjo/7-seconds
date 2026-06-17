@@ -11,7 +11,7 @@ import { findMatch } from './online-matchmaking';
 import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
 import type { PathList, MatchOutcome } from './online-async-core';
 import { outcomeNeedsYou } from './online-async-core';
-import { createAsyncMatch, loadMatch, getAsyncJoinId, loadMyMatches } from './online-async';
+import { createAsyncMatch, loadMatch, getAsyncJoinId, loadMyMatches, getAsyncShareUrl } from './online-async';
 import { currentUserId } from './online-auth';
 import { registerTurnNotifications, setTurnNotifications } from './online-push';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
@@ -612,6 +612,9 @@ newBattleBtn.addEventListener('click', () => {
   destroyAsync();
   onlineActive = false;
   onlineLobby.style.display = 'none';
+  // The other funnel back to the menu (a match just ended — e.g. an open-match
+  // forfeit). Recount so the "My Matches" badge doesn't keep a stale count.
+  void refreshMatchesBadge();
 
   // Reset horde state
   hordeActive = false;
@@ -827,7 +830,10 @@ function asyncHooks(): AsyncGameHooks {
         confirmBtn.classList.remove('active');
         onlineShareContainer.style.display = '';
         asyncNotify.style.display = 'flex';
-        asyncForfeitBtn.style.display = 'none';
+        // Offer Forfeit even while waiting for a guest: lets a host clear an open
+        // match to get back under the concurrent-match cap (forfeit() handles
+        // 'open' matches), so the cap warning's advice is actually actionable.
+        asyncForfeitBtn.style.display = '';
         asyncFirstMoveBtn.style.display = '';
         setOnlineStatus('Share this link so a friend can join — or plan your first move now.', false);
         onlineLobby.style.display = 'flex';
@@ -857,6 +863,9 @@ function asyncHooks(): AsyncGameHooks {
         // invite visible so a friend can join and start the match.
         onlineShareContainer.style.display = '';
         asyncNotify.style.display = 'flex';
+        // Same as the first-move screen: allow forfeiting an open match so the
+        // host can drop back under the concurrent-match cap without a guest.
+        asyncForfeitBtn.style.display = '';
         setOnlineStatus('First move locked in! Share the link — the match begins when a friend joins.', true);
       } else {
         onlineShareContainer.style.display = 'none';
@@ -966,11 +975,15 @@ async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean
     }
     id = created.match.id;
     onlineShareContainer.style.display = '';
-    onlineShareUrl.value = created.shareUrl;
     setOnlineStatus('Share this link with your friend — the match starts when they join.', true);
   } else {
     setOnlineStatus('Loading match...', true);
   }
+
+  // Populate the invite link for both new and resumed host matches: when a host
+  // reopens an open match, the hooks reveal the share box but never set the URL,
+  // so without this the field shows up empty. getAsyncShareUrl is id-only/pure.
+  onlineShareUrl.value = getAsyncShareUrl(id);
 
   asyncController = new AsyncGameController(id, asyncHooks());
   const ok = await asyncController.start();
@@ -1160,6 +1173,9 @@ onlineCancelBtn.addEventListener('click', () => {
   onlineActive = false;
   onlineLobby.style.display = 'none';
   showScreen('prompt');
+  // Leaving a match is the funnel back to the menu after taking a turn, so
+  // recount here — otherwise the "My Matches" badge keeps a stale count.
+  void refreshMatchesBadge();
 });
 
 window.addEventListener('age-verified-async-join', ((e: CustomEvent<string>) => {

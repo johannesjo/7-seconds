@@ -551,7 +551,7 @@
 
   </div>
 
-  <div id="online-lobby" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:var(--color-overlay-lobby);z-index:25;padding:32px">
+  <div id="online-lobby" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:safe center;gap:20px;background:var(--color-overlay-lobby);z-index:25;padding:calc(32px + var(--sat)) 32px calc(32px + var(--sab));overflow-y:auto">
     <h2 id="online-lobby-title" style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:var(--color-online-title);margin:0">Online PvP</h2>
     <div id="online-spinner" style="display:none;width:32px;height:32px;border:3px solid var(--color-online-spinner-bg);border-top-color:var(--color-online-spinner);border-radius:50%;animation:spin 0.8s linear infinite"></div>
     <p id="online-record" style="font-size:18px;color:var(--color-text-muted);letter-spacing:2px;margin:0;display:none"></p>
