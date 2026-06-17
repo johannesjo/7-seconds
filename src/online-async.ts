@@ -90,11 +90,11 @@ function mapTurn(row: TurnRow): RoundTurn {
  *  or null if auth/DB is unavailable. */
 export async function createAsyncMatch(
   initialState: OnlineGameState,
+  id: string = generateRoomId(),
 ): Promise<{ match: MatchRecord; shareUrl: string } | null> {
   const uid = await ensureAuth();
   if (!uid) return null;
 
-  const id = generateRoomId();
   const client = getSupabaseClient();
   const { data, error } = await client
     .from('matches')

@@ -15,7 +15,7 @@ import { findMatch } from './online-matchmaking';
 import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
 import type { PathList, MatchOutcome } from './online-async-core';
 import { outcomeNeedsYou } from './online-async-core';
-import { createAsyncMatch, getAsyncJoinId, loadMyMatches } from './online-async';
+import { createAsyncMatch, loadMatch, getAsyncJoinId, loadMyMatches } from './online-async';
 import { currentUserId } from './online-auth';
 import { registerTurnNotifications, setTurnNotifications } from './online-push';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
@@ -1298,11 +1298,13 @@ function asyncHooks(): AsyncGameHooks {
       roundCounterEl.textContent = `Round ${round}`;
       showScreen('battle');
 
-      if (awaitingGuest) {
+      if (awaitingGuest && !asyncMatchmade) {
         // Host's first move before a friend joins. The full-screen lobby would
         // cover the canvas, so we keep the invite up with a "Plan first move"
         // button that dismisses the lobby into the (already set-up) planning UI.
         // No "your turn" notification — the host just opened this themselves.
+        // (Matchmade games skip this: the stranger is already arriving, so the
+        // host just plans — no share link.)
         planningOverlay.classList.remove('active');
         confirmBtn.classList.remove('active');
         onlineShareContainer.style.display = '';
@@ -1332,7 +1334,7 @@ function asyncHooks(): AsyncGameHooks {
       confirmBtn.classList.remove('active');
       asyncFirstMoveBtn.style.display = 'none';
       asyncForfeitBtn.style.display = 'none';
-      if (awaitingGuest) {
+      if (awaitingGuest && !asyncMatchmade) {
         // First move locked in, but still nobody to play against — keep the
         // invite visible so a friend can join and start the match.
         onlineShareContainer.style.display = '';
@@ -1395,8 +1397,14 @@ function asyncHooks(): AsyncGameHooks {
 /** Soft cap on simultaneously in-play async matches per player. */
 const MAX_CONCURRENT_ASYNC_MATCHES = 5;
 
+/** True while the current async match was created via stranger matchmaking, so
+ *  both players are already present: the host should plan immediately rather
+ *  than see the friend-invite "share this link / plan your first move" UX. */
+let asyncMatchmade = false;
+
 /** Start an async match: create a new one (host) or open/join an existing one. */
-async function startAsyncGame(roomId: string | null): Promise<void> {
+async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean } = {}): Promise<void> {
+  asyncMatchmade = opts.matchmade ?? false;
   await initRenderer();
   destroyAsync();
   showScreen('battle');
@@ -1583,18 +1591,32 @@ onlineRandomBtn.addEventListener('click', async () => {
     const result = await promise;
     cancelMatchmaking = null;
 
+    // Both peers paired on the same room id via presence. Run the stranger game
+    // on the durable log too: the host creates the match under that id; the
+    // guest joins it. No WebRTC — a present opponent just makes the turn log
+    // resolve within seconds (Realtime), and a leaver degrades to play-by-mail.
     if (result.role === 'host') {
-      onlineRole = 'host';
       setOnlineStatus('Opponent found! Setting up game...', true);
-      onlineHost = new OnlineHost(createHostCallbacks({
-        onShareUrl() { /* no-op for random match */ },
-        waitingStatus: 'Waiting for opponent to connect...',
-        errorStatus: 'Connection failed. Try again.',
-      }));
-      await onlineHost.createRoomWithId(result.roomId);
+      const created = await createAsyncMatch(GameEngine.generateInitialState(), result.roomId);
+      if (!created) {
+        if (onlineActive) setOnlineStatus('Could not start the match. Try again.');
+        return;
+      }
+      await startAsyncGame(result.roomId, { matchmade: true });
     } else {
-      // Guest flow — reuse existing startOnlineGuestMode
-      startOnlineGuestMode(result.roomId);
+      setOnlineStatus('Opponent found! Joining game...', true);
+      // The host writes the match row right after pairing; tolerate the brief
+      // replication lag before it's queryable (also rides out a transient read).
+      let exists = false;
+      for (let i = 0; i < 8 && onlineActive && !exists; i++) {
+        exists = (await loadMatch(result.roomId)) != null;
+        if (!exists) await new Promise((r) => setTimeout(r, 500));
+      }
+      if (!exists) {
+        if (onlineActive) setOnlineStatus('Could not join the match. Try again.');
+        return;
+      }
+      await startAsyncGame(result.roomId, { matchmade: true });
     }
   } catch {
     cancelMatchmaking = null;
