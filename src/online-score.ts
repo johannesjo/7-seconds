@@ -50,7 +50,10 @@ const SCORED_KEY = '7s-scored-matches';
 export function recordMatchResultOnce(matchId: string, opponentId: string, won: boolean): void {
   if (!isValidPlayerId(opponentId)) return;
   let scored: string[];
-  try { scored = JSON.parse(localStorage.getItem(SCORED_KEY) ?? '[]'); } catch { scored = []; }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SCORED_KEY) ?? '[]');
+    scored = Array.isArray(parsed) ? parsed : []; // tolerate a corrupted value
+  } catch { scored = []; }
   if (scored.includes(matchId)) return;
   if (won) recordWin(opponentId); else recordLoss(opponentId);
   try { localStorage.setItem(SCORED_KEY, JSON.stringify([...scored, matchId])); } catch { /* unavailable */ }

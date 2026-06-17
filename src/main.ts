@@ -1074,6 +1074,12 @@ asyncNotifyCb.addEventListener('change', async () => {
   asyncNotifyHint.textContent = ok ? "You'll be notified when it's your turn." : 'Could not enable notifications.';
 });
 
+// How long a matchmade guest waits for the host's freshly-created match row to
+// replicate into view before giving up: up to JOIN_LAG_TRIES probes spaced
+// JOIN_LAG_INTERVAL_MS apart (~4s total; normally resolves on the first probe).
+const JOIN_LAG_TRIES = 8;
+const JOIN_LAG_INTERVAL_MS = 500;
+
 // Online vs Random — client-side matchmaking via Supabase Realtime
 onlineRandomBtn.addEventListener('click', async () => {
   onlineActive = true;
@@ -1110,9 +1116,10 @@ onlineRandomBtn.addEventListener('click', async () => {
       // The host writes the match row right after pairing; tolerate the brief
       // replication lag before it's queryable (also rides out a transient read).
       let exists = false;
-      for (let i = 0; i < 8 && onlineActive && !exists; i++) {
+      for (let i = 0; i < JOIN_LAG_TRIES && onlineActive && !exists; i++) {
         exists = (await loadMatch(result.roomId)) != null;
-        if (!exists) await new Promise((r) => setTimeout(r, 500));
+        // No sleep after the final probe — we're about to give up anyway.
+        if (!exists && i < JOIN_LAG_TRIES - 1) await new Promise((r) => setTimeout(r, JOIN_LAG_INTERVAL_MS));
       }
       if (!exists) {
         if (onlineActive) setOnlineStatus('Could not join the match. Try again.');
