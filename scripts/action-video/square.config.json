@@ -1,0 +1,7 @@
+{
+  "browser": {
+    "launchOptions": { "headless": false },
+    "contextOptions": { "viewport": { "width": 1000, "height": 1000 } }
+  },
+  "outputDir": "output/playwright/cli"
+}

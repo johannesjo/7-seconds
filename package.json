@@ -12,6 +12,8 @@
     "build:edge": "node scripts/build-edge-engine.mjs",
     "test": "vitest",
     "test:run": "vitest run",
+    "video:capture": "bash scripts/capture-action-videos.sh",
+    "video:verify": "bash scripts/verify-action-videos.sh",
     "cap:sync": "npx cap sync",
     "cap:open": "npx cap open android",
     "cap:build": "npm run build && npx cap sync && cd android && ./gradlew bundleRelease",
