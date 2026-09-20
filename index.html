@@ -282,6 +282,10 @@
     #unit-info[data-placement="top"] { top: calc(52px + var(--sat)); bottom: auto; }
     #planning-overlay.tutorial ~ #unit-info[data-placement="top"] { top: auto; bottom: calc(48px + var(--sab)); }
     #unit-info-title { display: block; font-size: 13px; margin-bottom: 2px; }
+    @media (max-width: 600px), (max-height: 500px) {
+      #unit-info { padding: 7px 10px; text-align: left; line-height: 1.4; }
+      #unit-info-title { display: inline; font-size: inherit; margin: 0 4px 0 0; }
+    }
 
     /* Cover screen */
     #cover-screen {
