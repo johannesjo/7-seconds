@@ -1,4 +1,117 @@
-import type { Vec2 } from './types';
+import { ROUND_DURATION_S } from './constants';
+import type { Unit, Vec2 } from './types';
+import { advanceWaypoint, moveUnit } from './units';
+
+export interface PathPrediction {
+  reached: Vec2[];
+  remainder: Vec2[];
+  position: Vec2;
+  /** Null means the destination was not reached within the simulation limit. */
+  travelTime: number | null;
+  tickDistances: number[];
+}
+
+const PREDICTION_DT = 1 / 60; // Matches Game's fixed simulation step.
+export const MAX_PREDICTION_TIME_S = 30;
+
+function pathLength(points: Vec2[]): number {
+  let length = 0;
+  for (let i = 1; i < points.length; i++) {
+    length += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+  return length;
+}
+
+/** Estimate a route in open space, using the same blade acceleration and waypoint motion as play. */
+export function predictPath(unit: Unit, path: Vec2[]): PathPrediction {
+  const points = path.length > 0 ? path : [unit.pos];
+  const length = pathLength(points);
+  if (length === 0) {
+    return { ...splitPathAtDistance(points, 0), travelTime: 0, tickDistances: [] };
+  }
+
+  if (unit.type !== 'blade') {
+    const speed = unit.speed;
+    if (speed <= 0) {
+      return { ...splitPathAtDistance(points, 0), travelTime: null, tickDistances: [] };
+    }
+    const roundDistance = speed * ROUND_DURATION_S;
+    const tickDistances: number[] = [];
+    for (let second = 1; second < ROUND_DURATION_S; second++) {
+      const d = speed * second;
+      if (d < length) tickDistances.push(d);
+    }
+    return { ...splitPathAtDistance(points, roundDistance), travelTime: length / speed, tickDistances };
+  }
+
+  // Only movement state is copied. The preview never changes the live unit or its route.
+  const ghost: Unit = {
+    ...unit,
+    pos: { ...points[0] },
+    vel: { ...unit.vel },
+    knockbackVel: unit.knockbackVel ? { ...unit.knockbackVel } : undefined,
+    moveTarget: null,
+    waypoints: points.slice(1),
+  };
+  const cumulative = [0];
+  for (let i = 1; i < points.length; i++) {
+    cumulative.push(cumulative[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+  }
+
+  let progress = 0;
+  let roundDistance = length;
+  let roundPosition: Vec2 = { ...points[points.length - 1] };
+  let travelTime: number | null = null;
+  const tickDistances: number[] = [];
+  const roundSteps = Math.round(ROUND_DURATION_S / PREDICTION_DT);
+  const maxSteps = Math.round(MAX_PREDICTION_TIME_S / PREDICTION_DT);
+  for (let step = 1; step <= maxSteps; step++) {
+    advanceWaypoint(ghost, PREDICTION_DT);
+    moveUnit(ghost, PREDICTION_DT, []);
+
+    if (ghost.moveTarget) {
+      const index = points.length - ghost.waypoints.length - 1;
+      const from = points[index - 1];
+      const to = points[index];
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const segmentLength2 = dx * dx + dy * dy;
+      const fraction = segmentLength2 > 0
+        ? Math.max(0, Math.min(1, ((ghost.pos.x - from.x) * dx + (ghost.pos.y - from.y) * dy) / segmentLength2))
+        : 1;
+      progress = Math.max(progress, cumulative[index - 1] + (cumulative[index] - cumulative[index - 1]) * fraction);
+    } else {
+      progress = length;
+    }
+
+    if (step % Math.round(1 / PREDICTION_DT) === 0 && step < roundSteps && progress < length &&
+      progress > (tickDistances[tickDistances.length - 1] ?? 0)) {
+      tickDistances.push(progress);
+    }
+    if (step === roundSteps) {
+      roundDistance = progress;
+      roundPosition = { ...ghost.pos };
+    }
+    if (ghost.moveTarget === null && ghost.waypoints.length === 0) {
+      travelTime = step * PREDICTION_DT;
+      if (step < roundSteps) {
+        roundDistance = length;
+        roundPosition = { ...ghost.pos };
+      }
+      break;
+    }
+  }
+
+  const split = splitPathAtDistance(points, roundDistance);
+  if (split.reached.length === 1 &&
+    (split.reached[0].x !== roundPosition.x || split.reached[0].y !== roundPosition.y)) {
+    split.reached.push(roundPosition);
+  } else {
+    split.reached[split.reached.length - 1] = roundPosition;
+  }
+  if (split.remainder.length > 0) split.remainder[0] = roundPosition;
+  return { ...split, position: roundPosition, travelTime, tickDistances };
+}
 
 /** Split a drawn route at a travel distance, preserving the bend at the cut. */
 export function splitPathAtDistance(points: Vec2[], distance: number): { reached: Vec2[]; remainder: Vec2[]; position: Vec2 } {

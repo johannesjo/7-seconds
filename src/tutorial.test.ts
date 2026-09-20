@@ -71,4 +71,19 @@ describe.each([
     expect(result.met).toBe(false);
     expect(result.redEnd).toEqual(result.redStart);
   });
+
+  it.each([{ direction: 'away', dx: 0, dy: 80 }, { direction: 'sideways', dx: 80, dy: 0 }])(
+    'movement lesson does not pass when moving $direction', ({ dx, dy }) => {
+      setMapSize(width, height);
+      const practice = createTutorialEncounter(0);
+      const soldier = practice.units[0];
+      const engine = new GameEngine(null, () => {}, { practice, seed: 1 });
+      engine.startBattle();
+      engine.setBluePaths([{ unitId: soldier.id, waypoints: [{ x: soldier.pos.x + dx, y: soldier.pos.y + dy }] }]);
+      engine.confirmPlan();
+      for (let tick = 0; tick < 480 && engine.phase === 'playing'; tick++) engine.externalTick(1000 / 60);
+      expect(tutorialObjectiveMet(0, engine.getUnits(), engine.getReplayData())).toBe(false);
+      engine.stop();
+    },
+  );
 });

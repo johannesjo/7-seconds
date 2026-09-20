@@ -2,7 +2,7 @@ import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZon
 import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELEVATION_ZONES } from './online-types';
 import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
-import { generateObstacles, generateElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
+import { generateBattlefield, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 // Type-only: the concrete Renderer / PathDrawer pull in pixi.js. Keeping them
 // out of the runtime import graph lets this module (and its static headless
@@ -58,6 +58,7 @@ export class GameEngine {
   private lockstepMode = false;
   private practice?: { units: Unit[]; elevationZones: ElevationZone[] };
   private initialState?: OnlineGameState;
+  private onInspectUnit?: (unit: Unit | null) => void;
 
   constructor(renderer: Renderer | null, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
@@ -72,6 +73,7 @@ export class GameEngine {
     seed?: number;
     practice?: { units: Unit[]; elevationZones: ElevationZone[] };
     initialState?: OnlineGameState;
+    onInspectUnit?: (unit: Unit | null) => void;
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -85,6 +87,7 @@ export class GameEngine {
     this.onlineHostMode = opts?.onlineHost ?? false;
     this.practice = opts?.practice;
     this.initialState = opts?.initialState;
+    this.onInspectUnit = opts?.onInspectUnit;
 
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
@@ -122,8 +125,9 @@ export class GameEngine {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
     } else {
-      this.obstacles = generateObstacles();
-      this.elevationZones = generateElevationZones();
+      const battlefield = generateBattlefield();
+      this.obstacles = battlefield.obstacles;
+      this.elevationZones = battlefield.elevationZones;
     }
 
     const allBlocks = this.obstacles;
@@ -150,6 +154,7 @@ export class GameEngine {
 
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer!.highlightZonesAt(pos));
+      this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
 
       // Render initial state — hills under obstacles
       this.renderer.renderElevationZones(this.elevationZones);

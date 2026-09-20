@@ -261,6 +261,27 @@
       cursor: pointer;
     }
     #result-stats { max-width: 480px; text-align: center; line-height: 1.5; }
+    #unit-info {
+      position: fixed;
+      bottom: calc(48px + var(--sab));
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(360px, calc(100% - 24px));
+      padding: 10px 14px;
+      border: 1px solid var(--color-btn-border);
+      border-radius: 4px;
+      background: var(--color-overlay);
+      color: var(--color-text);
+      text-align: center;
+      font-size: 12px;
+      line-height: 1.5;
+      pointer-events: none;
+      z-index: 12;
+    }
+    #unit-info[hidden], #planning-overlay:not(.active) ~ #unit-info { display: none; }
+    #unit-info[data-placement="top"] { top: calc(52px + var(--sat)); bottom: auto; }
+    #planning-overlay.tutorial ~ #unit-info[data-placement="top"] { top: auto; bottom: calc(48px + var(--sab)); }
+    #unit-info-title { display: block; font-size: 13px; margin-bottom: 2px; }
 
     /* Cover screen */
     #cover-screen {
@@ -593,6 +614,10 @@
     </div>
     <button id="confirm-btn">Done</button>
     <button id="skip-tutorial-btn">Back to menu</button>
+    <div id="unit-info" hidden role="status" aria-live="polite">
+      <strong id="unit-info-title"></strong>
+      <span id="unit-info-description"></span>
+    </div>
 
     <div id="replay-overlay">
       <button id="replay-restart-btn" title="Restart">&#x23EE;</button>

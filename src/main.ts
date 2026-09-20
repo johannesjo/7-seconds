@@ -1,9 +1,9 @@
 import { Renderer } from './renderer';
 import { GameEngine } from './game';
 import { createArmy, createMissionArmy, createUnitFromState } from './units';
-import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
+import { generateBattlefield, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
 import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team } from './types';
-import { ARMY_COMPOSITION, HORDE_MAX_WAVES, ROUND_DURATION_S } from './constants';
+import { ARMY_COMPOSITION, HORDE_MAX_WAVES, ROUND_DURATION_S, MAP_HEIGHT, SHIELD_MAX_HITS } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
@@ -42,6 +42,9 @@ const planningLabel = document.getElementById('planning-label')!;
 const confirmBtn = document.getElementById('confirm-btn')!;
 const planningInstructions = document.getElementById('planning-instructions')!;
 const skipTutorialBtn = document.getElementById('skip-tutorial-btn')!;
+const unitInfo = document.getElementById('unit-info')!;
+const unitInfoTitle = document.getElementById('unit-info-title')!;
+const unitInfoDescription = document.getElementById('unit-info-description')!;
 const coverScreen = document.getElementById('cover-screen')!;
 const countInEl = document.getElementById('count-in')!;
 const roundCounterEl = document.getElementById('round-counter')!;
@@ -111,6 +114,31 @@ function showOnlineRecord(): void {
 function setOnlineStatus(text: string, showSpinner = false): void {
   onlineStatus.textContent = text;
   onlineSpinner.style.display = showSpinner ? 'block' : 'none';
+}
+
+const UNIT_ROLES: Record<Unit['type'], string> = {
+  soldier: 'Balanced ranged fighter. Keep enemies within its firing circle.',
+  sniper: 'Long range and heavy damage, but fragile. Protect it behind your frontline.',
+  blade: 'Builds speed and damage while charging. Sharp turns slow it down.',
+  shielder: 'Blocks frontal shots. Its sides and rear are exposed.',
+  zombie: 'Slow melee attacker. Must get close to deal damage.',
+  bomber: 'Explodes when killed, hurting both teams. Keep your units clear.',
+};
+
+function showUnitInfo(unit: Unit | null): void {
+  unitInfo.hidden = !unit;
+  if (!unit) return;
+  unitInfoTitle.textContent = `${unit.type[0].toUpperCase()}${unit.type.slice(1)}`;
+  unitInfoTitle.style.color = unit.team === 'blue' ? 'var(--color-planning-blue)' : 'var(--color-planning-red)';
+  let description = UNIT_ROLES[unit.type];
+  if (unit.type === 'shielder') {
+    const remaining = Math.max(0, SHIELD_MAX_HITS - (unit.shieldHits ?? 0));
+    description = remaining > 0
+      ? `Blocks ${remaining} more frontal hit${remaining === 1 ? '' : 's'}. Its sides and rear are exposed.`
+      : 'Shield broken. Now vulnerable from every direction.';
+  }
+  unitInfoDescription.textContent = description;
+  unitInfo.dataset.placement = unit.pos.y >= MAP_HEIGHT / 2 ? 'top' : 'bottom';
 }
 
 const toastEl = document.getElementById('toast')!;
@@ -372,8 +400,9 @@ async function initRenderer(): Promise<void> {
 
 function showPreview(): void {
   if (!renderer) return;
-  renderer.renderElevationZones(generateElevationZones());
-  renderer.renderObstacles(generateObstacles());
+  const battlefield = generateBattlefield();
+  renderer.renderElevationZones(battlefield.elevationZones);
+  renderer.renderObstacles(battlefield.obstacles);
   const preview = [...createArmy('blue'), ...createArmy('red')];
   renderer.renderUnits(preview);
 }
@@ -390,6 +419,7 @@ function startGame(retry = false): void {
     practice: tutorialLesson === null ? undefined : createTutorialEncounter(tutorialLesson),
     initialState: encounter?.state,
     seed: encounter?.seed,
+    onInspectUnit: showUnitInfo,
   });
   tutorialFinished = false;
   planningOverlay.classList.toggle('tutorial', tutorialLesson !== null);
@@ -417,6 +447,7 @@ function startCtfGame(): void {
     aiMode: !ctfHotseat,
     ctfMode: true,
     ctfHotseat,
+    onInspectUnit: showUnitInfo,
   });
   showScreen('battle');
   speedToggle.classList.remove('active');
@@ -502,6 +533,7 @@ function startNextHordeWave(): void {
     hordeBlueUnits: hordeUnits,
     hordeRedArmy: waveDef.enemies,
     hordeMap: hordeMap!,
+    onInspectUnit: showUnitInfo,
   });
 
   showScreen('battle');
@@ -936,6 +968,7 @@ function asyncHooks(): AsyncGameHooks {
 
       playbackPathDrawer?.destroy();
       playbackPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
+      playbackPathDrawer.onInspectUnit = showUnitInfo;
       playbackPathDrawer.enable(myTeam, playbackUnits, playbackElevationZones);
 
       planningLabel.textContent = 'Your Planning';

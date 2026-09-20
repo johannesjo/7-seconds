@@ -3,7 +3,7 @@ import { Unit, Team, Vec2, ElevationZone } from './types';
 import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S } from './constants';
 import { getElevationLevel } from './units';
 import { Theme, NIGHT_THEME } from './theme';
-import { splitPathAtDistance } from './path-preview';
+import { MAX_PREDICTION_TIME_S, predictPath, type PathPrediction } from './path-preview';
 
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
 function samplePath(raw: Vec2[], minDist: number): Vec2[] {
@@ -32,15 +32,6 @@ function distancePt(a: Vec2, b: Vec2): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   return Math.sqrt(dx * dx + dy * dy);
-}
-
-/** Sum of all segment lengths in a polyline. */
-function polylineLength(pts: Vec2[]): number {
-  let len = 0;
-  for (let i = 1; i < pts.length; i++) {
-    len += distancePt(pts[i - 1], pts[i]);
-  }
-  return len;
 }
 
 /** Return position and angle at a given distance along a polyline. */
@@ -88,6 +79,18 @@ export class PathDrawer {
   private labelIndex = 0;
   private hoverLabel: Text;
   private onZoneHighlight: ((pos: Vec2 | null) => void) | null = null;
+  onInspectUnit: ((unit: Unit | null) => void) | null = null;
+  private inspectedUnit: Unit | null = null;
+  private predictionCache = new WeakMap<Unit, {
+    points: Vec2[];
+    pos: Vec2;
+    vel: Vec2;
+    momentum: number | undefined;
+    knockbackVel: Vec2 | undefined;
+    stuckTime: number | undefined;
+    speed: number;
+    prediction: PathPrediction;
+  }>();
 
   constructor(stage: Container, canvas?: HTMLCanvasElement, onZoneHighlight?: (pos: Vec2 | null) => void) {
     this.stage = stage;
@@ -162,6 +165,39 @@ export class PathDrawer {
     gfx.fill({ color, alpha: alpha * 0.8 });
   }
 
+  private prediction(unit: Unit, points: Vec2[]): PathPrediction {
+    const cached = this.predictionCache.get(unit);
+    if (cached && cached.speed === unit.speed && cached.momentum === unit.momentum &&
+      cached.stuckTime === unit.stuckTime &&
+      cached.knockbackVel?.x === unit.knockbackVel?.x &&
+      cached.knockbackVel?.y === unit.knockbackVel?.y &&
+      cached.pos.x === unit.pos.x && cached.pos.y === unit.pos.y &&
+      cached.vel.x === unit.vel.x && cached.vel.y === unit.vel.y &&
+      cached.points.length === points.length &&
+      cached.points.every((p, i) => p.x === points[i].x && p.y === points[i].y)) {
+      return cached.prediction;
+    }
+    const prediction = predictPath(unit, points);
+    this.predictionCache.set(unit, {
+      points: points.map(p => ({ ...p })), pos: { ...unit.pos }, vel: { ...unit.vel },
+      momentum: unit.momentum, knockbackVel: unit.knockbackVel ? { ...unit.knockbackVel } : undefined,
+      stuckTime: unit.stuckTime, speed: unit.speed, prediction,
+    });
+    return prediction;
+  }
+
+  private timeText(time: number | null): string {
+    return time === null ? `>${MAX_PREDICTION_TIME_S}s` : `~${time.toFixed(1)}s`;
+  }
+
+  private syncInspectedUnit(): void {
+    const inspected = this.enabled ? this.selectedUnit ?? this.hoveredUnit ?? this.hoveredEnemy : null;
+    if (inspected !== this.inspectedUnit) {
+      this.inspectedUnit = inspected;
+      this.onInspectUnit?.(inspected);
+    }
+  }
+
   enable(team: Team, units: Unit[], elevationZones: ElevationZone[] = []): void {
     this.team = team;
     this.units = units;
@@ -171,6 +207,7 @@ export class PathDrawer {
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rawPoints = [];
+    this.predictionCache = new WeakMap();
     this.renderPaths();
   }
 
@@ -181,6 +218,8 @@ export class PathDrawer {
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rawPoints = [];
+    this.inspectedUnit = null;
+    this.onInspectUnit?.(null);
     this.hoverGfx.clear();
     for (const label of this.labelPool) label.visible = false;
     this.onZoneHighlight?.(null);
@@ -209,10 +248,7 @@ export class PathDrawer {
       const color = unit.team === 'blue' ? this.theme.bluePath : this.theme.redPath;
       const alpha = 0.8;
       const fullPath: Vec2[] = [unit.pos, ...unit.waypoints];
-      const pathLen = polylineLength(fullPath);
-      const travelTime = pathLen / unit.speed;
-      const roundDistance = unit.speed * ROUND_DURATION_S;
-      const { reached, remainder, position } = splitPathAtDistance(fullPath, roundDistance);
+      const { reached, remainder, position, travelTime, tickDistances } = this.prediction(unit, fullPath);
       this.strokePath(this.gfx, reached, color, 2, alpha);
       this.strokePath(this.gfx, remainder, color, 2, alpha * 0.22);
       this.drawGhost(this.gfx, unit, position, color, alpha);
@@ -225,8 +261,7 @@ export class PathDrawer {
 
       // Ticks mark seconds reachable within this round.
       const tickAlpha = alpha * 0.5;
-      const tickDist = unit.speed; // 1 second of travel
-      for (let d = tickDist; d < Math.min(pathLen, roundDistance); d += tickDist) {
+      for (const d of tickDistances) {
         const { pos: tp, angle: ta } = pointAtDistance(fullPath, d);
         const nx = Math.cos(ta + Math.PI / 2) * 4;
         const ny = Math.sin(ta + Math.PI / 2) * 4;
@@ -236,9 +271,9 @@ export class PathDrawer {
         this.gfx.stroke();
       }
 
-      const overLimit = travelTime > ROUND_DURATION_S;
+      const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
       const timeLabel = this.acquireLabel();
-      timeLabel.text = `~${travelTime.toFixed(1)}s`;
+      timeLabel.text = this.timeText(travelTime);
       timeLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.labelFill;
       timeLabel.position.set(last.x, last.y - (overLimit ? 12 : unit.radius + 6));
       timeLabel.alpha = alpha;
@@ -254,17 +289,13 @@ export class PathDrawer {
     // Draw in-progress raw line (thicker + brighter than finalized paths)
     if (this.selectedUnit && this.rawPoints.length > 1) {
       const color = this.team === 'blue' ? this.theme.bluePathBright : this.theme.redPathBright;
-      const rawLen = polylineLength(this.rawPoints);
-      const rawTime = rawLen / this.selectedUnit.speed;
-      const roundDistance = this.selectedUnit.speed * ROUND_DURATION_S;
-      const { reached, remainder, position } = splitPathAtDistance(this.rawPoints, roundDistance);
+      const { reached, remainder, position, travelTime, tickDistances } = this.prediction(this.selectedUnit, this.rawPoints);
       this.strokePath(this.gfx, reached, color, 4, 1);
       this.strokePath(this.gfx, remainder, color, 3, 0.22);
       this.drawGhost(this.gfx, this.selectedUnit, position, color, 1);
 
       // Tick marks + live time label for in-progress path
-      const tickDist = this.selectedUnit.speed;
-      for (let d = tickDist; d < Math.min(rawLen, roundDistance); d += tickDist) {
+      for (const d of tickDistances) {
         const { pos: tp, angle: ta } = pointAtDistance(this.rawPoints, d);
         const nx = Math.cos(ta + Math.PI / 2) * 5;
         const ny = Math.sin(ta + Math.PI / 2) * 5;
@@ -276,9 +307,9 @@ export class PathDrawer {
 
       const endpoint = this.rawPoints[this.rawPoints.length - 1];
       this.onZoneHighlight?.(position);
-      const rawOverLimit = rawTime > ROUND_DURATION_S;
+      const rawOverLimit = travelTime === null || travelTime > ROUND_DURATION_S;
       const liveLabel = this.acquireLabel();
-      liveLabel.text = `~${rawTime.toFixed(1)}s`;
+      liveLabel.text = this.timeText(travelTime);
       liveLabel.style.fill = rawOverLimit ? this.theme.labelWarn : this.theme.labelFill;
       liveLabel.position.set(endpoint.x, endpoint.y - (rawOverLimit ? 12 : this.selectedUnit.radius + 6));
       liveLabel.alpha = 1.0;
@@ -301,6 +332,7 @@ export class PathDrawer {
   }
 
   private renderHoverLayer(): void {
+    this.syncInspectedUnit();
     this.hoverGfx.clear();
     this.hoverLabel.visible = false;
     if (!this.enabled || !this.team) return;
@@ -334,7 +366,7 @@ export class PathDrawer {
       this.hoverGfx.stroke();
       // Range preview follows the estimated round-end position.
       const endPos = this.rawPoints.length > 0
-        ? splitPathAtDistance(this.rawPoints, this.selectedUnit.speed * ROUND_DURATION_S).position
+        ? this.prediction(this.selectedUnit, this.rawPoints).position
         : this.selectedUnit.pos;
       this.drawRangeCircle(this.selectedUnit, endPos, teamColor);
 
@@ -351,16 +383,14 @@ export class PathDrawer {
       if (this.hoveredUnit.waypoints.length > 0) {
         const brightColor = this.team === 'blue' ? this.theme.bluePathBright : this.theme.redPathBright;
         const fullPath: Vec2[] = [this.hoveredUnit.pos, ...this.hoveredUnit.waypoints];
-        const pathLen = polylineLength(fullPath);
-        const travelTime = pathLen / this.hoveredUnit.speed;
-        const { reached, remainder, position } = splitPathAtDistance(fullPath, this.hoveredUnit.speed * ROUND_DURATION_S);
+        const { reached, remainder, position, travelTime } = this.prediction(this.hoveredUnit, fullPath);
         this.strokePath(this.hoverGfx, reached, brightColor, 3, 1);
         this.strokePath(this.hoverGfx, remainder, brightColor, 2, 0.22);
         this.drawGhost(this.hoverGfx, this.hoveredUnit, position, brightColor, 1);
 
         const last = this.hoveredUnit.waypoints[this.hoveredUnit.waypoints.length - 1];
-        const overLimit = travelTime > ROUND_DURATION_S;
-        this.hoverLabel.text = `~${travelTime.toFixed(1)}s`;
+        const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
+        this.hoverLabel.text = this.timeText(travelTime);
         this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
         this.hoverLabel.position.set(last.x, last.y - (overLimit ? 12 : this.hoveredUnit.radius + 6));
         this.hoverLabel.alpha = 1;
@@ -369,7 +399,7 @@ export class PathDrawer {
 
       // Range circle at estimated round end (or current pos if no path)
       const hoverPos = this.hoveredUnit.waypoints.length > 0
-        ? splitPathAtDistance([this.hoveredUnit.pos, ...this.hoveredUnit.waypoints], this.hoveredUnit.speed * ROUND_DURATION_S).position
+        ? this.prediction(this.hoveredUnit, [this.hoveredUnit.pos, ...this.hoveredUnit.waypoints]).position
         : this.hoveredUnit.pos;
       this.drawRangeCircle(this.hoveredUnit, hoverPos, teamColor);
     }
@@ -384,16 +414,14 @@ export class PathDrawer {
       // Show enemy path + time on hover
       if (this.hoveredEnemy.waypoints.length > 0) {
         const fullPath: Vec2[] = [this.hoveredEnemy.pos, ...this.hoveredEnemy.waypoints];
-        const pathLen = polylineLength(fullPath);
-        const travelTime = pathLen / this.hoveredEnemy.speed;
-        const { reached, remainder, position } = splitPathAtDistance(fullPath, this.hoveredEnemy.speed * ROUND_DURATION_S);
+        const { reached, remainder, position, travelTime } = this.prediction(this.hoveredEnemy, fullPath);
         this.strokePath(this.hoverGfx, reached, enemyColor, 2, 0.5);
         this.strokePath(this.hoverGfx, remainder, enemyColor, 2, 0.13);
         this.drawGhost(this.hoverGfx, this.hoveredEnemy, position, enemyColor, 0.6);
 
         const last = this.hoveredEnemy.waypoints[this.hoveredEnemy.waypoints.length - 1];
-        const overLimit = travelTime > ROUND_DURATION_S;
-        this.hoverLabel.text = `~${travelTime.toFixed(1)}s`;
+        const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
+        this.hoverLabel.text = this.timeText(travelTime);
         this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
         this.hoverLabel.position.set(last.x, last.y - (overLimit ? 12 : this.hoveredEnemy.radius + 6));
         this.hoverLabel.alpha = 0.6;
@@ -401,7 +429,7 @@ export class PathDrawer {
       }
 
       const enemyEndPos = this.hoveredEnemy.waypoints.length > 0
-        ? splitPathAtDistance([this.hoveredEnemy.pos, ...this.hoveredEnemy.waypoints], this.hoveredEnemy.speed * ROUND_DURATION_S).position
+        ? this.prediction(this.hoveredEnemy, [this.hoveredEnemy.pos, ...this.hoveredEnemy.waypoints]).position
         : this.hoveredEnemy.pos;
       this.drawRangeCircle(this.hoveredEnemy, enemyEndPos, enemyColor);
     }
@@ -442,6 +470,9 @@ export class PathDrawer {
   }
 
   destroy(): void {
+    this.enabled = false;
+    this.inspectedUnit = null;
+    this.onInspectUnit?.(null);
     this.stage.off('pointerdown', this.onPointerDown);
     this.stage.off('pointermove', this.onPointerMove);
     this.stage.off('pointerup', this.onPointerUp);
@@ -510,6 +541,7 @@ export class PathDrawer {
     const closest = this.findNearestUnit(pos.x, pos.y);
     if (closest) {
       this.hoveredEnemy = null;
+      this.hoveredUnit = closest;
       this.selectedUnit = closest;
       closest.waypoints = [];
       closest.moveTarget = null;
@@ -520,6 +552,7 @@ export class PathDrawer {
 
     // Tap on enemy → show their range
     const enemy = this.findNearestEnemy(pos.x, pos.y);
+    this.hoveredUnit = null;
     this.hoveredEnemy = enemy;
     this.renderHoverLayer();
   };
@@ -556,6 +589,7 @@ export class PathDrawer {
     // Skip the first point (unit's current position)
     this.selectedUnit.waypoints = waypoints.slice(1);
 
+    this.hoveredUnit = this.selectedUnit;
     this.selectedUnit = null;
     this.rawPoints = [];
     this.renderPaths();

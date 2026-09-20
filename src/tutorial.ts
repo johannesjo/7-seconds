@@ -51,7 +51,9 @@ export function createTutorialEncounter(lesson: number): { units: Unit[]; elevat
 export function tutorialObjectiveMet(lesson: number, units: Unit[], replay: ReplayData | null): boolean {
   if (lesson === 0) {
     const soldier = units.find(u => u.id === 'blue_soldier');
-    return !!soldier && Math.hypot(soldier.pos.x - MAP_WIDTH / 2, soldier.pos.y - (MAP_HEIGHT / 2 + 140)) >= 60;
+    const [start, target] = createTutorialEncounter(0).units;
+    const initialDistance = Math.hypot(start.pos.x - target.pos.x, start.pos.y - target.pos.y);
+    return !!soldier && initialDistance - Math.hypot(soldier.pos.x - target.pos.x, soldier.pos.y - target.pos.y) >= 60;
   }
   if (lesson === 1) {
     return !!replay?.events.some(event => event.type === 'fire' && event.team === 'blue'

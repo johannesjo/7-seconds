@@ -1,85 +1,123 @@
-import { describe, it, expect } from 'vitest';
-import { generateObstacles, generateElevationZones, generateHordeObstacles, generateHordeElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
-import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH } from './constants';
+import { describe, it, expect, vi } from 'vitest';
+import { generateBattlefield, generateHordeObstacles, generateHordeElevationZones, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
+import { MAP_WIDTH, MAP_HEIGHT, CTF_BASE_ZONE_WIDTH, setMapSize, UNIT_STATS } from './constants';
+import { advanceWaypoint, createUnit, moveUnit } from './units';
 
-describe('generateObstacles', () => {
-  it('generates 2-3 obstacles', () => {
-    for (let i = 0; i < 20; i++) {
-      const obstacles = generateObstacles();
-      expect(obstacles.length).toBeGreaterThanOrEqual(2);
-      expect(obstacles.length).toBeLessThanOrEqual(3);
-    }
-  });
-
-  it('obstacles are symmetrical (mirrored top-bottom)', () => {
-    const obstacles = generateObstacles();
-    for (const obs of obstacles) {
-      const centerY = obs.y + obs.h / 2;
-      const mirrorCenterY = MAP_HEIGHT - centerY;
-      const isCentered = Math.abs(centerY - MAP_HEIGHT / 2) < 1;
-      const hasMirror = obstacles.some(o => {
-        const oCenterY = o.y + o.h / 2;
-        return Math.abs(oCenterY - mirrorCenterY) < 1 && o !== obs;
+describe('generateBattlefield', () => {
+  it('selects one of three distinct standard layouts', () => {
+    const random = vi.spyOn(Math, 'random');
+    try {
+      const layouts = [0, 0.4, 0.8].map(value => {
+        random.mockReturnValue(value);
+        return generateBattlefield();
       });
-      expect(isCentered || hasMirror).toBe(true);
+      expect(new Set(layouts.map(layout => JSON.stringify(layout))).size).toBe(3);
+      for (let index = 0; index < 3; index++) expect(layouts[index]).toEqual(generateBattlefield(index));
+    } finally {
+      random.mockRestore();
     }
   });
 
-  it('obstacles are within the middle zone of the map', () => {
-    const obstacles = generateObstacles();
-    for (const obs of obstacles) {
-      expect(obs.x).toBeGreaterThanOrEqual(50);
-      expect(obs.x + obs.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
-      expect(obs.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.25);
-      expect(obs.y + obs.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.75);
-    }
-  });
+  it('keeps terrain fair, clear of spawns, and reachable by the largest unit at both map sizes', () => {
+    const originalSize = [MAP_WIDTH, MAP_HEIGHT] as const;
+    const radius = Math.max(...Object.values(UNIT_STATS).map(stats => stats.radius));
+    const step = 10;
+    try {
+      for (const [width, height] of [[360, 620], [1000, 1000]] as const) {
+        setMapSize(width, height);
+        for (let index = 0; index < 3; index++) {
+          const { obstacles, elevationZones } = generateBattlefield(index);
+          for (const rects of [obstacles, elevationZones]) {
+            for (const rect of rects) {
+              expect(rect.x).toBeGreaterThanOrEqual(0);
+              expect(rect.x + rect.w).toBeLessThanOrEqual(width);
+              expect(rect.y).toBeGreaterThanOrEqual(height * 0.16);
+              expect(rect.y + rect.h).toBeLessThanOrEqual(height * 0.84);
+              expect(rects.some(other => other.x === rect.x && other.w === rect.w &&
+                other.h === rect.h && Math.abs(other.y - (height - rect.y - rect.h)) < 0.001)).toBe(true);
+            }
+          }
+          for (const [hillIndex, hill] of elevationZones.entries()) {
+            expect(obstacles.some(block => block.x < hill.x + hill.w && block.x + block.w > hill.x &&
+              block.y < hill.y + hill.h && block.y + block.h > hill.y)).toBe(false);
+            expect(elevationZones.some((other, otherIndex) => otherIndex !== hillIndex &&
+              other.x < hill.x + hill.w && other.x + other.w > hill.x &&
+              other.y < hill.y + hill.h && other.y + other.h > hill.y)).toBe(false);
+          }
 
-  it('obstacle sizes are in the 30-60 range', () => {
-    for (let i = 0; i < 20; i++) {
-      const obstacles = generateObstacles();
-      for (const obs of obstacles) {
-        expect(obs.w).toBeGreaterThanOrEqual(30);
-        expect(obs.w).toBeLessThanOrEqual(60);
-        expect(obs.h).toBeGreaterThanOrEqual(30);
-        expect(obs.h).toBeLessThanOrEqual(60);
+          const cols = Math.floor((width - 2 * radius) / step) + 1;
+          const rows = Math.floor((height - 2 * radius) / step) + 1;
+          const cell = (x: number, y: number) => {
+            const col = Math.round((x - radius) / step);
+            const row = Math.round((y - radius) / step);
+            return row * cols + col;
+          };
+          const open = (at: number) => {
+            const x = radius + (at % cols) * step;
+            const y = radius + Math.floor(at / cols) * step;
+            return !obstacles.some(o => x > o.x - radius && x < o.x + o.w + radius &&
+              y > o.y - radius && y < o.y + o.h + radius);
+          };
+          const reachable = (start: number) => {
+            const seen = new Uint8Array(cols * rows);
+            const queue = [start];
+            seen[start] = 1;
+            for (let head = 0; head < queue.length; head++) {
+              const at = queue[head];
+              const col = at % cols;
+              const row = Math.floor(at / cols);
+              for (const next of [col > 0 ? at - 1 : -1, col < cols - 1 ? at + 1 : -1,
+                row > 0 ? at - cols : -1, row < rows - 1 ? at + cols : -1]) {
+                if (next >= 0 && !seen[next] && open(next)) {
+                  seen[next] = 1;
+                  queue.push(next);
+                }
+              }
+            }
+            return seen;
+          };
+          const destinations = [cell(radius + step, height / 2),
+            cell(width - radius - step, height / 2),
+            ...elevationZones.map(hill => cell(hill.x + hill.w / 2, hill.y + hill.h / 2))];
+          for (const spawnY of [height * 0.08, height * 0.92]) {
+            const spawn = cell(width / 2, spawnY);
+            expect(open(spawn)).toBe(true);
+            const seen = reachable(spawn);
+            for (const destination of destinations) expect(seen[destination]).toBe(1);
+            expect(seen[cell(width / 2, height - spawnY)]).toBe(1);
+          }
+        }
       }
-    }
-  });
-});
-
-describe('generateElevationZones', () => {
-  it('generates 2-4 zones (always even, mirrored pairs)', () => {
-    for (let i = 0; i < 20; i++) {
-      const zones = generateElevationZones();
-      expect(zones.length).toBeGreaterThanOrEqual(2);
-      expect(zones.length).toBeLessThanOrEqual(4);
-      expect(zones.length % 2).toBe(0);
+    } finally {
+      setMapSize(...originalSize);
     }
   });
 
-  it('zones are symmetrical (mirrored top-bottom)', () => {
-    const zones = generateElevationZones();
-    for (const z of zones) {
-      const centerY = z.y + z.h / 2;
-      const mirrorCenterY = MAP_HEIGHT - centerY;
-      const hasMirror = zones.some(other => {
-        const otherCenterY = other.y + other.h / 2;
-        return Math.abs(otherCenterY - mirrorCenterY) < 1 && other !== z;
-      });
-      expect(hasMirror).toBe(true);
-    }
-  });
-
-  it('zones are within map bounds', () => {
-    for (let i = 0; i < 20; i++) {
-      const zones = generateElevationZones();
-      for (const z of zones) {
-        expect(z.x).toBeGreaterThanOrEqual(50);
-        expect(z.x + z.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
-        expect(z.y).toBeGreaterThanOrEqual(0);
-        expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT);
+  it('lets a blade follow both outer lanes with actual movement and edge steering', () => {
+    const originalSize = [MAP_WIDTH, MAP_HEIGHT] as const;
+    try {
+      for (const [width, height] of [[360, 620], [1000, 1000]] as const) {
+        setMapSize(width, height);
+        for (let layout = 0; layout < 3; layout++) {
+          const { obstacles } = generateBattlefield(layout);
+          for (const x of [27, width - 27]) {
+            for (const fromBottom of [true, false]) {
+              const startY = height * (fromBottom ? 0.82 : 0.18);
+              const targetY = height * (fromBottom ? 0.18 : 0.82);
+              const blade = createUnit('flanker', 'blade', fromBottom ? 'blue' : 'red', { x, y: startY });
+              blade.waypoints = [{ x, y: targetY }];
+              for (let tick = 0; tick < 1200; tick++) {
+                advanceWaypoint(blade, 1 / 60);
+                moveUnit(blade, 1 / 60, obstacles);
+                if (Math.abs(blade.pos.y - targetY) < 4) break;
+              }
+              expect(Math.abs(blade.pos.y - targetY)).toBeLessThan(4);
+            }
+          }
+        }
       }
+    } finally {
+      setMapSize(...originalSize);
     }
   });
 });
@@ -201,4 +239,3 @@ describe('generateCtfElevationZones', () => {
     }
   });
 });
-

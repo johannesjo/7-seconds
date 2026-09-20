@@ -5,50 +5,43 @@ function randomInRange(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min)) + min;
 }
 
-/** Generate 2-3 symmetrical obstacles (smaller) in the middle zone of the map. */
-export function generateObstacles(): Obstacle[] {
-  const obstacles: Obstacle[] = [];
+// [horizontal center, vertical center, width, height]. Sizes are tuned at 360x620;
+// the capped scale keeps cover useful without filling a wide battlefield.
+type LayoutRect = readonly [number, number, number, number];
+const STANDARD_LAYOUTS: ReadonlyArray<{ obstacles: readonly LayoutRect[]; elevationZones: readonly LayoutRect[] }> = [
+  // Central barricade: advance behind cover or take either exposed side hill.
+  {
+    obstacles: [[0.5, 0.5, 70, 52], [0.5, 0.32, 54, 40]],
+    elevationZones: [[0.22, 0.36, 100, 70], [0.78, 0.36, 100, 70]],
+  },
+  // Split gates: the middle hill is valuable, but both outer lanes bypass it.
+  {
+    obstacles: [[0.31, 0.5, 40, 86], [0.69, 0.5, 40, 86], [0.5, 0.28, 52, 40]],
+    elevationZones: [[0.5, 0.5, 90, 72]],
+  },
+  // Offset positions: side cover protects approaches to hills; the center stays open.
+  {
+    obstacles: [[0.31, 0.43, 45, 42], [0.69, 0.31, 45, 42]],
+    elevationZones: [[0.22, 0.32, 100, 65], [0.78, 0.42, 100, 65]],
+  },
+];
 
-  const pairCount = randomInRange(1, 2); // 1 pair
-  const hasCenter = Math.random() > 0.5;
+/** A coherent standard battlefield, mirrored so each team has the same routes. */
+export function generateBattlefield(layoutIndex = Math.floor(Math.random() * STANDARD_LAYOUTS.length)):
+  { obstacles: Obstacle[]; elevationZones: ElevationZone[] } {
+  const layout = STANDARD_LAYOUTS[layoutIndex];
+  if (!layout) throw new RangeError(`Unknown battlefield layout: ${layoutIndex}`);
 
-  for (let i = 0; i < pairCount; i++) {
-    const w = randomInRange(30, 60);
-    const h = randomInRange(30, 60);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
-
-    obstacles.push({ x, y, w, h });
-    obstacles.push({ x, y: MAP_HEIGHT - y - h, w, h });
-  }
-
-  if (hasCenter || obstacles.length < 3) {
-    const w = randomInRange(30, 60);
-    const h = randomInRange(30, 60);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = (MAP_HEIGHT - h) / 2;
-    obstacles.push({ x, y, w, h });
-  }
-
-  return obstacles;
-}
-
-/** Generate 1-2 symmetric pairs of hill zones (2-4 total). */
-export function generateElevationZones(): ElevationZone[] {
-  const zones: ElevationZone[] = [];
-  const pairCount = randomInRange(1, 3); // 1 or 2 pairs
-
-  for (let i = 0; i < pairCount; i++) {
-    const w = randomInRange(80, 160);
-    const h = randomInRange(60, 120);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
-
-    zones.push({ x, y, w, h });
-    zones.push({ x, y: MAP_HEIGHT - y - h, w, h });
-  }
-
-  return zones;
+  const scale = Math.min(MAP_WIDTH / 360, MAP_HEIGHT / 620);
+  const expand = (rects: readonly LayoutRect[]): Obstacle[] => rects.flatMap(([cx, cy, baseW, baseH]) => {
+    const w = baseW * scale;
+    const h = baseH * scale;
+    const x = cx * MAP_WIDTH - w / 2;
+    const y = cy * MAP_HEIGHT - h / 2;
+    const rect = { x, y, w, h };
+    return cy === 0.5 ? [rect] : [rect, { ...rect, y: MAP_HEIGHT - y - h }];
+  });
+  return { obstacles: expand(layout.obstacles), elevationZones: expand(layout.elevationZones) };
 }
 
 // --- Horde-specific generators (player-side terrain only) ---
@@ -134,4 +127,3 @@ export function generateCtfElevationZones(): ElevationZone[] {
 
   return zones;
 }
-
