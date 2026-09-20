@@ -119,6 +119,7 @@ export interface ReplayUnitSnapshot {
   maxHp: number;
   alive: boolean;
   radius: number;
+  shieldHits?: number;
 }
 
 export interface ReplayProjectileSnapshot {
@@ -136,13 +137,15 @@ export interface ReplayProjectileSnapshot {
 
 export interface ReplayEvent {
   frame: number;
-  type: 'fire' | 'hit' | 'kill';
+  type: 'fire' | 'hit' | 'kill' | 'shield-break';
   pos: Vec2;
   angle: number;
   damage: number;
   flanked: boolean;
   team: Team;
   targetId?: string;
+  /** Shield direction at the moment its final frontal hit was absorbed. */
+  facingAngle?: number;
 }
 
 export interface ReplayFlagSnapshot {

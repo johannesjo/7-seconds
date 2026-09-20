@@ -381,7 +381,23 @@ export class Renderer {
       }
 
       // Rotate gun barrel
-      (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
+      const nose = container.getChildAt(1) as Graphics;
+      nose.rotation = unit.gunAngle;
+      if (unit.type === 'shielder') {
+        // Keep the facing arc in sync with live and replay shield condition.
+        nose.clear();
+        const integrity = Math.max(0, 1 - (unit.shieldHits ?? 0) / SHIELD_MAX_HITS);
+        if (integrity > 0) {
+          const radius = unit.radius * 1.6;
+          const halfCone = Math.PI / 3;
+          nose.moveTo(Math.cos(-halfCone) * radius, Math.sin(-halfCone) * radius);
+          nose.arc(0, 0, radius, -halfCone, halfCone);
+          nose.stroke({ width: 3, color: this.theme.shieldGold, alpha: 0.9 * integrity });
+          nose.moveTo(Math.cos(-halfCone) * (radius - 1.5), Math.sin(-halfCone) * (radius - 1.5));
+          nose.arc(0, 0, radius - 1.5, -halfCone, halfCone);
+          nose.stroke({ width: 1.5, color: this.theme.shieldGoldBright, alpha: 0.4 * integrity });
+        }
+      }
       // Rotate body with the gun for person-shaped units
       if (unit.type === 'soldier' || unit.type === 'sniper' || unit.type === 'zombie' || unit.type === 'shielder' || unit.type === 'bomber') {
         (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
@@ -474,16 +490,6 @@ export class Renderer {
       // Wider ellipse body in team color
       shape.ellipse(0, 0, unit.radius * 1.4, unit.radius * 0.9);
       shape.fill(color);
-      // Golden shield arc on front (120° cone) — fades as shield takes hits
-      const shieldIntegrity = 1 - (unit.shieldHits ?? 0) / SHIELD_MAX_HITS;
-      const arcRadius = unit.radius * 1.6;
-      if (shieldIntegrity > 0) {
-        shape.arc(0, 0, arcRadius, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3);
-        shape.stroke({ width: 3, color: this.theme.shieldGold, alpha: 0.9 * shieldIntegrity });
-        // Inner shield glow
-        shape.arc(0, 0, arcRadius - 1.5, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3);
-        shape.stroke({ width: 1.5, color: this.theme.shieldGoldBright, alpha: 0.4 * shieldIntegrity });
-      }
     } else if (unit.type === 'bomber') {
       // Pulsing circle — pulse speed increases as HP drops
       const hpRatio = unit.hp / unit.maxHp;

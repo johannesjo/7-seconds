@@ -1,7 +1,7 @@
 import { Graphics, Container, Text } from 'pixi.js';
 import { Vec2, Team, ReplayEvent } from './types';
 import { Theme, NIGHT_THEME } from './theme';
-import { FLANK_DAMAGE_MULTIPLIER } from './constants';
+import { FLANK_DAMAGE_MULTIPLIER, MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 interface Effect {
   update(dt: number): boolean; // false = expired
@@ -122,6 +122,126 @@ class KillText implements Effect {
     const t = this.age / this.duration;
     this.text.y = this.startY - t * 30;
     this.text.alpha = 1 - t;
+    return true;
+  }
+}
+
+/** Small directional marks keep the cue beside the unit rather than over it. */
+class CombatCue implements Effect {
+  private gfx = new Graphics();
+  private label: Text;
+  private age = 0;
+  private readonly duration = 0.65;
+
+  constructor(
+    container: Container,
+    private pos: Vec2,
+    private angle: number,
+    private kind: 'flank' | 'shield-break',
+    private color: number,
+    labelColor: string,
+    outline: number,
+  ) {
+    this.label = new Text({
+      text: kind === 'flank' ? 'FLANK' : 'SHIELD BREAK',
+      style: {
+        fontSize: 11,
+        fontFamily: 'monospace',
+        fontWeight: 'bold',
+        letterSpacing: 0.5,
+        fill: labelColor,
+        stroke: { color: outline, width: 3 },
+      },
+    });
+    this.label.anchor.set(0.5);
+    container.addChild(this.gfx, this.label);
+    this.draw();
+  }
+
+  private draw(): void {
+    const t = this.age / this.duration;
+    const alpha = 1 - t;
+    this.gfx.clear();
+    if (this.kind === 'flank') {
+      // A chevron advances along the projectile's path toward the impact.
+      const forward = { x: Math.cos(this.angle), y: Math.sin(this.angle) };
+      const side = { x: -forward.y, y: forward.x };
+      const tip = 16 - t * 5;
+      const tail = tip + 10;
+      for (const sign of [-1, 1]) {
+        this.gfx.moveTo(this.pos.x - forward.x * tail + side.x * sign * 7,
+          this.pos.y - forward.y * tail + side.y * sign * 7);
+        this.gfx.lineTo(this.pos.x - forward.x * tip, this.pos.y - forward.y * tip);
+        this.gfx.stroke({ width: 2.5, color: this.color, alpha });
+      }
+    } else {
+      // Three broken shield segments fly outward from the unit's facing arc.
+      for (const offset of [-0.56, 0, 0.56]) {
+        const center = this.angle + offset;
+        const radius = 18 + t * 15;
+        this.gfx.moveTo(this.pos.x + Math.cos(center - 0.19) * radius,
+          this.pos.y + Math.sin(center - 0.19) * radius);
+        this.gfx.arc(this.pos.x, this.pos.y, radius, center - 0.19, center + 0.19);
+        this.gfx.stroke({ width: 3.5 - t * 1.5, color: this.color, alpha });
+        const rayStart = radius + 3;
+        const rayEnd = rayStart + 5 + t * 5;
+        this.gfx.moveTo(this.pos.x + Math.cos(center) * rayStart,
+          this.pos.y + Math.sin(center) * rayStart);
+        this.gfx.lineTo(this.pos.x + Math.cos(center) * rayEnd,
+          this.pos.y + Math.sin(center) * rayEnd);
+        this.gfx.stroke({ width: 1.5, color: this.color, alpha: alpha * 0.8 });
+      }
+    }
+    const margin = this.label.width / 2 + 4;
+    this.label.x = Math.max(margin, Math.min(MAP_WIDTH - margin, this.pos.x));
+    const above = this.pos.y - (this.kind === 'shield-break' ? 46 : 31) - t * 12;
+    this.label.y = above >= 12 ? above : Math.min(MAP_HEIGHT - 12, this.pos.y + 36 + t * 12);
+    this.label.alpha = alpha;
+  }
+
+  update(dt: number): boolean {
+    this.age += dt;
+    if (this.age >= this.duration) {
+      this.gfx.destroy();
+      this.label.destroy();
+      return false;
+    }
+    this.draw();
+    return true;
+  }
+}
+
+/** Replay-only focus around a decisive kill; leaves the unit center clear. */
+class KillFocus implements Effect {
+  private gfx = new Graphics();
+  private age = 0;
+  private readonly duration = 0.55;
+
+  constructor(container: Container, private pos: Vec2, private color: number) {
+    container.addChild(this.gfx);
+    this.draw();
+  }
+
+  private draw(): void {
+    const t = this.age / this.duration;
+    const radius = 19 + t * 12;
+    this.gfx.clear();
+    for (let i = 0; i < 4; i++) {
+      const angle = i * Math.PI / 2 + Math.PI / 4;
+      this.gfx.moveTo(this.pos.x + Math.cos(angle - 0.22) * radius,
+        this.pos.y + Math.sin(angle - 0.22) * radius);
+      this.gfx.arc(this.pos.x, this.pos.y, radius, angle - 0.22, angle + 0.22);
+      this.gfx.stroke({ width: 2, color: this.color, alpha: 0.9 * (1 - t) });
+    }
+  }
+
+  update(dt: number): boolean {
+    this.age += dt;
+    if (this.age >= this.duration) {
+      this.gfx.destroy();
+      return false;
+    }
+    this.draw();
     return true;
   }
 }
@@ -344,6 +464,8 @@ export class EffectsManager {
   private groundStains: Graphics;
   private effects: Effect[] = [];
   private theme: Theme = NIGHT_THEME;
+  private cueTime = 0;
+  private flankCueTimes = new Map<string, number>();
 
   constructor(stage: Container) {
     this.groundStains = new Graphics();
@@ -373,6 +495,21 @@ export class EffectsManager {
   addKillText(pos: Vec2, team: Team): void {
     const color = team === 'blue' ? this.theme.blueKill : this.theme.redKill;
     this.effects.push(new KillText(this.container, pos, color));
+  }
+
+  addFlankCue(pos: Vec2, projectileAngle: number, targetId?: string): void {
+    if (targetId) {
+      const last = this.flankCueTimes.get(targetId);
+      if (last !== undefined && this.cueTime - last < 0.7) return;
+      this.flankCueTimes.set(targetId, this.cueTime);
+    }
+    this.effects.push(new CombatCue(this.container, pos, projectileAngle, 'flank',
+      this.theme.flankCue, this.theme.flankCueText, this.theme.bg));
+  }
+
+  addShieldBreakCue(pos: Vec2, facingAngle: number): void {
+    this.effects.push(new CombatCue(this.container, pos, facingAngle, 'shield-break',
+      this.theme.shieldBreakCue, this.theme.shieldBreakText, this.theme.bg));
   }
 
   addMuzzleFlash(pos: Vec2, angle: number, radius: number): void {
@@ -446,6 +583,7 @@ export class EffectsManager {
   }
 
   update(dt: number): void {
+    this.cueTime += dt;
     this.effects = this.effects.filter(e => e.update(dt));
   }
 
@@ -453,6 +591,8 @@ export class EffectsManager {
     this.container.removeChildren();
     this.groundStains.clear();
     this.effects = [];
+    this.cueTime = 0;
+    this.flankCueTimes.clear();
   }
 
   destroy(): void {
@@ -462,7 +602,7 @@ export class EffectsManager {
   }
 
   /** Dispatch visual effects for replay/online frame events. */
-  dispatchEvents(events: ReplayEvent[]): void {
+  dispatchEvents(events: ReplayEvent[], highlightDecisiveHits = false): void {
     for (const event of events) {
       if (event.type === 'fire') {
         this.addMuzzleFlash(event.pos, event.angle, 6);
@@ -471,12 +611,20 @@ export class EffectsManager {
         const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
         this.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
         this.addImpactBurst(event.pos, event.team);
+        if (event.flanked) this.addFlankCue(event.pos, event.angle, event.targetId);
       } else if (event.type === 'kill') {
         const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
         const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
         this.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
         this.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
         this.addKillText(event.pos, event.team);
+        if (event.flanked) this.addFlankCue(event.pos, event.angle, event.targetId);
+        if (highlightDecisiveHits) {
+          this.effects.push(new KillFocus(this.container, event.pos,
+            victimTeam === 'blue' ? this.theme.blue : this.theme.red));
+        }
+      } else if (event.type === 'shield-break') {
+        this.addShieldBreakCue(event.pos, event.facingAngle ?? event.angle + Math.PI);
       }
     }
   }

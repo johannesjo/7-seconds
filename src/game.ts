@@ -56,6 +56,8 @@ export class GameEngine {
   private rng: () => number = Math.random;
   private seed = 0;
   private lockstepMode = false;
+  private practice?: { units: Unit[]; elevationZones: ElevationZone[] };
+  private initialState?: OnlineGameState;
 
   constructor(renderer: Renderer | null, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
@@ -68,6 +70,8 @@ export class GameEngine {
     onlineHost?: boolean;
     onPhaseChange?: (phase: TurnPhase) => void;
     seed?: number;
+    practice?: { units: Unit[]; elevationZones: ElevationZone[] };
+    initialState?: OnlineGameState;
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -79,6 +83,8 @@ export class GameEngine {
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.onlineHostMode = opts?.onlineHost ?? false;
+    this.practice = opts?.practice;
+    this.initialState = opts?.initialState;
 
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
@@ -101,7 +107,13 @@ export class GameEngine {
   startBattle(): void {
 
     // Load map before spawning units so we can avoid placing them inside blocks
-    if (this.ctfMode) {
+    if (this.initialState) {
+      this.loadOnlineGameState(this.initialState);
+    } else if (this.practice) {
+      this.obstacles = [];
+      this.elevationZones = this.practice.elevationZones;
+      this.units = this.practice.units;
+    } else if (this.ctfMode) {
       this.obstacles = generateCtfObstacles();
       this.elevationZones = generateCtfElevationZones();
       this.units = [...createCtfArmy('blue', this.obstacles), ...createCtfArmy('red', this.obstacles)];
@@ -116,7 +128,7 @@ export class GameEngine {
 
     const allBlocks = this.obstacles;
 
-    if (!this.ctfMode) {
+    if (!this.ctfMode && !this.practice && !this.initialState) {
       if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
         // Horde mode: use pre-created blue units + spawn wave enemies
         const redUnits = createMissionArmy('red', this.hordeRedArmy, allBlocks);
@@ -159,6 +171,11 @@ export class GameEngine {
   /** Called by the UI "Done" button to end the current planning phase. */
   confirmPlan(): void {
     if (this._phase === 'blue-planning') {
+      // Practice opponents hold position while the player tries a tactic.
+      if (this.practice) {
+        this.setPhase('playing');
+        return;
+      }
       this.setPhase('cover');
       // In AI mode, setPhase('cover') already transitions to playing
       if (!this.aiMode) {
@@ -456,8 +473,18 @@ export class GameEngine {
 
   /** Update projectile positions and resolve collisions. Returns hit results. */
   private updateProjectiles(dt: number): ReturnType<typeof updateProjectiles>['hits'] {
-    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
+    const { alive: aliveProjectiles, hits, shieldBreaks } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
     this.projectiles = aliveProjectiles;
+    for (const shieldBreak of shieldBreaks) {
+      this.replayEvents.push({
+        ...shieldBreak,
+        frame: this.replayFrames.length,
+        type: 'shield-break',
+        damage: 0,
+        flanked: false,
+      });
+      this.renderer?.effects?.addShieldBreakCue(shieldBreak.pos, shieldBreak.facingAngle);
+    }
     return hits;
   }
 
@@ -467,6 +494,7 @@ export class GameEngine {
     for (const hit of hits) {
       const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
+      if (hit.flanked) fx?.addFlankCue(hit.pos, hit.angle, hit.targetId);
 
       this.replayEvents.push({
         frame: this.replayFrames.length,
@@ -606,6 +634,7 @@ export class GameEngine {
         maxHp: u.maxHp,
         alive: u.alive,
         radius: u.radius,
+        shieldHits: u.shieldHits,
       })),
       projectiles: this.projectiles.map(p => ({
         x: p.pos.x,

@@ -1,4 +1,4 @@
-import { Renderer } from './renderer';
+import type { Renderer } from './renderer';
 import { ReplayData, CtfState } from './types';
 import { snapshotToUnit, snapshotToProjectile } from './units';
 
@@ -24,6 +24,7 @@ export class ReplayPlayer {
   }
 
   start(): void {
+    this.renderer.clearDyingUnits();
     this.renderer.renderElevationZones(this.data.elevationZones);
     this.renderer.renderObstacles(this.data.obstacles);
     if (this.data.ctfMode) {
@@ -54,14 +55,14 @@ export class ReplayPlayer {
       this.triggerEvents(this.frameIndex);
     }
 
-    this.renderFrame(this.frameIndex);
+    this.renderFrame(this.frameIndex, dt);
 
     const time = this.frameIndex / this.fps;
     const duration = this.data.frames.length / this.fps;
     this.onEvent('frame', { time, duration });
 
     // Update effects
-    this.renderer.effects?.update(ticker.deltaMS / 1000);
+    this.renderer.effects?.update(dt);
 
     if (this.frameIndex >= this.data.frames.length - 1) {
       this.onEvent('end', { time: duration, duration });
@@ -69,14 +70,12 @@ export class ReplayPlayer {
     }
   }
 
-  private renderFrame(index: number): void {
+  private renderFrame(index: number, dt = 0): void {
     const frame = this.data.frames[index];
     if (!frame) return;
 
     const units = frame.units.map(snapshotToUnit);
     const projectiles = frame.projectiles.map(snapshotToProjectile);
-
-    const dt = 1 / this.fps;
 
     // Reconstruct CTF state for rendering if flag data exists
     if (frame.blueFlag && frame.redFlag) {
@@ -110,7 +109,7 @@ export class ReplayPlayer {
     const fx = this.renderer.effects;
     if (!fx) return;
     const frameEvents = this.data.events.filter(e => e.frame === frameIndex);
-    fx.dispatchEvents(frameEvents);
+    fx.dispatchEvents(frameEvents, true);
   }
 
   pause(): void {
@@ -138,7 +137,9 @@ export class ReplayPlayer {
     this.accumulator = 0;
     this.paused = false;
     this.renderer.effects?.clear();
+    this.renderer.clearDyingUnits();
     this.renderFrame(0);
+    this.triggerEvents(0);
   }
 
   stop(): void {

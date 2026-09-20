@@ -49,3 +49,64 @@ describe('chase AI is AI-only', () => {
     expect(shielder.pos.y).toBeGreaterThan(160); // chased the enemy downward
   });
 });
+
+describe('retry an AI encounter', () => {
+  it('restores the original armies and terrain without mutating the saved encounter', () => {
+    const original = GameEngine.generateInitialState();
+    const saved = structuredClone(original);
+    const first = new GameEngine(null, () => {}, { aiMode: true, seed: 42, initialState: saved });
+    first.startBattle();
+    expect(first.getOnlineGameState()).toEqual(original);
+    const blue = first.getUnits().find(unit => unit.team === 'blue')!;
+    first.setBluePaths([{ unitId: blue.id, waypoints: [{ x: blue.pos.x + 80, y: blue.pos.y - 80 }] }]);
+    first.confirmPlan();
+    for (let tick = 0; tick < 60; tick++) first.externalTick(1000 / 60);
+    expect(first.getOnlineGameState()).not.toEqual(original);
+    expect(saved).toEqual(original);
+    first.stop();
+
+    const retry = new GameEngine(null, () => {}, { aiMode: true, seed: 42, initialState: saved });
+    retry.startBattle();
+    expect(retry.phase).toBe('blue-planning');
+    expect(retry.getOnlineGameState()).toEqual(original);
+    expect(retry.getUnits().every(unit => unit.waypoints.length === 0)).toBe(true);
+    expect(retry.getRoundSeed()).toBe(first.getRoundSeed());
+    retry.stop();
+  });
+
+  it('repeats the same result for the same plan and seed', () => {
+    const saved = GameEngine.generateInitialState();
+    const play = () => {
+      const engine = new GameEngine(null, () => {}, { aiMode: true, seed: 42, initialState: saved });
+      engine.startBattle();
+      engine.confirmPlan();
+      for (let tick = 0; tick < 120; tick++) engine.externalTick(1000 / 60);
+      const result = engine.getOnlineGameState();
+      engine.stop();
+      return result;
+    };
+    expect(play()).toEqual(play());
+  });
+});
+
+it('records a shield break and the broken shield in the same replay frame', async () => {
+  const { createUnit, snapshotToUnit } = await import('./units');
+  const blue = createUnit('blue_soldier', 'soldier', 'blue', { x: 300, y: 360 });
+  const shield = createUnit('red_shielder', 'shielder', 'red', { x: 300, y: 300 });
+  shield.shieldHits = 6;
+  const engine = new GameEngine(null, () => {}, {
+    practice: { units: [blue, shield], elevationZones: [] }, seed: 1,
+  });
+  engine.startBattle();
+  engine.confirmPlan();
+  for (let tick = 0; tick < 30; tick++) engine.externalTick(1000 / 60);
+  const replay = engine.getReplayData()!;
+  const event = replay.events.find(event => event.type === 'shield-break')!;
+  expect(event).toMatchObject({ targetId: shield.id, damage: 0, flanked: false, facingAngle: Math.PI / 2 });
+  const frame = replay.frames[event.frame].units.find(unit => unit.id === shield.id)!;
+  expect(frame.shieldHits).toBe(7);
+  expect(frame.hp).toBe(shield.maxHp);
+  expect(snapshotToUnit(frame).shieldHits).toBe(7);
+  expect(replay.events.some(event => event.targetId === shield.id && event.type === 'hit')).toBe(false);
+  engine.stop();
+});

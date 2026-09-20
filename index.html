@@ -132,6 +132,15 @@
       cursor: pointer;
     }
     #battle-btn:hover, #ai-btn:hover, #online-async-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
+    #tutorial-btn {
+      padding: 10px 24px;
+      font: inherit;
+      color: var(--color-text);
+      background: var(--color-btn-bg);
+      border: 1px solid var(--color-btn-border);
+      border-radius: 4px;
+      cursor: pointer;
+    }
     .beta-tag { font-size: 10px; vertical-align: super; opacity: 0.6; letter-spacing: 1px; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -233,6 +242,25 @@
     }
     #confirm-btn.active { display: block; }
     #confirm-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); opacity: 1; }
+    #planning-overlay.tutorial { width: min(460px, calc(100% - 32px)); text-align: center; }
+    #planning-overlay.tutorial #planning-label { font-size: 18px; letter-spacing: 1px; }
+    #planning-overlay.tutorial #planning-instructions { display: block; opacity: 1; line-height: 1.5; }
+    #skip-tutorial-btn { display: none; }
+    #planning-overlay.tutorial.active ~ #skip-tutorial-btn {
+      display: block;
+      position: fixed;
+      bottom: calc(4px + var(--sab));
+      left: 8px;
+      z-index: 12;
+      border: 0;
+      background: var(--color-bg);
+      color: var(--color-text);
+      padding: 6px 8px;
+      min-height: 28px;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    #result-stats { max-width: 480px; text-align: center; line-height: 1.5; }
 
     /* Cover screen */
     #cover-screen {
@@ -514,6 +542,7 @@
     <p>Draw paths for your units, then watch them fight. Blue plans first, then Red.</p>
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
       <button id="ai-btn">vs AI</button>
+      <button id="tutorial-btn">Learn to play</button>
       <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-horde-bg);color:var(--color-btn-horde-text);border:2px solid var(--color-btn-horde-border);border-radius:4px;cursor:pointer">Horde</button>
       <button id="online-async-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Friend</button>
       <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Stranger <span class="beta-tag">BETA</span></button>
@@ -563,11 +592,12 @@
       <span id="planning-instructions">Click a unit, drag to draw a path. Repeat for each unit.</span>
     </div>
     <button id="confirm-btn">Done</button>
+    <button id="skip-tutorial-btn">Back to menu</button>
 
     <div id="replay-overlay">
       <button id="replay-restart-btn" title="Restart">&#x23EE;</button>
       <button id="replay-pause-btn" title="Pause">&#x23F8;</button>
-      <button id="replay-speed-toggle">3x</button>
+      <button id="replay-speed-toggle" data-speed="1" title="Change replay speed: 1×, 0.5×, 3×">1×</button>
       <span id="replay-progress">0.0s / 0.0s</span>
       <button id="replay-exit-btn" title="Exit">&#x2715;</button>
     </div>
@@ -621,6 +651,7 @@
     <h2 id="winner-text">Blue Wins!</h2>
     <div class="stats" id="result-stats"></div>
     <div class="buttons" style="flex-direction:column;align-items:center">
+      <button id="retry-encounter-btn" style="display:none" title="Retry the same map and armies from round 1">Try another plan</button>
       <button id="rematch-btn" style="font-weight:bold;letter-spacing:2px;text-transform:uppercase">Rematch</button>
       <button id="new-battle-btn" style="opacity:0.7">Back</button>
       <button id="replay-btn" style="display:none;background:transparent;border:1px solid var(--color-btn-border);color:inherit;padding:6px 20px;font-size:13px;border-radius:4px;cursor:pointer;opacity:0.5">Watch Replay</button>

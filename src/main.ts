@@ -19,6 +19,7 @@ import { OnlineGameState } from './online-types';
 import { PathDrawer } from './path-drawer';
 import { recordMatchResultOnce, getOverallScore } from './online-score';
 import { requestNotificationPermission, notify } from './notify';
+import { createTutorialEncounter, TUTORIAL_LESSONS, tutorialObjectiveMet } from './tutorial';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -27,6 +28,7 @@ const resultScreen = document.getElementById('result-screen')!;
 
 const battleBtn = document.getElementById('battle-btn')!;
 const aiBtn = document.getElementById('ai-btn')!;
+const tutorialBtn = document.getElementById('tutorial-btn')!;
 const hordeBtn = document.getElementById('horde-btn')!;
 
 const battleHud = document.getElementById('battle-hud')!;
@@ -38,6 +40,8 @@ const speedToggle = document.getElementById('speed-toggle') as HTMLButtonElement
 const planningOverlay = document.getElementById('planning-overlay')!;
 const planningLabel = document.getElementById('planning-label')!;
 const confirmBtn = document.getElementById('confirm-btn')!;
+const planningInstructions = document.getElementById('planning-instructions')!;
+const skipTutorialBtn = document.getElementById('skip-tutorial-btn')!;
 const coverScreen = document.getElementById('cover-screen')!;
 const countInEl = document.getElementById('count-in')!;
 const roundCounterEl = document.getElementById('round-counter')!;
@@ -45,6 +49,7 @@ const roundCounterEl = document.getElementById('round-counter')!;
 const winnerTextEl = document.getElementById('winner-text')!;
 const resultStatsEl = document.getElementById('result-stats')!;
 const rematchBtn = document.getElementById('rematch-btn')!;
+const retryEncounterBtn = document.getElementById('retry-encounter-btn')!;
 const newBattleBtn = document.getElementById('new-battle-btn')!;
 const replayBtn = document.getElementById('replay-btn')!;
 
@@ -127,6 +132,11 @@ function showToast(message: string): void {
 let renderer: Renderer | null = null;
 let engine: GameEngine | null = null;
 let aiMode = false;
+let tutorialLesson: number | null = null;
+let tutorialPassed = false;
+let tutorialFinished = false;
+let retryEncounter: { state: OnlineGameState; seed: number } | null = null;
+let canRetryEncounter = false;
 
 // Horde state
 let hordeActive = false;
@@ -177,6 +187,7 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
   battleScreen.classList.add('active'); // always visible once initialized
   resultScreen.classList.toggle('active', screen === 'result');
   upgradeScreen.style.display = screen === 'horde-upgrade' ? 'flex' : 'none';
+  retryEncounterBtn.style.display = screen === 'result' && canRetryEncounter ? '' : 'none';
 }
 
 function onPhaseChange(phase: TurnPhase): void {
@@ -192,6 +203,7 @@ function onPhaseChange(phase: TurnPhase): void {
       ? 'var(--color-planning-blue)'
       : 'var(--color-planning-red)';
     planningLabel.textContent = `${team} Planning`;
+    if (tutorialLesson !== null) planningLabel.textContent = TUTORIAL_LESSONS[tutorialLesson].title;
     planningLabel.style.color = color;
     planningOverlay.classList.add('active');
     confirmBtn.classList.add('active');
@@ -205,6 +217,24 @@ function onPhaseChange(phase: TurnPhase): void {
   coverScreen.classList.toggle('active', phase === 'cover' && !hordeActive);
 }
 
+function finishTutorialRound(): void {
+  if (tutorialLesson === null || tutorialFinished) return;
+  tutorialFinished = true;
+  captureReplayData();
+  tutorialPassed = tutorialObjectiveMet(tutorialLesson, engine!.getUnits(), lastReplayData);
+  engine!.stop();
+  onPhaseChange('playing');
+  const lesson = TUTORIAL_LESSONS[tutorialLesson];
+  winnerTextEl.textContent = tutorialPassed ? 'Nicely done!' : 'Try again';
+  winnerTextEl.style.color = 'var(--color-result-blue)';
+  resultStatsEl.textContent = tutorialPassed ? lesson.success : lesson.retry;
+  rematchBtn.textContent = !tutorialPassed ? 'Retry lesson'
+    : tutorialLesson === TUTORIAL_LESSONS.length - 1 ? 'Play vs AI' : 'Next lesson';
+  replayBtn.style.display = lastReplayData ? '' : 'none';
+  returnToScreen = 'result';
+  showScreen('result');
+}
+
 function captureReplayData(): void {
   lastReplayData = engine?.getReplayData() ?? null;
 }
@@ -213,6 +243,11 @@ function onGameEvent(
   event: 'update' | 'end' | 'phase-change' | 'wave-clear',
   data?: BattleResult | { phase: TurnPhase; timeLeft?: number; round?: number },
 ) {
+  if (tutorialLesson !== null && (event === 'end' || (event === 'phase-change'
+    && data && 'phase' in data && data.phase === 'blue-planning' && (data.round ?? 1) > 1))) {
+    finishTutorialRound();
+    return;
+  }
   if (event === 'phase-change' && data && 'phase' in data) {
     onPhaseChange(data.phase);
     if (data.round !== undefined) {
@@ -304,6 +339,7 @@ function onGameEvent(
 
     const color = result.winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
     winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
+    canRetryEncounter = aiMode && result.winner === 'red' && retryEncounter !== null;
     winnerTextEl.style.color = color;
 
     const blueTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
@@ -316,7 +352,7 @@ function onGameEvent(
     ];
     resultStatsEl.innerHTML = statsLines.join('<br>');
 
-    rematchBtn.textContent = 'Rematch';
+    rematchBtn.textContent = aiMode ? 'New encounter' : 'Rematch';
     rematchBtn.style.opacity = '1';
     rematchBtn.style.display = '';
     newBattleBtn.textContent = 'Back';
@@ -342,20 +378,34 @@ function showPreview(): void {
   renderer.renderUnits(preview);
 }
 
-function startGame(): void {
+function startGame(retry = false): void {
+  const encounter = retry ? retryEncounter : null;
+  canRetryEncounter = false;
   lastReplayData = null;
   engine?.stop();
   document.body.classList.toggle('day-mode', dayModeCb.checked);
   renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
   engine = new GameEngine(renderer!, onGameEvent, {
-    aiMode,
+    aiMode: tutorialLesson === null && aiMode,
+    practice: tutorialLesson === null ? undefined : createTutorialEncounter(tutorialLesson),
+    initialState: encounter?.state,
+    seed: encounter?.seed,
   });
+  tutorialFinished = false;
+  planningOverlay.classList.toggle('tutorial', tutorialLesson !== null);
+  planningInstructions.textContent = tutorialLesson === null
+    ? 'Click a unit, drag to draw a path. Repeat for each unit.'
+    : TUTORIAL_LESSONS[tutorialLesson].instruction;
+  confirmBtn.textContent = tutorialLesson === null ? 'Done' : 'Fight';
+  rematchBtn.textContent = 'Rematch';
   showScreen('battle');
   speedToggle.classList.remove('active');
   speedToggle.dataset.speed = '1';
   speedToggle.textContent = '3x';
   roundCounterEl.textContent = 'Round 1';
   engine.startBattle();
+  retryEncounter = tutorialLesson === null && aiMode
+    ? { state: structuredClone(engine.getOnlineGameState()), seed: engine.getSeed() } : null;
 }
 
 function startCtfGame(): void {
@@ -390,7 +440,8 @@ function startReplay(data: ReplayData): void {
   showScreen('battle');
   replayOverlay.classList.add('active');
   replayPauseBtn.textContent = '\u23F8';
-  replaySpeedToggle.textContent = '3x';
+  replaySpeedToggle.textContent = '1×';
+  replaySpeedToggle.dataset.speed = '1';
   replaySpeedToggle.classList.remove('active');
 
   replayPlayer = new ReplayPlayer(renderer!, data, (event, eventData) => {
@@ -541,6 +592,14 @@ aiBtn.addEventListener('click', async () => {
   startGame();
 });
 
+tutorialBtn.addEventListener('click', async () => {
+  await initRenderer();
+  tutorialLesson = 0;
+  startGame();
+});
+
+skipTutorialBtn.addEventListener('click', () => newBattleBtn.click());
+
 hordeBtn.addEventListener('click', async () => {
   await initRenderer();
   startHorde();
@@ -590,6 +649,15 @@ speedToggle.addEventListener('click', () => {
 
 rematchBtn.addEventListener('click', async () => {
   await initRenderer();
+  if (tutorialLesson !== null) {
+    if (tutorialPassed) tutorialLesson++;
+    if (tutorialLesson === TUTORIAL_LESSONS.length) {
+      tutorialLesson = null;
+      aiMode = true;
+    }
+    startGame();
+    return;
+  }
   if (ctfActive) {
     startCtfGame();
   } else if (hordeActive) {
@@ -597,6 +665,10 @@ rematchBtn.addEventListener('click', async () => {
   } else {
     startGame();
   }
+});
+
+retryEncounterBtn.addEventListener('click', () => {
+  if (canRetryEncounter && retryEncounter) startGame(true);
 });
 
 newBattleBtn.addEventListener('click', () => {
@@ -608,6 +680,13 @@ newBattleBtn.addEventListener('click', () => {
   coverScreen.classList.remove('active');
   roundTimerEl.textContent = '';
   lastReplayData = null;
+  tutorialLesson = null;
+  retryEncounter = null;
+  canRetryEncounter = false;
+  planningOverlay.classList.remove('tutorial');
+  planningInstructions.textContent = 'Click a unit, drag to draw a path. Repeat for each unit.';
+  confirmBtn.textContent = 'Done';
+  rematchBtn.textContent = 'Rematch';
 
   // Reset online state
   destroyAsync();
@@ -671,10 +750,13 @@ replayExitBtn.addEventListener('click', () => {
 });
 
 replaySpeedToggle.addEventListener('click', () => {
-  const isActive = replaySpeedToggle.classList.toggle('active');
-  const speed = isActive ? 3 : 1;
+  const speeds = [1, 0.5, 3];
+  const current = Number(replaySpeedToggle.dataset.speed);
+  const speed = speeds[(speeds.indexOf(current) + 1) % speeds.length];
+  replaySpeedToggle.dataset.speed = String(speed);
+  replaySpeedToggle.classList.toggle('active', speed !== 1);
   replayPlayer?.setSpeed(speed);
-  replaySpeedToggle.textContent = isActive ? '1x' : '3x';
+  replaySpeedToggle.textContent = `${speed}×`;
 });
 
 /** Tear down the headless playback engine used to animate a resolved async

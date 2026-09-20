@@ -29,6 +29,10 @@ export interface Theme {
   redImpact: number;
   blueKill: string;
   redKill: string;
+  flankCue: number;
+  flankCueText: string;
+  shieldBreakCue: number;
+  shieldBreakText: string;
 
   // Blood colors
   blueBlood: number[];
@@ -105,6 +109,10 @@ export const NIGHT_THEME: Theme = {
   redImpact: 0xff8888,
   blueKill: '#88ccff',
   redKill: '#ff8888',
+  flankCue: 0xffa8dc,
+  flankCueText: '#ffe0f2',
+  shieldBreakCue: 0xffdd66,
+  shieldBreakText: '#ffe08a',
 
   blueBlood: [0x3377dd, 0x2255bb, 0x5599ee],
   redBlood: [0xdd3333, 0xbb2222, 0xee4444],
@@ -173,6 +181,10 @@ export const DAY_THEME: Theme = {
   redImpact: 0xcc5555,
   blueKill: '#336699',
   redKill: '#994444',
+  flankCue: 0x9a326b,
+  flankCueText: '#76214f',
+  shieldBreakCue: 0x9a6a10,
+  shieldBreakText: '#765000',
 
   blueBlood: [0x3388dd, 0x2266bb, 0x55aaee],
   redBlood: [0xcc4433, 0xaa2222, 0xdd6644],

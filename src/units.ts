@@ -11,6 +11,15 @@ interface ProjectileHit {
   flanked: boolean;
 }
 
+/** The final absorbed frontal hit. This is not a damage or kill result. */
+export interface ShieldBreak {
+  pos: Vec2;
+  targetId: string;
+  team: Team;
+  angle: number;
+  facingAngle: number;
+}
+
 /** Check if line segment from a to b intersects rect expanded by padding (slab method). */
 export function segmentHitsRect(a: Vec2, b: Vec2, rect: Obstacle, padding: number): boolean {
   const left = rect.x - padding;
@@ -985,9 +994,10 @@ export function updateProjectiles(
   units: Unit[],
   dt: number,
   obstacles: Obstacle[] = [],
-): { alive: Projectile[]; hits: ProjectileHit[] } {
+): { alive: Projectile[]; hits: ProjectileHit[]; shieldBreaks: ShieldBreak[] } {
   const alive: Projectile[] = [];
   const hits: ProjectileHit[] = [];
+  const shieldBreaks: ShieldBreak[] = [];
 
   for (const p of projectiles) {
     // Move projectile
@@ -1026,6 +1036,15 @@ export function updateProjectiles(
         if (unit.type === 'shielder' && (unit.shieldHits ?? 0) < SHIELD_MAX_HITS) {
           if (!isFlanked(projAngle, unit.gunAngle)) {
             unit.shieldHits = (unit.shieldHits ?? 0) + 1;
+            if (unit.shieldHits === SHIELD_MAX_HITS) {
+              shieldBreaks.push({
+                pos: { x: unit.pos.x, y: unit.pos.y },
+                targetId: unit.id,
+                team: p.team,
+                angle: projAngle,
+                facingAngle: unit.gunAngle,
+              });
+            }
             // Shield absorbs — destroy projectile
             if (!p.piercing) {
               consumed = true;
@@ -1074,7 +1093,7 @@ export function updateProjectiles(
     if (!consumed) alive.push(p);
   }
 
-  return { alive, hits };
+  return { alive, hits, shieldBreaks };
 }
 
 /** Convert a replay unit snapshot to a Unit object for rendering. */
@@ -1090,6 +1109,7 @@ export function snapshotToUnit(s: ReplayUnitSnapshot): Unit {
     maxHp: s.maxHp,
     alive: s.alive,
     radius: s.radius,
+    shieldHits: s.shieldHits,
     speed: 0,
     damage: 0,
     range: 0,

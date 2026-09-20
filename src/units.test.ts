@@ -595,11 +595,61 @@ describe('shielder', () => {
       distanceTraveled: 0,
     };
 
-    const { alive, hits } = updateProjectiles([proj], [shielder], 0.016);
+    const { alive, hits, shieldBreaks } = updateProjectiles([proj], [shielder], 0.016);
     // Shield absorbs projectile — no damage, projectile consumed
     expect(hits).toHaveLength(0);
+    expect(shieldBreaks).toHaveLength(0);
     expect(alive).toHaveLength(0); // projectile destroyed by shield
     expect(shielder.hp).toBe(40); // no damage taken
+  });
+
+  it('reports only the seventh absorbed frontal hit as a shield break', () => {
+    const shielder = createUnit('sh1', 'shielder', 'red', { x: 200, y: 100 });
+    shielder.gunAngle = 0;
+    const frontalProjectile = () => ({
+      pos: { x: 210, y: 100 }, vel: { x: -300, y: 0 },
+      target: { x: 200, y: 100 }, damage: 10, radius: 5,
+      team: 'blue' as const, maxRange: 500, distanceTraveled: 0,
+    });
+
+    for (let i = 1; i <= 7; i++) {
+      const { alive, hits, shieldBreaks } = updateProjectiles([frontalProjectile()], [shielder], 0.016);
+      expect(alive).toHaveLength(0);
+      expect(hits).toHaveLength(0);
+      expect(shieldBreaks).toHaveLength(i === 7 ? 1 : 0);
+      expect(shielder.hp).toBe(40);
+      if (i === 7) {
+        expect(shieldBreaks[0]).toMatchObject({
+          pos: { x: 200, y: 100 }, targetId: 'sh1', team: 'blue',
+          angle: Math.PI, facingAngle: 0,
+        });
+      }
+    }
+    expect(shielder.shieldHits).toBe(7);
+
+    const afterBreak = updateProjectiles([frontalProjectile()], [shielder], 0.016);
+    expect(afterBreak.shieldBreaks).toHaveLength(0);
+    expect(afterBreak.hits).toHaveLength(1);
+    expect(afterBreak.hits[0].flanked).toBe(false);
+    expect(shielder.hp).toBe(30);
+  });
+
+  it('does not spend shield integrity or break it for a rear hit', () => {
+    const shielder = createUnit('sh1', 'shielder', 'red', { x: 200, y: 100 });
+    shielder.gunAngle = 0;
+    shielder.shieldHits = 6;
+    const rearProjectile = {
+      pos: { x: 190, y: 100 }, vel: { x: 300, y: 0 },
+      target: { x: 200, y: 100 }, damage: 10, radius: 5,
+      team: 'blue' as const, maxRange: 500, distanceTraveled: 0,
+    };
+
+    const { hits, shieldBreaks } = updateProjectiles([rearProjectile], [shielder], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].flanked).toBe(true);
+    expect(shieldBreaks).toHaveLength(0);
+    expect(shielder.shieldHits).toBe(6);
+    expect(shielder.hp).toBe(25);
   });
 
   it('takes damage from flanking projectiles', () => {
