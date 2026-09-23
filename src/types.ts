@@ -1,4 +1,4 @@
-export type UnitType = 'soldier' | 'blade' | 'sniper' | 'zombie' | 'shielder' | 'bomber';
+export type UnitType = 'soldier' | 'blade' | 'sniper' | 'zombie' | 'shielder' | 'bomber' | 'mortar' | 'rocketeer';
 export type Team = 'blue' | 'red';
 export type TurnPhase = 'blue-planning' | 'cover' | 'red-planning' | 'playing';
 
@@ -43,6 +43,10 @@ export interface Unit {
   attackTargetId: string | null;
   /** Seconds left on the current hold order (see Waypoint.wait). */
   holdTimer?: number;
+  /** Rocketeer only: the drawn flight path of this round's rocket. It launches
+   *  once the unit reaches the end of its move path. */
+  rocketPath?: Vec2[];
+  rocketFired?: boolean;
   alive: boolean;
   fireCooldown: number;
   fireTimer: number;
@@ -74,6 +78,17 @@ export interface Projectile {
   piercing?: boolean;
   hitIds?: Set<string>;
   knockback?: number;
+  /** Ordnance: area-damage projectiles with their own flight rules.
+   *  shell — mortar round arcing over obstacles to a fixed landing point;
+   *  rocket — follows a player-drawn path, bursts on contact. */
+  kind?: 'shell' | 'rocket';
+  blastRadius?: number;
+  /** Shell: launch point and flight progress. */
+  origin?: Vec2;
+  age?: number;
+  flightTime?: number;
+  /** Rocket: remaining points of its drawn path. */
+  path?: Vec2[];
 }
 
 export interface Obstacle {
@@ -143,11 +158,16 @@ export interface ReplayProjectileSnapshot {
   maxRange: number;
   distanceTraveled: number;
   trail?: Vec2[];
+  kind?: 'shell' | 'rocket';
+  /** Shell landing point and flight progress (0..1). */
+  tx?: number;
+  ty?: number;
+  progress?: number;
 }
 
 export interface ReplayEvent {
   frame: number;
-  type: 'fire' | 'hit' | 'kill' | 'shield-break';
+  type: 'fire' | 'hit' | 'kill' | 'shield-break' | 'explosion';
   pos: Vec2;
   angle: number;
   damage: number;
@@ -156,6 +176,8 @@ export interface ReplayEvent {
   targetId?: string;
   /** Shield direction at the moment its final frontal hit was absorbed. */
   facingAngle?: number;
+  /** Explosion blast radius. */
+  radius?: number;
 }
 
 export interface ReplayFlagSnapshot {

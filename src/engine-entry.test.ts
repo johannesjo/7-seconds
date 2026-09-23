@@ -36,6 +36,21 @@ describe('edge engine bundle', () => {
     expect(bundle.hashPaths(blueOrders)).toBe(src.hashPaths(blueOrders));
   });
 
+  it('resolves mortar shells and drawn rockets exactly like the source', () => {
+    const armed = {
+      ...state,
+      units: [
+        ...state.units,
+        { id: 'b2', type: 'mortar', team: 'blue', x: 150, y: 500, hp: 30, maxHp: 30, radius: 10, speed: 55, range: 320, gunAngle: 0 },
+        { id: 'b3', type: 'rocketeer', team: 'blue', x: 150, y: 100, hp: 35, maxHp: 35, radius: 9, speed: 80, range: 0, gunAngle: 0 },
+      ],
+    } as typeof state;
+    const blueOrders = [{ unitId: 'b3', waypoints: [{ x: 200, y: 120 }], rocketPath: [{ x: 450, y: 150 }, { x: 700, y: 300 }] }];
+    const a = src.resolveRound(structuredClone(armed), blueOrders, red, 7, 360);
+    const b = bundle.resolveRound(structuredClone(armed), blueOrders, red, 7, 360);
+    expect(JSON.stringify(b.endState)).toBe(JSON.stringify(a.endState));
+  });
+
   it('exposes the commit/seed helpers and they agree with the source', () => {
     expect(bundle.hashPaths(blue)).toBe(src.hashPaths(blue));
     expect(bundle.deriveMatchSeed('room1', 11, 22)).toBe(src.deriveMatchSeed('room1', 11, 22));

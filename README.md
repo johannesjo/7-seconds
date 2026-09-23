@@ -35,6 +35,8 @@ Terrain matters: elevation grants range bonuses, obstacles block movement and li
 | Blade | Fast melee attacker |
 | Shielder | Tanky frontline |
 | Bomber | Area damage |
+| Mortar | Lobs shells over cover at where enemies stand; can't hit close targets |
+| Rocketeer | No gun; you draw its rocket's flight path, which launches at the end of its move |
 
 ## Screenshots
 

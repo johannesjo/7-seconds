@@ -123,6 +123,8 @@ const UNIT_ROLES: Record<Unit['type'], string> = {
   shielder: 'Blocks frontal shots. Its sides and rear are exposed.',
   zombie: 'Slow melee attacker. Must get close to deal damage.',
   bomber: 'Explodes when killed, hurting both teams. Keep your units clear.',
+  mortar: 'Lobs shells over cover at where enemies stand. Can’t hit anything close. Keep moving to dodge its blasts.',
+  rocketeer: 'No gun: drag from its rocket icon to draw the rocket’s flight. It launches when the rocketeer reaches the end of its path.',
 };
 
 function showUnitInfo(unit: Unit | null): void {
@@ -658,6 +660,7 @@ confirmBtn.addEventListener('click', () => {
       unitId: u.id,
       waypoints: [...u.waypoints],
       ...(u.attackTargetId ? { targetId: u.attackTargetId } : {}),
+      ...(u.rocketPath?.length ? { rocketPath: u.rocketPath.map(p => ({ ...p })) } : {}),
     }));
     playbackPathDrawer.destroy();
     playbackPathDrawer = null;

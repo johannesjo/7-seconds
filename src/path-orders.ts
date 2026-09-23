@@ -1,7 +1,7 @@
 // Drawing-gesture rules for movement orders, kept free of pixi so they can be
 // unit tested: sampling a drawn line into waypoints and turning a resting
 // pointer into a hold ("wait here") order.
-import type { Waypoint } from './types';
+import type { Vec2, Waypoint } from './types';
 import { PATH_SAMPLE_DISTANCE, MAX_HOLD_S } from './constants';
 
 /** Pointer must rest this long (within HOLD_JITTER_PX) before a hold starts. */
@@ -50,4 +50,22 @@ export function toWaypoints(raw: Waypoint[]): Waypoint[] {
   if (waypoints.length === 0) return [];
   const start = sampled[0];
   return start.wait ? [{ x: start.x, y: start.y, wait: start.wait }, ...waypoints] : waypoints;
+}
+
+/** Trim a path (flown from `start`) to at most `max` length. */
+export function clampPathLength(points: Vec2[], start: Vec2, max: number): Vec2[] {
+  const out: Vec2[] = [];
+  let prev = start;
+  let left = max;
+  for (const p of points) {
+    const d = Math.hypot(p.x - prev.x, p.y - prev.y);
+    if (d > left) {
+      if (left > 0) out.push({ x: prev.x + ((p.x - prev.x) / d) * left, y: prev.y + ((p.y - prev.y) / d) * left });
+      break;
+    }
+    out.push(p);
+    left -= d;
+    prev = p;
+  }
+  return out;
 }

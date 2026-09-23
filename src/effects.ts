@@ -625,6 +625,8 @@ export class EffectsManager {
         }
       } else if (event.type === 'shield-break') {
         this.addShieldBreakCue(event.pos, event.facingAngle ?? event.angle + Math.PI);
+      } else if (event.type === 'explosion') {
+        this.addExplosion(event.pos, event.radius ?? 40);
       }
     }
   }

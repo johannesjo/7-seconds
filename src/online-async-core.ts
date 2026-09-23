@@ -1,9 +1,9 @@
-import type { Waypoint } from './types';
+import type { Vec2, Waypoint } from './types';
 import type { OnlineGameState } from './online-types';
 
 /** A team's planned orders for one round: waypoints (with optional holds) per
  *  unit, plus an optional focus-fire target. */
-export type PathList = { unitId: string; waypoints: Waypoint[]; targetId?: string }[];
+export type PathList = { unitId: string; waypoints: Waypoint[]; targetId?: string; rocketPath?: Vec2[] }[];
 
 export type AsyncTeam = 'blue' | 'red';
 
@@ -36,12 +36,18 @@ function fnv1aString(hash: number, s: string): number {
 
 const HOLD_TAG = 0x484f4c44; // 'HOLD'
 const FOCUS_TAG = 0x464f4353; // 'FOCS'
+const ROCKET_TAG = 0x524f434b; // 'ROCK'
 
 /** Canonicalise a path list so hashing is order-independent across clients:
  *  units sorted by id, waypoints kept in drawn order (order is significant). */
 export function canonicalisePaths(paths: PathList): PathList {
   return [...paths]
-    .map(p => (p.targetId ? { unitId: p.unitId, waypoints: p.waypoints, targetId: p.targetId } : { unitId: p.unitId, waypoints: p.waypoints }))
+    .map(p => ({
+      unitId: p.unitId,
+      waypoints: p.waypoints,
+      ...(p.targetId ? { targetId: p.targetId } : {}),
+      ...(p.rocketPath?.length ? { rocketPath: p.rocketPath } : {}),
+    }))
     .sort((a, b) => (a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0));
 }
 
@@ -66,6 +72,14 @@ export function hashPaths(paths: PathList): number {
     if (p.targetId) {
       h = fnv1a(h, FOCUS_TAG);
       h = fnv1aString(h, p.targetId);
+    }
+    if (p.rocketPath?.length) {
+      h = fnv1a(h, ROCKET_TAG);
+      h = fnv1a(h, p.rocketPath.length);
+      for (const r of p.rocketPath) {
+        h = fnv1a(h, Math.round(r.x * 100));
+        h = fnv1a(h, Math.round(r.y * 100));
+      }
     }
   }
   return h >>> 0; // unsigned 32-bit

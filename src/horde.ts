@@ -145,6 +145,8 @@ export const ALL_RECRUIT_UPGRADES: HordeUpgrade[] = [
   makeRecruitUpgrade('soldier'),
   makeRecruitUpgrade('sniper'),
   makeRecruitUpgrade('shielder'),
+  makeRecruitUpgrade('mortar'),
+  makeRecruitUpgrade('rocketeer'),
 ];
 
 /** Rarity weights: higher = more likely to appear in the pool. */
