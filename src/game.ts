@@ -60,7 +60,7 @@ export class GameEngine {
   private rng: () => number = Math.random;
   private seed = 0;
   private lockstepMode = false;
-  private practice?: { units: Unit[]; elevationZones: ElevationZone[] };
+  private practice?: { units: Unit[]; elevationZones: ElevationZone[]; obstacles?: Obstacle[] };
   private initialState?: OnlineGameState;
   private onInspectUnit?: (unit: Unit | null) => void;
 
@@ -75,7 +75,7 @@ export class GameEngine {
     onlineHost?: boolean;
     onPhaseChange?: (phase: TurnPhase) => void;
     seed?: number;
-    practice?: { units: Unit[]; elevationZones: ElevationZone[] };
+    practice?: { units: Unit[]; elevationZones: ElevationZone[]; obstacles?: Obstacle[] };
     initialState?: OnlineGameState;
     onInspectUnit?: (unit: Unit | null) => void;
   }) {
@@ -117,7 +117,7 @@ export class GameEngine {
     if (this.initialState) {
       this.loadOnlineGameState(this.initialState);
     } else if (this.practice) {
-      this.obstacles = [];
+      this.obstacles = this.practice.obstacles ?? [];
       this.elevationZones = this.practice.elevationZones;
       this.units = this.practice.units;
     } else if (this.ctfMode) {
@@ -731,6 +731,7 @@ export class GameEngine {
         alive: u.alive,
         radius: u.radius,
         shieldHits: u.shieldHits,
+        ...(u.rocketFired ? { rocketFired: true } : {}),
       })),
       projectiles: this.projectiles.map(p => ({
         x: p.pos.x,

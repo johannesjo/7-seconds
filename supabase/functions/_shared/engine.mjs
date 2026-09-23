@@ -1386,7 +1386,7 @@ var GameEngine = class _GameEngine {
     if (this.initialState) {
       this.loadOnlineGameState(this.initialState);
     } else if (this.practice) {
-      this.obstacles = [];
+      this.obstacles = this.practice.obstacles ?? [];
       this.elevationZones = this.practice.elevationZones;
       this.units = this.practice.units;
     } else if (this.ctfMode) {
@@ -1906,7 +1906,8 @@ var GameEngine = class _GameEngine {
         maxHp: u.maxHp,
         alive: u.alive,
         radius: u.radius,
-        shieldHits: u.shieldHits
+        shieldHits: u.shieldHits,
+        ...u.rocketFired ? { rocketFired: true } : {}
       })),
       projectiles: this.projectiles.map((p) => ({
         x: p.pos.x,

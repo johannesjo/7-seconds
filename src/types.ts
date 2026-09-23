@@ -135,6 +135,7 @@ export interface ReplayUnitSnapshot {
   alive: boolean;
   radius: number;
   shieldHits?: number;
+  rocketFired?: boolean;
 }
 
 export interface ReplayProjectileSnapshot {

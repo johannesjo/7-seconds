@@ -383,6 +383,11 @@ export class Renderer {
       // Rotate gun barrel
       const nose = container.getChildAt(1) as Graphics;
       nose.rotation = unit.gunAngle;
+      if (unit.type === 'rocketeer') {
+        const warhead = container.getChildAt(3) as Graphics;
+        warhead.rotation = unit.gunAngle;
+        warhead.visible = !unit.rocketFired;
+      }
       if (unit.type === 'shielder') {
         // Keep the facing arc in sync with live and replay shield condition.
         nose.clear();
@@ -532,11 +537,9 @@ export class Renderer {
         nose.rect(0, -3.5, unit.radius * 1.3, 7);
         nose.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
       } else if (unit.type === 'rocketeer') {
-        // Launch tube over the shoulder, with a warhead tip.
+        // Launch tube over the shoulder (the loaded warhead is its own child).
         nose.rect(-unit.radius * 0.8, unit.radius * 0.35, unit.radius * 2.2, 4.5);
         nose.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
-        nose.circle(unit.radius * 1.4, unit.radius * 0.35 + 2.25, 2.6);
-        nose.fill({ color: this.theme.bomber, alpha: 0.9 });
       } else {
         const nr = unit.radius * 0.6;
         nose.poly([unit.radius + nr, 0, unit.radius - 1, -nr * 0.35, unit.radius - 1, nr * 0.35]);
@@ -550,6 +553,14 @@ export class Renderer {
     const hpBar = new Graphics();
     this.updateHealthBar(hpBar, unit);
     container.addChild(hpBar);
+
+    if (unit.type === 'rocketeer') {
+      // Child 3: warhead in the tube, hidden once the rocket is away.
+      const warhead = new Graphics();
+      warhead.circle(unit.radius * 1.4, unit.radius * 0.35 + 2.25, 2.6);
+      warhead.fill({ color: this.theme.bomber, alpha: 0.9 });
+      container.addChild(warhead);
+    }
 
     return container;
   }

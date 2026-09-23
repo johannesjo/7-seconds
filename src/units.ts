@@ -1120,6 +1120,7 @@ export function snapshotToUnit(s: ReplayUnitSnapshot): Unit {
     alive: s.alive,
     radius: s.radius,
     shieldHits: s.shieldHits,
+    rocketFired: s.rocketFired,
     speed: 0,
     damage: 0,
     range: 0,
