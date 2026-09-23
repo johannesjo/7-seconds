@@ -452,7 +452,10 @@ export class GameEngine {
         continue;
       }
 
-      const target = findTarget(unit, this.units, unit.attackTargetId, this.obstacles);
+      // The focus target wins only while it can actually be shot; otherwise
+      // the unit keeps firing at whatever is closest.
+      const target = engagedFocusTarget(unit, this.units, this.obstacles, this.elevationZones)
+        ?? findTarget(unit, this.units, null, this.obstacles);
 
       // Blade uses AoE melee attack instead of projectiles
       if (unit.type === 'blade') {
@@ -706,6 +709,9 @@ export class GameEngine {
       // Use actual velocity — moveTarget can be stuck on obstacles
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
+      // Holding, or about to launch a drawn rocket, is not idle.
+      if ((u.holdTimer ?? 0) > 0) return false;
+      if (u.type === 'rocketeer' && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
       const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
     });
@@ -878,7 +884,8 @@ export class GameEngine {
           ? clampPathLength(p.rocketPath.slice(0, maxWaypoints)
             .filter(w => typeof w?.x === 'number' && typeof w?.y === 'number'
               && Number.isFinite(w.x) && Number.isFinite(w.y))
-            .map(w => ({ x: w.x, y: w.y })), unit.pos, ROCKET_MAX_PATH)
+            // Measured from the launch point (end of the move), as when drawn.
+            .map(w => ({ x: w.x, y: w.y })), unit.waypoints[unit.waypoints.length - 1] ?? unit.pos, ROCKET_MAX_PATH)
           : [];
       }
     }

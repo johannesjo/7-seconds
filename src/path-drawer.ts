@@ -828,6 +828,12 @@ export class PathDrawer {
     }
     if (!this.selectedUnit) return;
 
+    // A hold still growing at release is just the finger resting before
+    // lifting, not an order: holds only count once the line moves on.
+    if (this.holdIndex !== null) {
+      const { x, y } = this.rawPoints[this.holdIndex];
+      this.rawPoints[this.holdIndex] = { x, y };
+    }
     this.selectedUnit.waypoints = toWaypoints(this.rawPoints);
     this.selectedUnit.attackTargetId = this.focusCandidate?.id ?? null;
 

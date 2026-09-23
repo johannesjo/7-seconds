@@ -79,6 +79,28 @@ describe('rocketeer', () => {
     expect(pos(late, 'k').y).toBeCloseTo(600, -1);
   });
 
+  it('measures the rocket cap from the launch point, not the unit start', () => {
+    // 300px walk + 450px rocket: the rocket alone is well under the cap.
+    const walker = { ...rocketeer, y: 900 };
+    const far = { ...target, y: 150 };
+    const plan: PathList = [{ unitId: 'k', waypoints: [{ x: 500, y: 600 }], rocketPath: [{ x: 500, y: 150 }] }];
+    expect(hp(run(state([walker, far]), plan), 'r')).toBe(UNIT_STATS.soldier.hp - UNIT_STATS.rocketeer.damage);
+  });
+
+  it('keeps a live round going while a rocketeer holds before launching', () => {
+    let ended = false;
+    const s = state([{ ...rocketeer, y: 700 }, { ...target, y: 400 }]);
+    const e = new GameEngine(null, ev => { if (ev === 'end') ended = true; }, { initialState: s, seed: 1 });
+    e.startBattle();
+    e.setBluePaths([{ unitId: 'k', waypoints: [{ x: 500, y: 690, wait: 2 }], rocketPath: [{ x: 500, y: 400 }] }]);
+    e.confirmPlan();
+    e.skipCover();
+    e.confirmPlan();
+    for (let t = 0; t < 360 && !ended && e.phase === 'playing'; t++) e.externalTick(1000 / 60);
+    expect(e.getUnits().find(u => u.id === 'k')!.rocketFired).toBe(true);
+    e.stop();
+  });
+
   it('caps an untrusted rocket path and ignores it on other unit types', () => {
     const launcher = { ...rocketeer, x: 100 };
     const far = { ...target, x: 100 + ROCKET_MAX_PATH + 100, y: 700 };

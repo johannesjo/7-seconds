@@ -1677,7 +1677,7 @@ var GameEngine = class _GameEngine {
         this.updateRocketeer(unit, dt);
         continue;
       }
-      const target = findTarget(unit, this.units, unit.attackTargetId, this.obstacles);
+      const target = engagedFocusTarget(unit, this.units, this.obstacles, this.elevationZones) ?? findTarget(unit, this.units, null, this.obstacles);
       if (unit.type === "blade") {
         if (target) {
           const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
@@ -1909,6 +1909,8 @@ var GameEngine = class _GameEngine {
       if (!u.alive) return true;
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
+      if ((u.holdTimer ?? 0) > 0) return false;
+      if (u.type === "rocketeer" && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
       const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
     });
@@ -2056,7 +2058,7 @@ var GameEngine = class _GameEngine {
         const target = typeof p.targetId === "string" ? this.units.find((u) => u.id === p.targetId && u.team !== team) : void 0;
         unit.attackTargetId = target && canFocus(unit) ? target.id : null;
         unit.rocketFired = false;
-        unit.rocketPath = unit.type === "rocketeer" && Array.isArray(p.rocketPath) ? clampPathLength(p.rocketPath.slice(0, maxWaypoints).filter((w) => typeof w?.x === "number" && typeof w?.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)).map((w) => ({ x: w.x, y: w.y })), unit.pos, ROCKET_MAX_PATH) : [];
+        unit.rocketPath = unit.type === "rocketeer" && Array.isArray(p.rocketPath) ? clampPathLength(p.rocketPath.slice(0, maxWaypoints).filter((w) => typeof w?.x === "number" && typeof w?.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)).map((w) => ({ x: w.x, y: w.y })), unit.waypoints[unit.waypoints.length - 1] ?? unit.pos, ROCKET_MAX_PATH) : [];
       }
     }
   }

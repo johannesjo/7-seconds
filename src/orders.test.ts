@@ -97,6 +97,16 @@ describe('focus order', () => {
     expect(unitIn(end, 'b').y).toBeLessThan(400);
   });
 
+  it('keeps shooting nearby enemies while the focus target is out of range', () => {
+    const s = state([
+      { id: 'b', x: 500, y: 900, hp: 1000, maxHp: 1000 },
+      { id: 'near', team: 'red', x: 500, y: 790, speed: 0, range: 0 },
+      { id: 'far', team: 'red', x: 500, y: 150, speed: 0, range: 0 },
+    ]);
+    const end = GameEngine.resolveRound(s, [{ unitId: 'b', waypoints: [], targetId: 'far' }], [], 1, 360).endState;
+    expect(unitIn(end, 'near').hp).toBe(0);
+  });
+
   it('ignores a focus target on the unit\'s own team', () => {
     const own = state([
       { id: 'b', x: 500, y: 900 },
