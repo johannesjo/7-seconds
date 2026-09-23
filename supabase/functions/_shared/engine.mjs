@@ -1078,8 +1078,10 @@ function rocketReady(unit) {
 function launchRocket(unit) {
   unit.rocketFired = true;
   const path = (unit.rocketPath ?? []).map((p) => ({ x: p.x, y: p.y }));
+  while (path.length > 0 && dist2(unit.pos, path[0]) < 1) path.shift();
+  if (path.length === 0) return null;
   const first = path[0];
-  const d = dist2(unit.pos, first) || 1;
+  const d = dist2(unit.pos, first);
   unit.gunAngle = Math.atan2(first.y - unit.pos.y, first.x - unit.pos.x);
   return {
     kind: "rocket",
@@ -1297,6 +1299,16 @@ function createRng(seed) {
 }
 
 // src/path-orders.ts
+function validPoints(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const p of list) {
+    if (p && typeof p.x === "number" && typeof p.y === "number" && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+      out.push({ x: p.x, y: p.y });
+    }
+  }
+  return out;
+}
 function clampPathLength(points, start, max) {
   const out = [];
   let prev = start;
@@ -1463,6 +1475,10 @@ var GameEngine = class _GameEngine {
   setPhase(phase) {
     this._phase = phase;
     if (phase === "blue-planning") {
+      for (const u of this.units) {
+        u.rocketFired = false;
+        if (u.team === "blue") u.rocketPath = [];
+      }
       this.pathDrawer?.clearPaths("blue");
       if (this.hordeMode) this.generateAiPaths();
       this.pathDrawer?.enable("blue", this.units, this.elevationZones);
@@ -1556,12 +1572,26 @@ var GameEngine = class _GameEngine {
    *  nearest enemy's current position. */
   planAiRocket(unit, enemies) {
     const launch = unit.waypoints[unit.waypoints.length - 1] ?? unit.pos;
-    let target = null;
-    for (const e of enemies) {
-      if (!target || Math.hypot(e.pos.x - launch.x, e.pos.y - launch.y) < Math.hypot(target.pos.x - launch.x, target.pos.y - launch.y)) target = e;
-    }
+    const byDistance = [...enemies].sort((a, b) => Math.hypot(a.pos.x - launch.x, a.pos.y - launch.y) - Math.hypot(b.pos.x - launch.x, b.pos.y - launch.y));
     unit.rocketFired = false;
-    unit.rocketPath = target ? clampPathLength([...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }], launch, ROCKET_MAX_PATH) : [];
+    unit.rocketPath = [];
+    for (const target of byDistance) {
+      const route = clampPathLength(
+        [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }],
+        launch,
+        ROCKET_MAX_PATH
+      );
+      let prev = launch;
+      const clear = route.every((p) => {
+        const ok = !this.obstacles.some((o) => segmentHitsRect(prev, p, o, unit.projectileRadius));
+        prev = p;
+        return ok;
+      });
+      if (clear) {
+        unit.rocketPath = route;
+        return;
+      }
+    }
   }
   tick = (ticker) => {
     if (!this.running) return;
@@ -1722,6 +1752,7 @@ var GameEngine = class _GameEngine {
   updateRocketeer(unit, dt) {
     if (rocketReady(unit)) {
       const rocket = launchRocket(unit);
+      if (!rocket) return;
       this.projectiles.push(rocket);
       this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
       this.recordFire(unit, rocket.damage);
@@ -1802,7 +1833,6 @@ var GameEngine = class _GameEngine {
   }
   /** Handle bomber chain explosions when bombers are killed. */
   handleBomberChainExplosions(hits) {
-    const fx = this.renderer?.effects ?? null;
     for (const hit of hits) {
       if (hit.killed) {
         const deadUnit = this.units.find((u) => u.id === hit.targetId);
@@ -1880,6 +1910,7 @@ var GameEngine = class _GameEngine {
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
       if (u.type === "rocketeer" && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
+      if (u.type === "mortar") return !findMortarTarget(u, this.units, this.elevationZones);
       const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
     });
@@ -2017,9 +2048,13 @@ var GameEngine = class _GameEngine {
       if (!Array.isArray(p.waypoints)) continue;
       const unit = this.units.find((u) => u.id === p.unitId);
       if (unit && unit.team === team) {
-        unit.waypoints = p.waypoints.slice(0, maxWaypoints).filter((w) => typeof w.x === "number" && typeof w.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)).map((w) => ({ x: w.x, y: w.y }));
+        unit.waypoints = validPoints(p.waypoints.slice(0, maxWaypoints));
         unit.rocketFired = false;
-        unit.rocketPath = unit.type === "rocketeer" && Array.isArray(p.rocketPath) ? clampPathLength(p.rocketPath.slice(0, maxWaypoints).filter((w) => typeof w?.x === "number" && typeof w?.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)).map((w) => ({ x: w.x, y: w.y })), unit.waypoints[unit.waypoints.length - 1] ?? unit.pos, ROCKET_MAX_PATH) : [];
+        unit.rocketPath = unit.type === "rocketeer" && Array.isArray(p.rocketPath) ? clampPathLength(
+          validPoints(p.rocketPath.slice(0, maxWaypoints)),
+          unit.waypoints[unit.waypoints.length - 1] ?? unit.pos,
+          ROCKET_MAX_PATH
+        ) : [];
       }
     }
   }
@@ -2155,10 +2190,11 @@ function hashPaths(paths) {
       h = fnv1a(h, Math.round(w.x * 100));
       h = fnv1a(h, Math.round(w.y * 100));
     }
-    if (p.rocketPath?.length) {
+    const rocket = validPoints(p.rocketPath);
+    if (rocket.length > 0) {
       h = fnv1a(h, ROCKET_TAG);
-      h = fnv1a(h, p.rocketPath.length);
-      for (const r of p.rocketPath) {
+      h = fnv1a(h, rocket.length);
+      for (const r of rocket) {
         h = fnv1a(h, Math.round(r.x * 100));
         h = fnv1a(h, Math.round(r.y * 100));
       }

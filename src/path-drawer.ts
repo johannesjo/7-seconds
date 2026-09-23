@@ -201,7 +201,11 @@ export class PathDrawer {
       if (!unit.alive || unit.team !== this.team || unit.type !== 'rocketeer') continue;
       const launch = launchPoint(unit);
       const drawing = unit === this.rocketUnit;
-      const drawn = drawing ? this.rawRocket.slice(1) : unit.rocketPath ?? [];
+      // Sample the live stroke as on release, so the preview and its "max"
+      // cut-off match what gets saved.
+      const drawn = drawing
+        ? samplePath(this.rawRocket, PATH_SAMPLE_DISTANCE).slice(1)
+        : unit.rocketPath ?? [];
       const path = clampPathLength(drawn, launch, ROCKET_MAX_PATH);
       if (drawing && path.length > 0 && polylineLength([launch, ...drawn]) > ROCKET_MAX_PATH) {
         // Past the rocket's reach: show the stroke faintly so the cut-off reads.

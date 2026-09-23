@@ -26,7 +26,7 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
   rocketeer: { hp: 35, speed: 80, damage: 45, range: 0, radius: 9, fireCooldown: 99, projectileSpeed: 260, projectileRadius: 5, turnSpeed: 3.0 },
 };
 
-/** Mortar can't lob shells closer than this (plus radii). */
+/** Mortar can't lob shells at enemies closer than this (centre to centre). */
 export const MORTAR_MIN_RANGE = 110;
 export const MORTAR_BLAST_RADIUS = 55;
 /** Seconds a shell is in the air — long enough to step out of the blast by moving on. */

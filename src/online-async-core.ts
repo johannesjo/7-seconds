@@ -1,5 +1,6 @@
 import type { Vec2 } from './types';
 import type { OnlineGameState } from './online-types';
+import { validPoints } from './path-orders';
 
 /** A team's planned orders for one round: waypoints per unit, plus a
  *  rocketeer's drawn rocket flight. */
@@ -61,11 +62,13 @@ export function hashPaths(paths: PathList): number {
       h = fnv1a(h, Math.round(w.y * 100));
     }
     // Only hashed when present, so plain paths hash exactly as before. The
-    // tag keeps rocket points from colliding with waypoint coordinates.
-    if (p.rocketPath?.length) {
+    // tag keeps rocket points from colliding with waypoint coordinates. Only
+    // the points the engine will accept are hashed, and junk can't throw.
+    const rocket = validPoints(p.rocketPath);
+    if (rocket.length > 0) {
       h = fnv1a(h, ROCKET_TAG);
-      h = fnv1a(h, p.rocketPath.length);
-      for (const r of p.rocketPath) {
+      h = fnv1a(h, rocket.length);
+      for (const r of rocket) {
         h = fnv1a(h, Math.round(r.x * 100));
         h = fnv1a(h, Math.round(r.y * 100));
       }

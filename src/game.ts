@@ -15,10 +15,9 @@ import type { Renderer } from './renderer';
 import type { PathList } from './online-async-core';
 import { scorePosition, generateCandidates } from './ai-scoring';
 import { createRng } from './rng';
-import { clampPathLength } from './path-orders';
+import { clampPathLength, validPoints } from './path-orders';
 
 const FIXED_DT = 1 / 60;
-
 
 type GameEventCallback = (
   event: 'update' | 'end' | 'phase-change' | 'wave-clear',
@@ -211,6 +210,13 @@ export class GameEngine {
     this._phase = phase;
 
     if (phase === 'blue-planning') {
+      // Reload every rocketeer and drop blue's old rocket orders here rather
+      // than relying on the drawer: Horde carries units into a fresh engine
+      // whose drawer doesn't know them yet.
+      for (const u of this.units) {
+        u.rocketFired = false;
+        if (u.team === 'blue') u.rocketPath = [];
+      }
       this.pathDrawer?.clearPaths('blue');
       if (this.hordeMode) this.generateAiPaths();
       this.pathDrawer?.enable('blue', this.units, this.elevationZones);
@@ -322,14 +328,26 @@ export class GameEngine {
    *  nearest enemy's current position. */
   private planAiRocket(unit: Unit, enemies: Unit[]): void {
     const launch = unit.waypoints[unit.waypoints.length - 1] ?? unit.pos;
-    let target: Unit | null = null;
-    for (const e of enemies) {
-      if (!target || Math.hypot(e.pos.x - launch.x, e.pos.y - launch.y) < Math.hypot(target.pos.x - launch.x, target.pos.y - launch.y)) target = e;
-    }
+    const byDistance = [...enemies].sort((a, b) =>
+      Math.hypot(a.pos.x - launch.x, a.pos.y - launch.y) - Math.hypot(b.pos.x - launch.x, b.pos.y - launch.y));
     unit.rocketFired = false;
-    unit.rocketPath = target
-      ? clampPathLength([...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }], launch, ROCKET_MAX_PATH)
-      : [];
+    unit.rocketPath = [];
+    // Nearest enemy whose detour route actually clears cover.
+    for (const target of byDistance) {
+      const route = clampPathLength(
+        [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }],
+        launch, ROCKET_MAX_PATH);
+      let prev = launch;
+      const clear = route.every(p => {
+        const ok = !this.obstacles.some(o => segmentHitsRect(prev, p, o, unit.projectileRadius));
+        prev = p;
+        return ok;
+      });
+      if (clear) {
+        unit.rocketPath = route;
+        return;
+      }
+    }
   }
 
   private tick = (ticker: { deltaMS: number }): void => {
@@ -526,6 +544,7 @@ export class GameEngine {
   private updateRocketeer(unit: Unit, dt: number): void {
     if (rocketReady(unit)) {
       const rocket = launchRocket(unit);
+      if (!rocket) return;
       this.projectiles.push(rocket);
       this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
       this.recordFire(unit, rocket.damage);
@@ -613,8 +632,7 @@ export class GameEngine {
 
   /** Handle bomber chain explosions when bombers are killed. */
   private handleBomberChainExplosions(hits: ReturnType<typeof updateProjectiles>['hits']): void {
-    const fx = this.renderer?.effects ?? null;
-    for (const hit of hits) {
+        for (const hit of hits) {
       if (hit.killed) {
         const deadUnit = this.units.find(u => u.id === hit.targetId);
         if (deadUnit && deadUnit.type === 'bomber') {
@@ -699,6 +717,8 @@ export class GameEngine {
       if (speed > 1 || u.waypoints.length > 0) return false;
       // About to launch a drawn rocket is not idle.
       if (u.type === 'rocketeer' && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
+      // A mortar is busy while any enemy sits in its firing band, seen or not.
+      if (u.type === 'mortar') return !findMortarTarget(u, this.units, this.elevationZones);
       const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
     });
@@ -852,17 +872,12 @@ export class GameEngine {
       if (unit && unit.team === team) {
         // Copy into fresh objects: the engine must never alias (or trust) the
         // caller's path list, which is also what gets hashed and persisted.
-        unit.waypoints = p.waypoints.slice(0, maxWaypoints)
-          .filter(w => typeof w.x === 'number' && typeof w.y === 'number'
-            && Number.isFinite(w.x) && Number.isFinite(w.y))
-          .map(w => ({ x: w.x, y: w.y }));
+        unit.waypoints = validPoints(p.waypoints.slice(0, maxWaypoints));
         unit.rocketFired = false;
         unit.rocketPath = unit.type === 'rocketeer' && Array.isArray(p.rocketPath)
-          ? clampPathLength(p.rocketPath.slice(0, maxWaypoints)
-            .filter(w => typeof w?.x === 'number' && typeof w?.y === 'number'
-              && Number.isFinite(w.x) && Number.isFinite(w.y))
-            // Measured from the launch point (end of the move), as when drawn.
-            .map(w => ({ x: w.x, y: w.y })), unit.waypoints[unit.waypoints.length - 1] ?? unit.pos, ROCKET_MAX_PATH)
+          // Measured from the launch point (end of the move), as when drawn.
+          ? clampPathLength(validPoints(p.rocketPath.slice(0, maxWaypoints)),
+            unit.waypoints[unit.waypoints.length - 1] ?? unit.pos, ROCKET_MAX_PATH)
           : [];
       }
     }

@@ -2,6 +2,19 @@
 // can be unit tested: sampling a drawn line and capping a path's length.
 import type { Vec2 } from './types';
 
+/** The finite {x, y} points of an untrusted list (anything else -> []). The
+ *  engine and the commit hash both use this, so they agree on what counts. */
+export function validPoints(list: unknown): Vec2[] {
+  if (!Array.isArray(list)) return [];
+  const out: Vec2[] = [];
+  for (const p of list) {
+    if (p && typeof p.x === 'number' && typeof p.y === 'number' && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+      out.push({ x: p.x, y: p.y });
+    }
+  }
+  return out;
+}
+
 /** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
 export function samplePath(raw: Vec2[], minDist: number): Vec2[] {
   if (raw.length === 0) return [];

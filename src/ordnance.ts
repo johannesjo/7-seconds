@@ -84,11 +84,15 @@ export function rocketReady(unit: Unit): boolean {
     && unit.moveTarget === null && unit.waypoints.length === 0;
 }
 
-export function launchRocket(unit: Unit): Projectile {
+export function launchRocket(unit: Unit): Projectile | null {
   unit.rocketFired = true;
+  // Skip points on top of the launch spot: a zero first leg would give the
+  // rocket no heading or speed, leaving it parked like a mine.
   const path = (unit.rocketPath ?? []).map(p => ({ x: p.x, y: p.y }));
+  while (path.length > 0 && dist(unit.pos, path[0]) < 1) path.shift();
+  if (path.length === 0) return null;
   const first = path[0];
-  const d = dist(unit.pos, first) || 1;
+  const d = dist(unit.pos, first);
   unit.gunAngle = Math.atan2(first.y - unit.pos.y, first.x - unit.pos.x);
   return {
     kind: 'rocket',
