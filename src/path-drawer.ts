@@ -322,11 +322,14 @@ export class PathDrawer {
     return null;
   }
 
-  /** Baseline for the time label at a path's end: above it, except for our
-   *  rocketeers, whose rocket handle sits there; theirs goes below. */
+  /** Baseline for the time label at a path's end: above it, unless one of
+   *  our rocketeers has its rocket handle there, then on the other side. */
   private endLabelY(unit: Unit, end: Vec2, overLimit: boolean): number {
     const gap = overLimit ? 12 : unit.radius + 6;
-    return unit.type === 'rocketeer' && unit.team === this.team ? end.y + gap + 14 : end.y - gap;
+    const launch = launchPoint(unit);
+    const handleAbove = unit.type === 'rocketeer' && unit.team === this.team
+      && launch.x === end.x && launch.y === end.y && rocketHandle(unit).y < end.y;
+    return handleAbove ? end.y + gap + 14 : end.y - gap;
   }
 
   private prediction(unit: Unit, points: Vec2[]): PathPrediction {

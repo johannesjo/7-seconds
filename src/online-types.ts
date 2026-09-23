@@ -86,6 +86,9 @@ export function isPlausibleGameState(state: OnlineGameState | null | undefined):
     && Number.isFinite(state.mapWidth) && state.mapWidth > 0
     && Number.isFinite(state.mapHeight) && state.mapHeight > 0
     && state.units.every(isValidUnit)
+    // Ids key the renderer's per-unit graphics; a duplicate would make one
+    // unit reuse another's (differently built) sprite.
+    && new Set(state.units.map(u => u.id)).size === state.units.length
     && state.obstacles.every(isValidRect)
     && state.elevationZones.every(isValidRect);
 }

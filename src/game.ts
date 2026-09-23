@@ -332,11 +332,11 @@ export class GameEngine {
       Math.hypot(a.pos.x - launch.x, a.pos.y - launch.y) - Math.hypot(b.pos.x - launch.x, b.pos.y - launch.y));
     unit.rocketFired = false;
     unit.rocketPath = [];
-    // Nearest enemy whose detour route actually clears cover.
+    // Nearest enemy whose detour route is within reach and clears cover.
     for (const target of byDistance) {
-      const route = clampPathLength(
-        [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }],
-        launch, ROCKET_MAX_PATH);
+      const full = [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }];
+      const route = clampPathLength(full, launch, ROCKET_MAX_PATH);
+      if (route.length !== full.length || route[route.length - 1] !== full[full.length - 1]) continue;
       let prev = launch;
       const clear = route.every(p => {
         const ok = !this.obstacles.some(o => segmentHitsRect(prev, p, o, unit.projectileRadius));
@@ -632,7 +632,7 @@ export class GameEngine {
 
   /** Handle bomber chain explosions when bombers are killed. */
   private handleBomberChainExplosions(hits: ReturnType<typeof updateProjectiles>['hits']): void {
-        for (const hit of hits) {
+    for (const hit of hits) {
       if (hit.killed) {
         const deadUnit = this.units.find(u => u.id === hit.targetId);
         if (deadUnit && deadUnit.type === 'bomber') {

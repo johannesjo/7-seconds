@@ -317,3 +317,20 @@ describe('applyUpgradesToUnit', () => {
     expect(recruit.maxHp).toBe(baseHp + 15);
   });
 });
+
+describe('upgrades with mortars and rocketeers', () => {
+  const find = (id: string) => ALL_STAT_UPGRADES.find(u => u.id === id)!;
+
+  it('does not give the rocketeer a gun range', () => {
+    const units = [createUnit('b', 'rocketeer', 'blue', { x: 0, y: 0 })];
+    find('range_50').apply(units);
+    expect(units[0].range).toBe(0);
+    expect(find('range_50').canApply!(units)).toBe(false);
+  });
+
+  it('only offers Piercing Rounds to squads that fire bullets', () => {
+    const noBullets = [createUnit('m', 'mortar', 'blue', { x: 0, y: 0 }), createUnit('k', 'rocketeer', 'blue', { x: 0, y: 0 })];
+    expect(find('piercing').canApply!(noBullets)).toBe(false);
+    expect(find('piercing').canApply!([...noBullets, createUnit('s', 'soldier', 'blue', { x: 0, y: 0 })])).toBe(true);
+  });
+});

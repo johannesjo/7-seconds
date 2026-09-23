@@ -55,7 +55,7 @@ function isValidUnit(u) {
   return !!u && typeof u.id === "string" && typeof u.type === "string" && Object.prototype.hasOwnProperty.call(UNIT_STATS, u.type) && VALID_TEAMS.has(u.team) && isFiniteNumber(u.x) && isFiniteNumber(u.y) && isFiniteNumber(u.hp) && u.hp >= 0 && isFiniteNumber(u.maxHp) && u.maxHp > 0 && isFiniteNumber(u.radius) && u.radius >= 0 && isFiniteNumber(u.speed) && u.speed >= 0 && isFiniteNumber(u.range) && u.range >= 0 && isFiniteNumber(u.gunAngle);
 }
 function isPlausibleGameState(state) {
-  return !!state && Array.isArray(state.units) && state.units.length <= MAX_ONLINE_UNITS && Array.isArray(state.obstacles) && state.obstacles.length <= MAX_ONLINE_OBSTACLES && Array.isArray(state.elevationZones) && state.elevationZones.length <= MAX_ONLINE_ELEVATION_ZONES && Number.isFinite(state.mapWidth) && state.mapWidth > 0 && Number.isFinite(state.mapHeight) && state.mapHeight > 0 && state.units.every(isValidUnit) && state.obstacles.every(isValidRect) && state.elevationZones.every(isValidRect);
+  return !!state && Array.isArray(state.units) && state.units.length <= MAX_ONLINE_UNITS && Array.isArray(state.obstacles) && state.obstacles.length <= MAX_ONLINE_OBSTACLES && Array.isArray(state.elevationZones) && state.elevationZones.length <= MAX_ONLINE_ELEVATION_ZONES && Number.isFinite(state.mapWidth) && state.mapWidth > 0 && Number.isFinite(state.mapHeight) && state.mapHeight > 0 && state.units.every(isValidUnit) && new Set(state.units.map((u) => u.id)).size === state.units.length && state.obstacles.every(isValidRect) && state.elevationZones.every(isValidRect);
 }
 
 // src/units.ts
@@ -1576,11 +1576,9 @@ var GameEngine = class _GameEngine {
     unit.rocketFired = false;
     unit.rocketPath = [];
     for (const target of byDistance) {
-      const route = clampPathLength(
-        [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }],
-        launch,
-        ROCKET_MAX_PATH
-      );
+      const full = [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }];
+      const route = clampPathLength(full, launch, ROCKET_MAX_PATH);
+      if (route.length !== full.length || route[route.length - 1] !== full[full.length - 1]) continue;
       let prev = launch;
       const clear = route.every((p) => {
         const ok = !this.obstacles.some((o) => segmentHitsRect(prev, p, o, unit.projectileRadius));

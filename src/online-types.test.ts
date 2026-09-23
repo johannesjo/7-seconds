@@ -61,8 +61,14 @@ describe('isPlausibleGameState', () => {
     expect(isPlausibleGameState(undefined)).toBe(false);
   });
 
+  it('rejects duplicate unit ids', () => {
+    const [u] = makeState().units;
+    expect(isPlausibleGameState(makeState({ units: [u, { ...u, type: 'rocketeer' }] }))).toBe(false);
+  });
+
   it('rejects oversized arrays from a malicious/buggy peer', () => {
-    const hugeUnits = makeState({ units: new Array(MAX_ONLINE_UNITS + 1).fill(makeState().units[0]) });
+    // Distinct ids, so only the size limit can reject it.
+    const hugeUnits = makeState({ units: Array.from({ length: MAX_ONLINE_UNITS + 1 }, (_, i) => ({ ...makeState().units[0], id: `u${i}` })) });
     expect(isPlausibleGameState(hugeUnits)).toBe(false);
     const hugeObstacles = makeState({ obstacles: new Array(MAX_ONLINE_OBSTACLES + 1).fill({ x: 0, y: 0, w: 1, h: 1 }) });
     expect(isPlausibleGameState(hugeObstacles)).toBe(false);

@@ -182,6 +182,21 @@ describe('rocketeer', () => {
     e.stop();
   });
 
+  it('AI holds its rocket rather than fire at a target out of reach', () => {
+    const s = state([
+      { id: 'b', type: 'soldier', team: 'blue', x: 950, y: 950 },
+      { id: 'k', type: 'rocketeer', team: 'red', x: 50, y: 50 },
+    ]);
+    const e = new GameEngine(null, () => {}, { aiMode: true, initialState: s, seed: 3 });
+    e.startBattle();
+    const k = e.getUnits().find(u => u.id === 'k') as Unit;
+    k.waypoints = [];
+    (e as unknown as { planAiRocket(u: Unit, enemies: Unit[]): void })
+      .planAiRocket(k, e.getUnits().filter(u => u.team === 'blue'));
+    expect(k.rocketPath).toEqual([]);
+    e.stop();
+  });
+
   it('hashes plain paths exactly as before rockets existed', () => {
     // Value computed with hashPaths at the commit before this feature.
     expect(hashPaths([{ unitId: 'b', waypoints: [{ x: 1.5, y: 2.25 }, { x: 100, y: 200 }] }, { unitId: 'a', waypoints: [] }]))
