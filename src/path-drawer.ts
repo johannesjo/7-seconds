@@ -322,6 +322,13 @@ export class PathDrawer {
     return null;
   }
 
+  /** Baseline for the time label at a path's end: above it, except for our
+   *  rocketeers, whose rocket handle sits there; theirs goes below. */
+  private endLabelY(unit: Unit, end: Vec2, overLimit: boolean): number {
+    const gap = overLimit ? 12 : unit.radius + 6;
+    return unit.type === 'rocketeer' && unit.team === this.team ? end.y + gap + 14 : end.y - gap;
+  }
+
   private prediction(unit: Unit, points: Vec2[]): PathPrediction {
     const cached = this.predictionCache.get(unit);
     if (cached && cached.speed === unit.speed && cached.momentum === unit.momentum &&
@@ -431,7 +438,7 @@ export class PathDrawer {
       const timeLabel = this.acquireLabel();
       timeLabel.text = this.timeText(travelTime);
       timeLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.labelFill;
-      timeLabel.position.set(last.x, last.y - (overLimit ? 12 : unit.radius + 6));
+      timeLabel.position.set(last.x, this.endLabelY(unit, last, overLimit));
       timeLabel.alpha = alpha;
       if (overLimit) {
         const roundLabel = this.acquireLabel();
@@ -467,7 +474,7 @@ export class PathDrawer {
       const liveLabel = this.acquireLabel();
       liveLabel.text = this.timeText(travelTime);
       liveLabel.style.fill = rawOverLimit ? this.theme.labelWarn : this.theme.labelFill;
-      liveLabel.position.set(endpoint.x, endpoint.y - (rawOverLimit ? 12 : this.selectedUnit.radius + 6));
+      liveLabel.position.set(endpoint.x, this.endLabelY(this.selectedUnit, endpoint, rawOverLimit));
       liveLabel.alpha = 1.0;
       if (rawOverLimit) {
         const roundLabel = this.acquireLabel();
@@ -558,7 +565,7 @@ export class PathDrawer {
         const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
         this.hoverLabel.text = this.timeText(travelTime);
         this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
-        this.hoverLabel.position.set(last.x, last.y - (overLimit ? 12 : this.hoveredUnit.radius + 6));
+        this.hoverLabel.position.set(last.x, this.endLabelY(this.hoveredUnit, last, overLimit));
         this.hoverLabel.alpha = 1;
         this.hoverLabel.visible = true;
       }
@@ -589,7 +596,7 @@ export class PathDrawer {
         const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
         this.hoverLabel.text = this.timeText(travelTime);
         this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
-        this.hoverLabel.position.set(last.x, last.y - (overLimit ? 12 : this.hoveredEnemy.radius + 6));
+        this.hoverLabel.position.set(last.x, this.endLabelY(this.hoveredEnemy, last, overLimit));
         this.hoverLabel.alpha = 0.6;
         this.hoverLabel.visible = true;
       }
