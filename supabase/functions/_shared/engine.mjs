@@ -19,6 +19,7 @@ var ARMY_COMPOSITION = [
   { type: "sniper", count: 1 }
 ];
 var ROUND_DURATION_S = 6;
+var MAX_HOLD_S = 3;
 var COVER_SCREEN_DURATION_MS = 1500;
 var ELEVATION_RANGE_BONUS = 0.2;
 var FLANK_ANGLE_THRESHOLD = Math.PI / 3;
@@ -350,6 +351,10 @@ function updateGunAngle(unit, desiredAngle, dt) {
 }
 function advanceWaypoint(unit, dt = 0) {
   if (!unit.alive) return;
+  if ((unit.holdTimer ?? 0) > 0) {
+    unit.holdTimer = Math.max(0, unit.holdTimer - dt);
+    if (unit.holdTimer > 0) return;
+  }
   const atTarget = !unit.moveTarget || Math.abs(unit.pos.x - unit.moveTarget.x) < 2 && Math.abs(unit.pos.y - unit.moveTarget.y) < 2;
   if (unit.moveTarget && dt > 0) {
     const toTargetX = unit.moveTarget.x - unit.pos.x;
@@ -365,6 +370,12 @@ function advanceWaypoint(unit, dt = 0) {
   const stuck = unit.moveTarget && (unit.stuckTime ?? 0) > 0.25;
   if (atTarget || stuck) {
     unit.stuckTime = 0;
+    const wait = unit.moveTarget?.wait ?? 0;
+    if (wait > 0) {
+      unit.moveTarget = null;
+      unit.holdTimer = wait;
+      return;
+    }
     unit.moveTarget = unit.waypoints.length > 0 ? unit.waypoints.shift() : null;
   }
 }
@@ -663,6 +674,16 @@ function findTarget(attacker, allUnits, preferredId, obstacles = []) {
   }
   return nearestVisible ?? nearestAny;
 }
+function canFocus(unit) {
+  return unit.type !== "blade" && unit.type !== "bomber";
+}
+function engagedFocusTarget(unit, allUnits, obstacles, elevationZones) {
+  if (!unit.attackTargetId || !canFocus(unit)) return null;
+  const target = allUnits.find((u) => u.id === unit.attackTargetId);
+  if (!target || !target.alive || target.team === unit.team) return null;
+  if (!isInRange(unit, target, elevationZones)) return null;
+  return hasLineOfSight(unit.pos, target.pos, obstacles, unit.projectileRadius) ? target : null;
+}
 function getElevationLevel(pos, zones) {
   let level = 0;
   for (const z of zones) {
@@ -811,6 +832,7 @@ function tryFireProjectile(unit, target, dt, elevationZones = []) {
 function updateProjectiles(projectiles, units, dt, obstacles = []) {
   const alive = [];
   const hits = [];
+  const shieldBreaks = [];
   for (const p of projectiles) {
     const oldPos = { x: p.pos.x, y: p.pos.y };
     const moveX = p.vel.x * dt;
@@ -836,6 +858,15 @@ function updateProjectiles(projectiles, units, dt, obstacles = []) {
         if (unit.type === "shielder" && (unit.shieldHits ?? 0) < SHIELD_MAX_HITS) {
           if (!isFlanked(projAngle, unit.gunAngle)) {
             unit.shieldHits = (unit.shieldHits ?? 0) + 1;
+            if (unit.shieldHits === SHIELD_MAX_HITS) {
+              shieldBreaks.push({
+                pos: { x: unit.pos.x, y: unit.pos.y },
+                targetId: unit.id,
+                team: p.team,
+                angle: projAngle,
+                facingAngle: unit.gunAngle
+              });
+            }
             if (!p.piercing) {
               consumed = true;
               break;
@@ -877,46 +908,43 @@ function updateProjectiles(projectiles, units, dt, obstacles = []) {
     }
     if (!consumed) alive.push(p);
   }
-  return { alive, hits };
+  return { alive, hits, shieldBreaks };
 }
 
 // src/battlefield.ts
 function randomInRange(min, max) {
   return Math.floor(Math.random() * (max - min)) + min;
 }
-function generateObstacles() {
-  const obstacles = [];
-  const pairCount = randomInRange(1, 2);
-  const hasCenter = Math.random() > 0.5;
-  for (let i = 0; i < pairCount; i++) {
-    const w = randomInRange(30, 60);
-    const h = randomInRange(30, 60);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
-    obstacles.push({ x, y, w, h });
-    obstacles.push({ x, y: MAP_HEIGHT - y - h, w, h });
+var STANDARD_LAYOUTS = [
+  // Central barricade: advance behind cover or take either exposed side hill.
+  {
+    obstacles: [[0.5, 0.5, 70, 52], [0.5, 0.32, 54, 40]],
+    elevationZones: [[0.22, 0.36, 100, 70], [0.78, 0.36, 100, 70]]
+  },
+  // Split gates: the middle hill is valuable, but both outer lanes bypass it.
+  {
+    obstacles: [[0.31, 0.5, 40, 86], [0.69, 0.5, 40, 86], [0.5, 0.28, 52, 40]],
+    elevationZones: [[0.5, 0.5, 90, 72]]
+  },
+  // Offset positions: side cover protects approaches to hills; the center stays open.
+  {
+    obstacles: [[0.31, 0.43, 45, 42], [0.69, 0.31, 45, 42]],
+    elevationZones: [[0.22, 0.32, 100, 65], [0.78, 0.42, 100, 65]]
   }
-  if (hasCenter || obstacles.length < 3) {
-    const w = randomInRange(30, 60);
-    const h = randomInRange(30, 60);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = (MAP_HEIGHT - h) / 2;
-    obstacles.push({ x, y, w, h });
-  }
-  return obstacles;
-}
-function generateElevationZones() {
-  const zones = [];
-  const pairCount = randomInRange(1, 3);
-  for (let i = 0; i < pairCount; i++) {
-    const w = randomInRange(80, 160);
-    const h = randomInRange(60, 120);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
-    zones.push({ x, y, w, h });
-    zones.push({ x, y: MAP_HEIGHT - y - h, w, h });
-  }
-  return zones;
+];
+function generateBattlefield(layoutIndex = Math.floor(Math.random() * STANDARD_LAYOUTS.length)) {
+  const layout = STANDARD_LAYOUTS[layoutIndex];
+  if (!layout) throw new RangeError(`Unknown battlefield layout: ${layoutIndex}`);
+  const scale = Math.min(MAP_WIDTH / 360, MAP_HEIGHT / 620);
+  const expand = (rects) => rects.flatMap(([cx, cy, baseW, baseH]) => {
+    const w = baseW * scale;
+    const h = baseH * scale;
+    const x = cx * MAP_WIDTH - w / 2;
+    const y = cy * MAP_HEIGHT - h / 2;
+    const rect = { x, y, w, h };
+    return cy === 0.5 ? [rect] : [rect, { ...rect, y: MAP_HEIGHT - y - h }];
+  });
+  return { obstacles: expand(layout.obstacles), elevationZones: expand(layout.elevationZones) };
 }
 function generateCtfObstacles() {
   const obstacles = [];
@@ -1167,6 +1195,9 @@ var GameEngine = class _GameEngine {
   rng = Math.random;
   seed = 0;
   lockstepMode = false;
+  practice;
+  initialState;
+  onInspectUnit;
   constructor(renderer, onEvent, opts) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -1178,6 +1209,9 @@ var GameEngine = class _GameEngine {
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.onlineHostMode = opts?.onlineHost ?? false;
+    this.practice = opts?.practice;
+    this.initialState = opts?.initialState;
+    this.onInspectUnit = opts?.onInspectUnit;
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
   get phase() {
@@ -1193,7 +1227,13 @@ var GameEngine = class _GameEngine {
     return this.seed + this.roundNumber;
   }
   startBattle() {
-    if (this.ctfMode) {
+    if (this.initialState) {
+      this.loadOnlineGameState(this.initialState);
+    } else if (this.practice) {
+      this.obstacles = [];
+      this.elevationZones = this.practice.elevationZones;
+      this.units = this.practice.units;
+    } else if (this.ctfMode) {
       this.obstacles = generateCtfObstacles();
       this.elevationZones = generateCtfElevationZones();
       this.units = [...createCtfArmy("blue", this.obstacles), ...createCtfArmy("red", this.obstacles)];
@@ -1202,11 +1242,12 @@ var GameEngine = class _GameEngine {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
     } else {
-      this.obstacles = generateObstacles();
-      this.elevationZones = generateElevationZones();
+      const battlefield = generateBattlefield();
+      this.obstacles = battlefield.obstacles;
+      this.elevationZones = battlefield.elevationZones;
     }
     const allBlocks = this.obstacles;
-    if (!this.ctfMode) {
+    if (!this.ctfMode && !this.practice && !this.initialState) {
       if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
         const redUnits = createMissionArmy("red", this.hordeRedArmy, allBlocks);
         const waveTag = `w${Date.now() % 1e4}`;
@@ -1225,6 +1266,7 @@ var GameEngine = class _GameEngine {
     this.running = true;
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer.highlightZonesAt(pos));
+      this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
       this.renderer.renderElevationZones(this.elevationZones);
       this.renderer.renderObstacles(this.obstacles);
       if (this.ctfMode) {
@@ -1239,6 +1281,10 @@ var GameEngine = class _GameEngine {
   /** Called by the UI "Done" button to end the current planning phase. */
   confirmPlan() {
     if (this._phase === "blue-planning") {
+      if (this.practice) {
+        this.setPhase("playing");
+        return;
+      }
       this.setPhase("cover");
       if (!this.aiMode) {
         this.coverTimeout = setTimeout(() => {
@@ -1381,7 +1427,7 @@ var GameEngine = class _GameEngine {
     this.roundTimer -= dt;
     this.simulationTick++;
     const redDelayed = this.updateHordeDelay(dt);
-    this.updateChaseAI();
+    if (this.aiMode) this.updateChaseAI();
     this.updateMovement(dt, redDelayed);
     this.updateCombat(dt);
     const hits = this.updateProjectiles(dt);
@@ -1398,7 +1444,9 @@ var GameEngine = class _GameEngine {
     if (redDelayed) this.hordeStartDelay -= dt;
     return redDelayed;
   }
-  /** Zombies, shielders, and bombers on the red team always chase closest enemy. */
+  /** AI-mode only: zombies, shielders, and bombers on the red team chase the
+   *  closest enemy. Gated by aiMode at the call site — never overrides the paths
+   *  of a human-controlled red team. */
   updateChaseAI() {
     for (const unit of this.units) {
       if (!unit.alive || unit.team !== "red" || unit.type !== "zombie" && unit.type !== "shielder" && unit.type !== "bomber") continue;
@@ -1414,6 +1462,13 @@ var GameEngine = class _GameEngine {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       if (redDelayed && unit.team === "red") continue;
+      if (engagedFocusTarget(unit, this.units, this.obstacles, this.elevationZones)) {
+        const resumeTarget = unit.moveTarget;
+        unit.moveTarget = null;
+        moveUnit(unit, dt, this.obstacles, this.units, this.rng);
+        unit.moveTarget = resumeTarget;
+        continue;
+      }
       advanceWaypoint(unit, dt);
       moveUnit(unit, dt, this.obstacles, this.units, this.rng);
     }
@@ -1423,7 +1478,7 @@ var GameEngine = class _GameEngine {
   updateCombat(dt) {
     for (const unit of this.units) {
       if (!unit.alive) continue;
-      const target = findTarget(unit, this.units, null, this.obstacles);
+      const target = findTarget(unit, this.units, unit.attackTargetId, this.obstacles);
       if (unit.type === "blade") {
         if (target) {
           const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
@@ -1479,8 +1534,18 @@ var GameEngine = class _GameEngine {
   }
   /** Update projectile positions and resolve collisions. Returns hit results. */
   updateProjectiles(dt) {
-    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
+    const { alive: aliveProjectiles, hits, shieldBreaks } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
     this.projectiles = aliveProjectiles;
+    for (const shieldBreak of shieldBreaks) {
+      this.replayEvents.push({
+        ...shieldBreak,
+        frame: this.replayFrames.length,
+        type: "shield-break",
+        damage: 0,
+        flanked: false
+      });
+      this.renderer?.effects?.addShieldBreakCue(shieldBreak.pos, shieldBreak.facingAngle);
+    }
     return hits;
   }
   /** Trigger visual effects for projectile hits and record replay events. */
@@ -1489,6 +1554,7 @@ var GameEngine = class _GameEngine {
     for (const hit of hits) {
       const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
+      if (hit.flanked) fx?.addFlankCue(hit.pos, hit.angle, hit.targetId);
       this.replayEvents.push({
         frame: this.replayFrames.length,
         type: hit.killed ? "kill" : "hit",
@@ -1612,7 +1678,8 @@ var GameEngine = class _GameEngine {
         hp: u.hp,
         maxHp: u.maxHp,
         alive: u.alive,
-        radius: u.radius
+        radius: u.radius,
+        shieldHits: u.shieldHits
       })),
       projectiles: this.projectiles.map((p) => ({
         x: p.pos.x,
@@ -1716,10 +1783,16 @@ var GameEngine = class _GameEngine {
       if (!Array.isArray(p.waypoints)) continue;
       const unit = this.units.find((u) => u.id === p.unitId);
       if (unit && unit.team === team) {
-        const valid = p.waypoints.slice(0, maxWaypoints).filter(
-          (w) => typeof w.x === "number" && typeof w.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)
-        );
-        unit.waypoints = valid;
+        unit.waypoints = p.waypoints.slice(0, maxWaypoints).filter((w) => typeof w.x === "number" && typeof w.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)).map((w) => {
+          const wp = { x: w.x, y: w.y };
+          if (typeof w.wait === "number" && Number.isFinite(w.wait) && w.wait > 0) {
+            wp.wait = Math.min(MAX_HOLD_S, w.wait);
+          }
+          return wp;
+        });
+        unit.holdTimer = 0;
+        const target = typeof p.targetId === "string" ? this.units.find((u) => u.id === p.targetId && u.team !== team) : void 0;
+        unit.attackTargetId = target && canFocus(unit) ? target.id : null;
       }
     }
   }
@@ -1838,8 +1911,10 @@ function fnv1aString(hash, s) {
   for (let i = 0; i < s.length; i++) hash = fnv1a(hash, s.charCodeAt(i));
   return hash;
 }
+var HOLD_TAG = 1213156420;
+var FOCUS_TAG = 1179599699;
 function canonicalisePaths(paths) {
-  return [...paths].map((p) => ({ unitId: p.unitId, waypoints: p.waypoints })).sort((a, b) => a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0);
+  return [...paths].map((p) => p.targetId ? { unitId: p.unitId, waypoints: p.waypoints, targetId: p.targetId } : { unitId: p.unitId, waypoints: p.waypoints }).sort((a, b) => a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0);
 }
 function hashPaths(paths) {
   let h = 2166136261;
@@ -1849,6 +1924,14 @@ function hashPaths(paths) {
     for (const w of p.waypoints) {
       h = fnv1a(h, Math.round(w.x * 100));
       h = fnv1a(h, Math.round(w.y * 100));
+      if (w.wait) {
+        h = fnv1a(h, HOLD_TAG);
+        h = fnv1a(h, Math.round(w.wait * 100));
+      }
+    }
+    if (p.targetId) {
+      h = fnv1a(h, FOCUS_TAG);
+      h = fnv1aString(h, p.targetId);
     }
   }
   return h >>> 0;

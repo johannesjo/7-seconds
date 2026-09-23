@@ -380,6 +380,12 @@ export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): vo
 export function advanceWaypoint(unit: Unit, dt: number = 0): void {
   if (!unit.alive) return;
 
+  // Holding at a wait point: stay put until the timer runs out.
+  if ((unit.holdTimer ?? 0) > 0) {
+    unit.holdTimer = Math.max(0, unit.holdTimer! - dt);
+    if (unit.holdTimer > 0) return;
+  }
+
   const atTarget = !unit.moveTarget ||
     (Math.abs(unit.pos.x - unit.moveTarget.x) < 2 &&
      Math.abs(unit.pos.y - unit.moveTarget.y) < 2);
@@ -404,6 +410,12 @@ export function advanceWaypoint(unit: Unit, dt: number = 0): void {
 
   if (atTarget || stuck) {
     unit.stuckTime = 0;
+    const wait = unit.moveTarget?.wait ?? 0;
+    if (wait > 0) {
+      unit.moveTarget = null;
+      unit.holdTimer = wait;
+      return;
+    }
     unit.moveTarget = unit.waypoints.length > 0
       ? unit.waypoints.shift()!
       : null;
@@ -777,6 +789,22 @@ export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string
   }
 
   return nearestVisible ?? nearestAny;
+}
+
+/** Units that can take a focus-fire order. Blades and bombers hit whatever
+ *  they touch, so a preferred target means nothing to them. */
+export function canFocus(unit: Unit): boolean {
+  return unit.type !== 'blade' && unit.type !== 'bomber';
+}
+
+/** The unit's focus target, if it is alive, visible and in firing range —
+ *  i.e. the unit should stop on its path and shoot it. */
+export function engagedFocusTarget(unit: Unit, allUnits: Unit[], obstacles: Obstacle[], elevationZones: ElevationZone[]): Unit | null {
+  if (!unit.attackTargetId || !canFocus(unit)) return null;
+  const target = allUnits.find(u => u.id === unit.attackTargetId);
+  if (!target || !target.alive || target.team === unit.team) return null;
+  if (!isInRange(unit, target, elevationZones)) return null;
+  return hasLineOfSight(unit.pos, target.pos, obstacles, unit.projectileRadius) ? target : null;
 }
 
 /** Count how many elevation zones overlap a position (0 = flat ground). */

@@ -7,6 +7,12 @@ export interface Vec2 {
   y: number;
 }
 
+/** A path point. `wait` makes the unit hold here for that many seconds
+ *  (still firing) before moving on to the next point. */
+export interface Waypoint extends Vec2 {
+  wait?: number;
+}
+
 export interface UnitStats {
   hp: number;
   speed: number;
@@ -30,9 +36,13 @@ export interface Unit {
   damage: number;
   range: number;
   radius: number;
-  moveTarget: Vec2 | null;
-  waypoints: Vec2[];
+  moveTarget: Waypoint | null;
+  waypoints: Waypoint[];
+  /** Focus-fire order: preferred enemy. While it is in range and visible the
+   *  unit stops on its path and engages it. */
   attackTargetId: string | null;
+  /** Seconds left on the current hold order (see Waypoint.wait). */
+  holdTimer?: number;
   alive: boolean;
   fireCooldown: number;
   fireTimer: number;

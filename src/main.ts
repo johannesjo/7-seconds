@@ -654,7 +654,11 @@ ctfPvpBtn.addEventListener('click', async () => {
 confirmBtn.addEventListener('click', () => {
   if (asyncController && playbackPathDrawer) {
     const myUnits = playbackUnits.filter(u => u.team === asyncMyTeam);
-    const paths: PathList = myUnits.map(u => ({ unitId: u.id, waypoints: [...u.waypoints] }));
+    const paths: PathList = myUnits.map(u => ({
+      unitId: u.id,
+      waypoints: [...u.waypoints],
+      ...(u.attackTargetId ? { targetId: u.attackTargetId } : {}),
+    }));
     playbackPathDrawer.destroy();
     playbackPathDrawer = null;
     confirmBtn.classList.remove('active');

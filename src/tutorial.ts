@@ -4,22 +4,34 @@ import type { Unit, ElevationZone, ReplayData } from './types';
 
 export const TUTORIAL_LESSONS = [
   {
-    title: '1/3 · Draw a move',
+    title: '1/5 · Draw a move',
     instruction: 'Drag your blue soldier toward the red soldier, then press Fight. Redraw the path to change your plan.',
     success: 'Your soldier followed your path and aimed automatically. You control movement; units handle firing.',
     retry: 'Try a longer path toward the red soldier, then press Fight.',
   },
   {
-    title: '2/3 · Take high ground',
+    title: '2/5 · Take high ground',
     instruction: 'Move your blue sniper onto the shaded hill. Stop there and fire with 20% extra range.',
     success: 'Your sniper fired from high ground. Hills extend firing range by 20% per level.',
     retry: 'End the sniper’s path inside the shaded hill and let it fire from there.',
   },
   {
-    title: '3/3 · Flank the shield',
+    title: '3/5 · Flank the shield',
     instruction: 'Leave the middle soldier in front. Draw the right soldier around the shield’s right side to attack from behind.',
     success: 'You landed a flanking hit! Side and rear shots bypass the frontal shield and deal 50% extra damage.',
     retry: 'Keep one soldier in front to hold the shield’s attention. Send the other around its side, staying a little farther away.',
+  },
+  {
+    title: '4/5 · Wait, then go',
+    instruction: 'Start drawing the soldier’s path, then rest your finger a moment: a wait marker appears and grows. Keep drawing to continue. Units hold at markers, still firing.',
+    success: 'Your soldier held, then moved on. Use waits to time pushes, let a shield lead, or ambush from cover.',
+    retry: 'While drawing, keep your finger still until the wait marker appears, then keep drawing past it.',
+  },
+  {
+    title: '5/5 · Focus fire',
+    instruction: 'End the sniper’s path on the red bomber to focus it. Focused units stop once the target is in range and shoot it before closer enemies.',
+    success: 'Focused shot! The bomber blew up among its own team. Focus picks your target; without it, units shoot the closest enemy.',
+    retry: 'Release the sniper’s path right on the bomber. A crosshair shows the focus order.',
   },
 ];
 
@@ -38,6 +50,23 @@ export function createTutorialEncounter(lesson: number): { units: Unit[]; elevat
       units: [createUnit('blue_sniper', 'sniper', 'blue', { x: x - 90, y: y + 170 }),
         createUnit('red_soldier', 'soldier', 'red', { x, y: y - 210 })],
       elevationZones: [{ x: x - 50, y: y + 90, w: 100, h: 70 }],
+    };
+  }
+  if (lesson === 3) {
+    return {
+      units: [createUnit('blue_soldier', 'soldier', 'blue', { x, y: y + 200 }),
+        createUnit('red_soldier', 'soldier', 'red', { x, y: y - 250 })],
+      elevationZones: [],
+    };
+  }
+  if (lesson === 4) {
+    return {
+      units: [createUnit('blue_sniper', 'sniper', 'blue', { x, y: y + 250 }),
+        createUnit('red_decoy', 'soldier', 'red', { x: x + 70, y: y - 100 }),
+        createUnit('red_bomber', 'bomber', 'red', { x: x - 60, y: y - 150 }),
+        createUnit('red_left', 'soldier', 'red', { x: x - 95, y: y - 170 }),
+        createUnit('red_right', 'soldier', 'red', { x: x - 25, y: y - 175 })],
+      elevationZones: [],
     };
   }
   return {
@@ -59,5 +88,28 @@ export function tutorialObjectiveMet(lesson: number, units: Unit[], replay: Repl
     return !!replay?.events.some(event => event.type === 'fire' && event.team === 'blue'
       && getElevationLevel(event.pos, replay.elevationZones) > 0);
   }
-  return !!replay?.events.some(event => event.team === 'blue' && event.flanked);
+  if (lesson === 2) return !!replay?.events.some(event => event.team === 'blue' && event.flanked);
+  if (lesson === 3) return !!replay && heldThenMoved(replay, 'blue_soldier');
+  const firstHit = replay?.events.find(event => event.team === 'blue' && (event.type === 'hit' || event.type === 'kill'));
+  return firstHit?.targetId === 'red_bomber';
+}
+
+/** True when the unit stood still mid-plan (a hold) and then moved on. */
+function heldThenMoved(replay: ReplayData, unitId: string): boolean {
+  const HOLD_FRAMES = 30; // shortest hold is 0.5s at 60 fps
+  let still = 0;
+  let heldAt: { x: number; y: number } | null = null;
+  let prev: { x: number; y: number } | null = null;
+  for (const frame of replay.frames) {
+    const u = frame.units.find(unit => unit.id === unitId);
+    if (!u) continue;
+    if (prev && Math.hypot(u.x - prev.x, u.y - prev.y) < 0.01) {
+      if (++still >= HOLD_FRAMES) heldAt ??= { x: u.x, y: u.y };
+    } else {
+      still = 0;
+    }
+    if (heldAt && Math.hypot(u.x - heldAt.x, u.y - heldAt.y) >= 20) return true;
+    prev = { x: u.x, y: u.y };
+  }
+  return false;
 }

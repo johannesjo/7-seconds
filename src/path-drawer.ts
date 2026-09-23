@@ -1,31 +1,13 @@
 import { Graphics, Container, Rectangle, Text } from 'pixi.js';
-import { Unit, Team, Vec2, ElevationZone } from './types';
-import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S } from './constants';
-import { getElevationLevel } from './units';
+import { Unit, Team, Vec2, Waypoint, ElevationZone } from './types';
+import { UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S } from './constants';
+import { HOLD_JITTER_PX, holdSecondsFor, toWaypoints } from './path-orders';
+import { getElevationLevel, canFocus } from './units';
 import { Theme, NIGHT_THEME } from './theme';
 import { MAX_PREDICTION_TIME_S, predictPath, type PathPrediction } from './path-preview';
 
-/** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
-function samplePath(raw: Vec2[], minDist: number): Vec2[] {
-  if (raw.length === 0) return [];
-  const result: Vec2[] = [raw[0]];
-  for (let i = 1; i < raw.length; i++) {
-    const last = result[result.length - 1];
-    const dx = raw[i].x - last.x;
-    const dy = raw[i].y - last.y;
-    if (dx * dx + dy * dy >= minDist * minDist) {
-      result.push(raw[i]);
-    }
-  }
-  // Always include the actual endpoint (release position)
-  if (raw.length > 1) {
-    const end = raw[raw.length - 1];
-    const last = result[result.length - 1];
-    if (end.x !== last.x || end.y !== last.y) {
-      result.push(end);
-    }
-  }
-  return result;
+function holdLabel(wait: number): string {
+  return `${wait % 1 === 0 ? wait.toFixed(0) : wait.toFixed(1)}s`;
 }
 
 function distancePt(a: Vec2, b: Vec2): number {
@@ -60,6 +42,13 @@ function pointAtDistance(pts: Vec2[], dist: number): { pos: Vec2; angle: number 
   };
 }
 
+function resetOrders(unit: Unit): void {
+  unit.waypoints = [];
+  unit.moveTarget = null;
+  unit.holdTimer = 0;
+  unit.attackTargetId = null;
+}
+
 export class PathDrawer {
   private stage: Container;
   private units: Unit[] = [];
@@ -70,7 +59,15 @@ export class PathDrawer {
   private selectedUnit: Unit | null = null;
   private hoveredUnit: Unit | null = null;
   private hoveredEnemy: Unit | null = null;
-  private rawPoints: Vec2[] = [];
+  private rawPoints: Waypoint[] = [];
+  /** Where the pointer last came to rest while drawing, and since when. */
+  private holdAnchor: Vec2 | null = null;
+  private holdSince = 0;
+  /** Index in rawPoints of the hold currently being grown, if any. */
+  private holdIndex: number | null = null;
+  /** Enemy under the pointer while drawing — releasing there sets a focus order. */
+  private focusCandidate: Unit | null = null;
+  private holdClock: ReturnType<typeof setInterval> | null = null;
   private enabled = false;
   private canvas: HTMLCanvasElement | null = null;
   theme: Theme = NIGHT_THEME;
@@ -82,7 +79,7 @@ export class PathDrawer {
   onInspectUnit: ((unit: Unit | null) => void) | null = null;
   private inspectedUnit: Unit | null = null;
   private predictionCache = new WeakMap<Unit, {
-    points: Vec2[];
+    points: Waypoint[];
     pos: Vec2;
     vel: Vec2;
     momentum: number | undefined;
@@ -165,7 +162,64 @@ export class PathDrawer {
     gfx.fill({ color, alpha: alpha * 0.8 });
   }
 
-  private prediction(unit: Unit, points: Vec2[]): PathPrediction {
+  /** The in-progress line as the unit will run it (a start hold becomes a
+   *  zero-length first leg, matching toWaypoints). */
+  private previewPoints(): Waypoint[] {
+    const [start, ...rest] = this.rawPoints;
+    if (!start?.wait) return this.rawPoints;
+    return [{ x: start.x, y: start.y }, start, ...rest];
+  }
+
+  /** Hold markers: a ring sized by the wait plus its duration. */
+  private drawHolds(points: Waypoint[], color: number, alpha: number): void {
+    for (const p of points) {
+      if (!p.wait) continue;
+      const r = 6 + p.wait * 2;
+      this.gfx.circle(p.x, p.y, r);
+      this.gfx.fill({ color, alpha: alpha * 0.15 });
+      this.gfx.circle(p.x, p.y, r);
+      this.gfx.setStrokeStyle({ width: 2, color, alpha });
+      this.gfx.stroke();
+      // Pause glyph
+      this.gfx.rect(p.x - 3, p.y - 3.5, 2, 7);
+      this.gfx.rect(p.x + 1, p.y - 3.5, 2, 7);
+      this.gfx.fill({ color, alpha });
+      const label = this.acquireLabel();
+      label.text = `wait ${holdLabel(p.wait)}`;
+      label.style.fill = this.theme.labelFill;
+      // Below the marker: the path's time label may sit above the same point.
+      label.position.set(p.x, p.y + r + 14);
+      label.alpha = alpha;
+    }
+  }
+
+  /** Focus marker: crosshair on the target, tethered to the path's end. */
+  private drawFocus(unit: Unit, from: Vec2, target: Unit | null, color: number, alpha: number): void {
+    if (!target || !target.alive || !canFocus(unit)) return;
+    const { x, y } = target.pos;
+    const r = target.radius + 7;
+    this.gfx.setStrokeStyle({ width: 1, color, alpha: alpha * 0.5 });
+    this.gfx.moveTo(from.x, from.y);
+    this.gfx.lineTo(x, y);
+    this.gfx.stroke();
+    this.gfx.circle(x, y, r);
+    this.gfx.setStrokeStyle({ width: 2, color, alpha });
+    this.gfx.stroke();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      this.gfx.moveTo(x + dx * (r - 4), y + dy * (r - 4));
+      this.gfx.lineTo(x + dx * (r + 5), y + dy * (r + 5));
+    }
+    this.gfx.stroke();
+    const label = this.acquireLabel();
+    label.text = 'focus';
+    label.style.fill = this.theme.labelFill;
+    // Beside the crosshair: time labels sit above and below the target.
+    const side = x > MAP_WIDTH - 70 ? -1 : 1;
+    label.position.set(x + side * (r + 24), y + 6);
+    label.alpha = alpha;
+  }
+
+  private prediction(unit: Unit, points: Waypoint[]): PathPrediction {
     const cached = this.predictionCache.get(unit);
     if (cached && cached.speed === unit.speed && cached.momentum === unit.momentum &&
       cached.stuckTime === unit.stuckTime &&
@@ -174,7 +228,7 @@ export class PathDrawer {
       cached.pos.x === unit.pos.x && cached.pos.y === unit.pos.y &&
       cached.vel.x === unit.vel.x && cached.vel.y === unit.vel.y &&
       cached.points.length === points.length &&
-      cached.points.every((p, i) => p.x === points[i].x && p.y === points[i].y)) {
+      cached.points.every((p, i) => p.x === points[i].x && p.y === points[i].y && p.wait === points[i].wait)) {
       return cached.prediction;
     }
     const prediction = predictPath(unit, points);
@@ -218,6 +272,9 @@ export class PathDrawer {
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rawPoints = [];
+    this.holdIndex = null;
+    this.focusCandidate = null;
+    this.stopHoldClock();
     this.inspectedUnit = null;
     this.onInspectUnit?.(null);
     this.hoverGfx.clear();
@@ -228,10 +285,7 @@ export class PathDrawer {
   /** Clear all waypoints for a team (called at start of their planning phase). */
   clearPaths(team: Team): void {
     for (const unit of this.units) {
-      if (unit.team === team && unit.alive) {
-        unit.waypoints = [];
-        unit.moveTarget = null;
-      }
+      if (unit.team === team && unit.alive) resetOrders(unit);
     }
     this.renderPaths();
   }
@@ -258,6 +312,8 @@ export class PathDrawer {
         this.gfx.circle(last.x, last.y, 3);
         this.gfx.fill({ color, alpha: alpha * 0.25 });
       }
+      this.drawHolds(unit.waypoints, color, alpha);
+      this.drawFocus(unit, last, this.units.find(u => u.id === unit.attackTargetId) ?? null, color, alpha);
 
       // Ticks mark seconds reachable within this round.
       const tickAlpha = alpha * 0.5;
@@ -289,7 +345,7 @@ export class PathDrawer {
     // Draw in-progress raw line (thicker + brighter than finalized paths)
     if (this.selectedUnit && this.rawPoints.length > 1) {
       const color = this.team === 'blue' ? this.theme.bluePathBright : this.theme.redPathBright;
-      const { reached, remainder, position, travelTime, tickDistances } = this.prediction(this.selectedUnit, this.rawPoints);
+      const { reached, remainder, position, travelTime, tickDistances } = this.prediction(this.selectedUnit, this.previewPoints());
       this.strokePath(this.gfx, reached, color, 4, 1);
       this.strokePath(this.gfx, remainder, color, 3, 0.22);
       this.drawGhost(this.gfx, this.selectedUnit, position, color, 1);
@@ -306,6 +362,8 @@ export class PathDrawer {
       }
 
       const endpoint = this.rawPoints[this.rawPoints.length - 1];
+      this.drawHolds(this.rawPoints, color, 1);
+      this.drawFocus(this.selectedUnit, endpoint, this.focusCandidate, color, 1);
       this.onZoneHighlight?.(position);
       const rawOverLimit = travelTime === null || travelTime > ROUND_DURATION_S;
       const liveLabel = this.acquireLabel();
@@ -366,7 +424,7 @@ export class PathDrawer {
       this.hoverGfx.stroke();
       // Range preview follows the estimated round-end position.
       const endPos = this.rawPoints.length > 0
-        ? this.prediction(this.selectedUnit, this.rawPoints).position
+        ? this.prediction(this.selectedUnit, this.previewPoints()).position
         : this.selectedUnit.pos;
       this.drawRangeCircle(this.selectedUnit, endPos, teamColor);
 
@@ -440,6 +498,34 @@ export class PathDrawer {
     if (this.enabled) this.renderHoverLayer();
   }
 
+  /** Holds grow while the pointer is still, when no pointer events arrive, so
+   *  drawing runs its own clock rather than relying on a host render loop. */
+  private startHoldClock(): void {
+    this.stopHoldClock();
+    this.holdClock = setInterval(() => {
+      if (this.updateHold()) this.renderPaths();
+    }, 50);
+  }
+
+  private stopHoldClock(): void {
+    if (this.holdClock !== null) clearInterval(this.holdClock);
+    this.holdClock = null;
+  }
+
+  /** Grow a hold while the pointer rests mid-draw. Returns true if it changed. */
+  private updateHold(now = performance.now()): boolean {
+    if (!this.selectedUnit || !this.holdAnchor || this.rawPoints.length === 0) return false;
+    const wait = holdSecondsFor(now - this.holdSince);
+    if (wait === 0) return false;
+    // Resting on an enemy means "focus", not "wait here".
+    if (this.focusCandidate) return false;
+    if (this.holdIndex === null) this.holdIndex = this.rawPoints.length - 1;
+    const point = this.rawPoints[this.holdIndex];
+    if (point.wait === wait) return false;
+    this.rawPoints[this.holdIndex] = { x: point.x, y: point.y, wait };
+    return true;
+  }
+
   private drawRangeCircle(unit: Unit, pos: Vec2, color: number): void {
     const level = getElevationLevel(pos, this.elevationZones);
     const elevated = level > 0;
@@ -471,6 +557,7 @@ export class PathDrawer {
 
   destroy(): void {
     this.enabled = false;
+    this.stopHoldClock();
     this.inspectedUnit = null;
     this.onInspectUnit?.(null);
     this.stage.off('pointerdown', this.onPointerDown);
@@ -543,9 +630,13 @@ export class PathDrawer {
       this.hoveredEnemy = null;
       this.hoveredUnit = closest;
       this.selectedUnit = closest;
-      closest.waypoints = [];
-      closest.moveTarget = null;
+      resetOrders(closest);
       this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
+      this.holdAnchor = { x: pos.x, y: pos.y };
+      this.holdSince = performance.now();
+      this.holdIndex = null;
+      this.focusCandidate = null;
+      this.startHoldClock();
       this.renderPaths();
       return;
     }
@@ -578,6 +669,13 @@ export class PathDrawer {
     // Drawing mode
     if (this.selectedUnit) {
       this.rawPoints.push({ x: pos.x, y: pos.y });
+      if (!this.holdAnchor || distancePt(this.holdAnchor, pos) > HOLD_JITTER_PX) {
+        // Moved on: any hold being grown is now fixed at its current length.
+        this.holdAnchor = { x: pos.x, y: pos.y };
+        this.holdSince = performance.now();
+        this.holdIndex = null;
+      }
+      this.focusCandidate = canFocus(this.selectedUnit) ? this.findNearestEnemy(pos.x, pos.y) : null;
       this.renderPaths();
     }
   };
@@ -585,13 +683,16 @@ export class PathDrawer {
   private onPointerUp = (): void => {
     if (!this.enabled || !this.selectedUnit) return;
 
-    const waypoints = samplePath(this.rawPoints, PATH_SAMPLE_DISTANCE);
-    // Skip the first point (unit's current position)
-    this.selectedUnit.waypoints = waypoints.slice(1);
+    this.selectedUnit.waypoints = toWaypoints(this.rawPoints);
+    this.selectedUnit.attackTargetId = this.focusCandidate?.id ?? null;
 
     this.hoveredUnit = this.selectedUnit;
     this.selectedUnit = null;
     this.rawPoints = [];
+    this.holdAnchor = null;
+    this.holdIndex = null;
+    this.focusCandidate = null;
+    this.stopHoldClock();
     this.renderPaths();
   };
 
@@ -600,8 +701,7 @@ export class PathDrawer {
     const pos = this.toLocal(e.global);
     const unit = this.findNearestUnit(pos.x, pos.y);
     if (unit) {
-      unit.waypoints = [];
-      unit.moveTarget = null;
+      resetOrders(unit);
       this.renderPaths();
     }
   };

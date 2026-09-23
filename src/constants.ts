@@ -28,6 +28,8 @@ export const ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
 ];
 
 export const ROUND_DURATION_S = 6;
+/** Longest hold a single path point can carry. */
+export const MAX_HOLD_S = 3;
 export const PATH_SAMPLE_DISTANCE = 18;
 export const UNIT_SELECT_RADIUS = 30;
 export const COVER_SCREEN_DURATION_MS = 1500;

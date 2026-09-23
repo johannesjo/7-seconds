@@ -28,6 +28,14 @@ describe('edge engine bundle', () => {
     expect(b.gameOver).toBe(a.gameOver);
   });
 
+  it('resolves hold and focus orders exactly like the source', () => {
+    const blueOrders = [{ unitId: 'b1', waypoints: [{ x: 150, y: 300, wait: 1.5 }, { x: 600, y: 300 }], targetId: 'r1' }];
+    const a = src.resolveRound(structuredClone(state), blueOrders, red, 99, 360);
+    const b = bundle.resolveRound(structuredClone(state), blueOrders, red, 99, 360);
+    expect(JSON.stringify(b.endState)).toBe(JSON.stringify(a.endState));
+    expect(bundle.hashPaths(blueOrders)).toBe(src.hashPaths(blueOrders));
+  });
+
   it('exposes the commit/seed helpers and they agree with the source', () => {
     expect(bundle.hashPaths(blue)).toBe(src.hashPaths(blue));
     expect(bundle.deriveMatchSeed('room1', 11, 22)).toBe(src.deriveMatchSeed('room1', 11, 22));
