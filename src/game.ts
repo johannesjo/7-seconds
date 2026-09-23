@@ -1,7 +1,7 @@
-import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Waypoint } from './types';
-import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, MAX_HOLD_S, ROCKET_MAX_PATH } from './constants';
+import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
+import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ROCKET_MAX_PATH } from './constants';
 import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELEVATION_ZONES } from './online-types';
-import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode, canFocus, engagedFocusTarget } from './units';
+import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateBattlefield, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 import { findMortarTarget, fireMortar, rocketReady, launchRocket, updateOrdnance, type Explosion } from './ordnance';
@@ -423,15 +423,6 @@ export class GameEngine {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       if (redDelayed && unit.team === 'red') continue;
-      if (engagedFocusTarget(unit, this.units, this.obstacles, this.elevationZones)) {
-        // Focus order: stand and shoot while the target is in reach, then
-        // resume the path once it dies or slips out of range.
-        const resumeTarget = unit.moveTarget;
-        unit.moveTarget = null;
-        moveUnit(unit, dt, this.obstacles, this.units, this.rng);
-        unit.moveTarget = resumeTarget;
-        continue;
-      }
       advanceWaypoint(unit, dt);
       moveUnit(unit, dt, this.obstacles, this.units, this.rng);
     }
@@ -452,10 +443,7 @@ export class GameEngine {
         continue;
       }
 
-      // The focus target wins only while it can actually be shot; otherwise
-      // the unit keeps firing at whatever is closest.
-      const target = engagedFocusTarget(unit, this.units, this.obstacles, this.elevationZones)
-        ?? findTarget(unit, this.units, null, this.obstacles);
+      const target = findTarget(unit, this.units, null, this.obstacles);
 
       // Blade uses AoE melee attack instead of projectiles
       if (unit.type === 'blade') {
@@ -709,8 +697,7 @@ export class GameEngine {
       // Use actual velocity — moveTarget can be stuck on obstacles
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
-      // Holding, or about to launch a drawn rocket, is not idle.
-      if ((u.holdTimer ?? 0) > 0) return false;
+      // About to launch a drawn rocket is not idle.
       if (u.type === 'rocketeer' && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
       const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
@@ -867,18 +854,7 @@ export class GameEngine {
         unit.waypoints = p.waypoints.slice(0, maxWaypoints)
           .filter(w => typeof w.x === 'number' && typeof w.y === 'number'
             && Number.isFinite(w.x) && Number.isFinite(w.y))
-          .map(w => {
-            const wp: Waypoint = { x: w.x, y: w.y };
-            if (typeof w.wait === 'number' && Number.isFinite(w.wait) && w.wait > 0) {
-              wp.wait = Math.min(MAX_HOLD_S, w.wait);
-            }
-            return wp;
-          });
-        unit.holdTimer = 0;
-        const target = typeof p.targetId === 'string'
-          ? this.units.find(u => u.id === p.targetId && u.team !== team)
-          : undefined;
-        unit.attackTargetId = target && canFocus(unit) ? target.id : null;
+          .map(w => ({ x: w.x, y: w.y }));
         unit.rocketFired = false;
         unit.rocketPath = unit.type === 'rocketeer' && Array.isArray(p.rocketPath)
           ? clampPathLength(p.rocketPath.slice(0, maxWaypoints)

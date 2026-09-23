@@ -87,12 +87,12 @@ describe('rocketeer', () => {
     expect(hp(run(state([walker, far]), plan), 'r')).toBe(UNIT_STATS.soldier.hp - UNIT_STATS.rocketeer.damage);
   });
 
-  it('keeps a live round going while a rocketeer holds before launching', () => {
+  it('fires the drawn rocket in a live round once the move is done', () => {
     let ended = false;
     const s = state([{ ...rocketeer, y: 700 }, { ...target, y: 400 }]);
     const e = new GameEngine(null, ev => { if (ev === 'end') ended = true; }, { initialState: s, seed: 1 });
     e.startBattle();
-    e.setBluePaths([{ unitId: 'k', waypoints: [{ x: 500, y: 690, wait: 2 }], rocketPath: [{ x: 500, y: 400 }] }]);
+    e.setBluePaths([{ unitId: 'k', waypoints: [{ x: 500, y: 660 }], rocketPath: [{ x: 500, y: 400 }] }]);
     e.confirmPlan();
     e.skipCover();
     e.confirmPlan();

@@ -19,16 +19,15 @@ var UNIT_STATS = {
   rocketeer: { hp: 35, speed: 80, damage: 45, range: 0, radius: 9, fireCooldown: 99, projectileSpeed: 260, projectileRadius: 5, turnSpeed: 3 }
 };
 var MORTAR_MIN_RANGE = 110;
-var MORTAR_BLAST_RADIUS = 45;
+var MORTAR_BLAST_RADIUS = 55;
 var MORTAR_FLIGHT_S = 1.1;
-var ROCKET_BLAST_RADIUS = 40;
+var ROCKET_BLAST_RADIUS = 60;
 var ROCKET_MAX_PATH = 650;
 var ARMY_COMPOSITION = [
   { type: "soldier", count: 3 },
   { type: "sniper", count: 1 }
 ];
 var ROUND_DURATION_S = 6;
-var MAX_HOLD_S = 3;
 var COVER_SCREEN_DURATION_MS = 1500;
 var ELEVATION_RANGE_BONUS = 0.2;
 var FLANK_ANGLE_THRESHOLD = Math.PI / 3;
@@ -362,10 +361,6 @@ function updateGunAngle(unit, desiredAngle, dt) {
 }
 function advanceWaypoint(unit, dt = 0) {
   if (!unit.alive) return;
-  if ((unit.holdTimer ?? 0) > 0) {
-    unit.holdTimer = Math.max(0, unit.holdTimer - dt);
-    if (unit.holdTimer > 0) return;
-  }
   const atTarget = !unit.moveTarget || Math.abs(unit.pos.x - unit.moveTarget.x) < 2 && Math.abs(unit.pos.y - unit.moveTarget.y) < 2;
   if (unit.moveTarget && dt > 0) {
     const toTargetX = unit.moveTarget.x - unit.pos.x;
@@ -381,12 +376,6 @@ function advanceWaypoint(unit, dt = 0) {
   const stuck = unit.moveTarget && (unit.stuckTime ?? 0) > 0.25;
   if (atTarget || stuck) {
     unit.stuckTime = 0;
-    const wait = unit.moveTarget?.wait ?? 0;
-    if (wait > 0) {
-      unit.moveTarget = null;
-      unit.holdTimer = wait;
-      return;
-    }
     unit.moveTarget = unit.waypoints.length > 0 ? unit.waypoints.shift() : null;
   }
 }
@@ -684,17 +673,6 @@ function findTarget(attacker, allUnits, preferredId, obstacles = []) {
     }
   }
   return nearestVisible ?? nearestAny;
-}
-function canFocus(unit) {
-  return unit.type !== "blade" && unit.type !== "bomber" && unit.type !== "rocketeer";
-}
-function engagedFocusTarget(unit, allUnits, obstacles, elevationZones) {
-  if (!unit.attackTargetId || !canFocus(unit)) return null;
-  const target = allUnits.find((u) => u.id === unit.attackTargetId);
-  if (!target || !target.alive || target.team === unit.team) return null;
-  if (unit.type === "mortar") return mortarCanReach(unit, target, elevationZones) ? target : null;
-  if (!isInRange(unit, target, elevationZones)) return null;
-  return hasLineOfSight(unit.pos, target.pos, obstacles, unit.projectileRadius) ? target : null;
 }
 function mortarCanReach(mortar, target, elevationZones) {
   const d = distance(mortar.pos, target.pos);
@@ -1059,7 +1037,6 @@ function findMortarTarget(mortar, allUnits, elevationZones) {
   let bestDist = Infinity;
   for (const u of allUnits) {
     if (!u.alive || u.team === mortar.team || !mortarCanReach(mortar, u, elevationZones)) continue;
-    if (u.id === mortar.attackTargetId) return u;
     const d = dist2(mortar.pos, u.pos);
     if (d < bestDist) {
       best = u;
@@ -1096,7 +1073,7 @@ function fireMortar(mortar, target, dt) {
   }];
 }
 function rocketReady(unit) {
-  return unit.type === "rocketeer" && unit.alive && !unit.rocketFired && (unit.rocketPath?.length ?? 0) > 0 && unit.moveTarget === null && unit.waypoints.length === 0 && !((unit.holdTimer ?? 0) > 0);
+  return unit.type === "rocketeer" && unit.alive && !unit.rocketFired && (unit.rocketPath?.length ?? 0) > 0 && unit.moveTarget === null && unit.waypoints.length === 0;
 }
 function launchRocket(unit) {
   unit.rocketFired = true;
@@ -1653,13 +1630,6 @@ var GameEngine = class _GameEngine {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       if (redDelayed && unit.team === "red") continue;
-      if (engagedFocusTarget(unit, this.units, this.obstacles, this.elevationZones)) {
-        const resumeTarget = unit.moveTarget;
-        unit.moveTarget = null;
-        moveUnit(unit, dt, this.obstacles, this.units, this.rng);
-        unit.moveTarget = resumeTarget;
-        continue;
-      }
       advanceWaypoint(unit, dt);
       moveUnit(unit, dt, this.obstacles, this.units, this.rng);
     }
@@ -1677,7 +1647,7 @@ var GameEngine = class _GameEngine {
         this.updateRocketeer(unit, dt);
         continue;
       }
-      const target = engagedFocusTarget(unit, this.units, this.obstacles, this.elevationZones) ?? findTarget(unit, this.units, null, this.obstacles);
+      const target = findTarget(unit, this.units, null, this.obstacles);
       if (unit.type === "blade") {
         if (target) {
           const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
@@ -1909,7 +1879,6 @@ var GameEngine = class _GameEngine {
       if (!u.alive) return true;
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
-      if ((u.holdTimer ?? 0) > 0) return false;
       if (u.type === "rocketeer" && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
       const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
@@ -2047,16 +2016,7 @@ var GameEngine = class _GameEngine {
       if (!Array.isArray(p.waypoints)) continue;
       const unit = this.units.find((u) => u.id === p.unitId);
       if (unit && unit.team === team) {
-        unit.waypoints = p.waypoints.slice(0, maxWaypoints).filter((w) => typeof w.x === "number" && typeof w.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)).map((w) => {
-          const wp = { x: w.x, y: w.y };
-          if (typeof w.wait === "number" && Number.isFinite(w.wait) && w.wait > 0) {
-            wp.wait = Math.min(MAX_HOLD_S, w.wait);
-          }
-          return wp;
-        });
-        unit.holdTimer = 0;
-        const target = typeof p.targetId === "string" ? this.units.find((u) => u.id === p.targetId && u.team !== team) : void 0;
-        unit.attackTargetId = target && canFocus(unit) ? target.id : null;
+        unit.waypoints = p.waypoints.slice(0, maxWaypoints).filter((w) => typeof w.x === "number" && typeof w.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)).map((w) => ({ x: w.x, y: w.y }));
         unit.rocketFired = false;
         unit.rocketPath = unit.type === "rocketeer" && Array.isArray(p.rocketPath) ? clampPathLength(p.rocketPath.slice(0, maxWaypoints).filter((w) => typeof w?.x === "number" && typeof w?.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)).map((w) => ({ x: w.x, y: w.y })), unit.waypoints[unit.waypoints.length - 1] ?? unit.pos, ROCKET_MAX_PATH) : [];
       }
@@ -2177,14 +2137,11 @@ function fnv1aString(hash, s) {
   for (let i = 0; i < s.length; i++) hash = fnv1a(hash, s.charCodeAt(i));
   return hash;
 }
-var HOLD_TAG = 1213156420;
-var FOCUS_TAG = 1179599699;
 var ROCKET_TAG = 1380926283;
 function canonicalisePaths(paths) {
   return [...paths].map((p) => ({
     unitId: p.unitId,
     waypoints: p.waypoints,
-    ...p.targetId ? { targetId: p.targetId } : {},
     ...p.rocketPath?.length ? { rocketPath: p.rocketPath } : {}
   })).sort((a, b) => a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0);
 }
@@ -2196,14 +2153,6 @@ function hashPaths(paths) {
     for (const w of p.waypoints) {
       h = fnv1a(h, Math.round(w.x * 100));
       h = fnv1a(h, Math.round(w.y * 100));
-      if (w.wait) {
-        h = fnv1a(h, HOLD_TAG);
-        h = fnv1a(h, Math.round(w.wait * 100));
-      }
-    }
-    if (p.targetId) {
-      h = fnv1a(h, FOCUS_TAG);
-      h = fnv1aString(h, p.targetId);
     }
     if (p.rocketPath?.length) {
       h = fnv1a(h, ROCKET_TAG);

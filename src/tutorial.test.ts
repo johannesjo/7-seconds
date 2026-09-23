@@ -2,19 +2,17 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { MAP_HEIGHT, MAP_WIDTH, setMapSize } from './constants';
 import { GameEngine } from './game';
 import { createTutorialEncounter, tutorialObjectiveMet } from './tutorial';
-import type { PathList } from './online-async-core';
+import type { Vec2 } from './types';
 
 const originalMapSize = { width: MAP_WIDTH, height: MAP_HEIGHT };
 
 afterEach(() => setMapSize(originalMapSize.width, originalMapSize.height));
 
-function intendedPlan(lesson: number): PathList {
+function intendedPlan(lesson: number): { unitId: string; waypoints: Vec2[] }[] {
   const x = MAP_WIDTH / 2;
   const y = MAP_HEIGHT / 2;
   if (lesson === 0) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 60 }] }];
   if (lesson === 1) return [{ unitId: 'blue_sniper', waypoints: [{ x, y: y + 125 }] }];
-  if (lesson === 3) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 150, wait: 1 }, { x, y: y + 60 }] }];
-  if (lesson === 4) return [{ unitId: 'blue_sniper', waypoints: [{ x: x - 60, y: y - 110 }], targetId: 'red_bomber' }];
   return [{ unitId: 'blue_flanker', waypoints: [
     { x: x + 110, y: y + 40 }, { x: x + 100, y: y - 50 },
   ] }];
@@ -63,42 +61,15 @@ describe.each([
   [360, 620],
   [1000, 1000],
 ])('tutorial encounter at %ix%i', (width, height) => {
-  it.each([0, 1, 2, 3, 4])('lesson %i succeeds with its intended plan and stationary red opponents', lesson => {
+  it.each([0, 1, 2])('lesson %i succeeds with its intended plan and stationary red opponents', lesson => {
     const result = playLesson(lesson, width, height, true);
     expect(result.met).toBe(true);
   });
 
-  it.each([0, 1, 2, 3, 4])('lesson %i does not pass with an empty plan', lesson => {
+  it.each([0, 1, 2])('lesson %i does not pass with an empty plan', lesson => {
     const result = playLesson(lesson, width, height, false);
     expect(result.met).toBe(false);
-    // In the focus lesson both enemies start in range, so an idle sniper
-    // still fires (at the closer decoy).
-    if (lesson !== 4) expect(result.redEnd).toEqual(result.redStart);
-  });
-
-  it('hold lesson does not pass with a plain path', () => {
-    setMapSize(width, height);
-    const plan = intendedPlan(3).map(p => ({ ...p, waypoints: p.waypoints.map(({ x, y }) => ({ x, y })) }));
-    const practice = createTutorialEncounter(3);
-    const engine = new GameEngine(null, () => {}, { practice, seed: 1 });
-    engine.startBattle();
-    engine.setBluePaths(plan);
-    engine.confirmPlan();
-    for (let tick = 0; tick < 480 && engine.phase === 'playing'; tick++) engine.externalTick(1000 / 60);
-    expect(tutorialObjectiveMet(3, engine.getUnits(), engine.getReplayData())).toBe(false);
-    engine.stop();
-  });
-
-  it('focus lesson does not pass without the focus order', () => {
-    setMapSize(width, height);
-    const practice = createTutorialEncounter(4);
-    const engine = new GameEngine(null, () => {}, { practice, seed: 1 });
-    engine.startBattle();
-    engine.setBluePaths(intendedPlan(4).map(({ unitId, waypoints }) => ({ unitId, waypoints })));
-    engine.confirmPlan();
-    for (let tick = 0; tick < 480 && engine.phase === 'playing'; tick++) engine.externalTick(1000 / 60);
-    expect(tutorialObjectiveMet(4, engine.getUnits(), engine.getReplayData())).toBe(false);
-    engine.stop();
+    expect(result.redEnd).toEqual(result.redStart);
   });
 
   it.each([{ direction: 'away', dx: 0, dy: 80 }, { direction: 'sideways', dx: 80, dy: 0 }])(

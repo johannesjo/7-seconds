@@ -1,5 +1,5 @@
 import { ROUND_DURATION_S } from './constants';
-import type { Unit, Vec2, Waypoint } from './types';
+import type { Unit, Vec2 } from './types';
 import { advanceWaypoint, moveUnit } from './units';
 
 export interface PathPrediction {
@@ -22,31 +22,8 @@ function pathLength(points: Vec2[]): number {
   return length;
 }
 
-function totalWait(points: Waypoint[]): number {
-  return points.reduce((sum, p) => sum + (p.wait ?? 0), 0);
-}
-
-/** Distance travelled along a constant-speed route after `t` seconds,
- *  pausing at each point for its hold time. */
-function distanceAtTime(points: Waypoint[], speed: number): (t: number) => number {
-  return (t: number) => {
-    let clock = points[0].wait ?? 0;
-    let traveled = 0;
-    if (t <= clock) return 0;
-    for (let i = 1; i < points.length; i++) {
-      const seg = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
-      const segTime = seg / speed;
-      if (t < clock + segTime) return traveled + (t - clock) * speed;
-      clock += segTime + (points[i].wait ?? 0);
-      traveled += seg;
-      if (t <= clock) return traveled;
-    }
-    return traveled;
-  };
-}
-
 /** Estimate a route in open space, using the same blade acceleration and waypoint motion as play. */
-export function predictPath(unit: Unit, path: Waypoint[]): PathPrediction {
+export function predictPath(unit: Unit, path: Vec2[]): PathPrediction {
   const points = path.length > 0 ? path : [unit.pos];
   const length = pathLength(points);
   if (length === 0) {
@@ -58,18 +35,13 @@ export function predictPath(unit: Unit, path: Waypoint[]): PathPrediction {
     if (speed <= 0) {
       return { ...splitPathAtDistance(points, 0), travelTime: null, tickDistances: [] };
     }
-    const at = distanceAtTime(points, speed);
+    const roundDistance = speed * ROUND_DURATION_S;
     const tickDistances: number[] = [];
     for (let second = 1; second < ROUND_DURATION_S; second++) {
-      const d = at(second);
-      // Holds park the unit, so several seconds can land on the same spot.
-      if (d < length && d > (tickDistances[tickDistances.length - 1] ?? 0)) tickDistances.push(d);
+      const d = speed * second;
+      if (d < length) tickDistances.push(d);
     }
-    return {
-      ...splitPathAtDistance(points, at(ROUND_DURATION_S)),
-      travelTime: length / speed + totalWait(points),
-      tickDistances,
-    };
+    return { ...splitPathAtDistance(points, roundDistance), travelTime: length / speed, tickDistances };
   }
 
   // Only movement state is copied. The preview never changes the live unit or its route.
@@ -79,7 +51,6 @@ export function predictPath(unit: Unit, path: Waypoint[]): PathPrediction {
     vel: { ...unit.vel },
     knockbackVel: unit.knockbackVel ? { ...unit.knockbackVel } : undefined,
     moveTarget: null,
-    holdTimer: 0,
     waypoints: points.slice(1),
   };
   const cumulative = [0];
@@ -98,10 +69,7 @@ export function predictPath(unit: Unit, path: Waypoint[]): PathPrediction {
     advanceWaypoint(ghost, PREDICTION_DT);
     moveUnit(ghost, PREDICTION_DT, []);
 
-    if ((ghost.holdTimer ?? 0) > 0) {
-      // Holding at the point just reached (it has left the waypoint queue).
-      progress = Math.max(progress, cumulative[points.length - ghost.waypoints.length - 1]);
-    } else if (ghost.moveTarget) {
+    if (ghost.moveTarget) {
       const index = points.length - ghost.waypoints.length - 1;
       const from = points[index - 1];
       const to = points[index];
@@ -124,7 +92,7 @@ export function predictPath(unit: Unit, path: Waypoint[]): PathPrediction {
       roundDistance = progress;
       roundPosition = { ...ghost.pos };
     }
-    if (ghost.moveTarget === null && ghost.waypoints.length === 0 && !((ghost.holdTimer ?? 0) > 0)) {
+    if (ghost.moveTarget === null && ghost.waypoints.length === 0) {
       travelTime = step * PREDICTION_DT;
       if (step < roundSteps) {
         roundDistance = length;

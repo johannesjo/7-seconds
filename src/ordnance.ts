@@ -30,14 +30,12 @@ function dist(a: Vec2, b: Vec2): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-/** The mortar's target: its focus target when reachable, else the nearest
- *  reachable enemy. */
+/** The mortar's target: the nearest enemy inside its firing band. */
 export function findMortarTarget(mortar: Unit, allUnits: Unit[], elevationZones: ElevationZone[]): Unit | null {
   let best: Unit | null = null;
   let bestDist = Infinity;
   for (const u of allUnits) {
     if (!u.alive || u.team === mortar.team || !mortarCanReach(mortar, u, elevationZones)) continue;
-    if (u.id === mortar.attackTargetId) return u;
     const d = dist(mortar.pos, u.pos);
     if (d < bestDist) {
       best = u;
@@ -79,11 +77,11 @@ export function fireMortar(mortar: Unit, target: Unit, dt: number): Projectile[]
 }
 
 /** True when a rocketeer should launch now: it has a drawn rocket left and
- *  has finished its move (including any hold). */
+ *  has finished its move. */
 export function rocketReady(unit: Unit): boolean {
   return unit.type === 'rocketeer' && unit.alive && !unit.rocketFired
     && (unit.rocketPath?.length ?? 0) > 0
-    && unit.moveTarget === null && unit.waypoints.length === 0 && !((unit.holdTimer ?? 0) > 0);
+    && unit.moveTarget === null && unit.waypoints.length === 0;
 }
 
 export function launchRocket(unit: Unit): Projectile {

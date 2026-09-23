@@ -28,14 +28,6 @@ describe('edge engine bundle', () => {
     expect(b.gameOver).toBe(a.gameOver);
   });
 
-  it('resolves hold and focus orders exactly like the source', () => {
-    const blueOrders = [{ unitId: 'b1', waypoints: [{ x: 150, y: 300, wait: 1.5 }, { x: 600, y: 300 }], targetId: 'r1' }];
-    const a = src.resolveRound(structuredClone(state), blueOrders, red, 99, 360);
-    const b = bundle.resolveRound(structuredClone(state), blueOrders, red, 99, 360);
-    expect(JSON.stringify(b.endState)).toBe(JSON.stringify(a.endState));
-    expect(bundle.hashPaths(blueOrders)).toBe(src.hashPaths(blueOrders));
-  });
-
   it('resolves mortar shells and drawn rockets exactly like the source', () => {
     const armed = {
       ...state,

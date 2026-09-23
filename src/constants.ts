@@ -28,10 +28,10 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
 
 /** Mortar can't lob shells closer than this (plus radii). */
 export const MORTAR_MIN_RANGE = 110;
-export const MORTAR_BLAST_RADIUS = 45;
+export const MORTAR_BLAST_RADIUS = 55;
 /** Seconds a shell is in the air — long enough to step out of the blast by moving on. */
 export const MORTAR_FLIGHT_S = 1.1;
-export const ROCKET_BLAST_RADIUS = 40;
+export const ROCKET_BLAST_RADIUS = 60;
 /** Longest rocket path a player can draw. */
 export const ROCKET_MAX_PATH = 650;
 
@@ -41,8 +41,6 @@ export const ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
 ];
 
 export const ROUND_DURATION_S = 6;
-/** Longest hold a single path point can carry. */
-export const MAX_HOLD_S = 3;
 export const PATH_SAMPLE_DISTANCE = 18;
 export const UNIT_SELECT_RADIUS = 30;
 export const COVER_SCREEN_DURATION_MS = 1500;
