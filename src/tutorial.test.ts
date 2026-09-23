@@ -14,7 +14,7 @@ function intendedPlan(lesson: number): PathList {
   if (lesson === 0) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 60 }] }];
   if (lesson === 1) return [{ unitId: 'blue_sniper', waypoints: [{ x, y: y + 125 }] }];
   if (lesson === 3) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 150, wait: 1 }, { x, y: y + 60 }] }];
-  if (lesson === 4) return [{ unitId: 'blue_sniper', waypoints: [{ x, y: y + 60 }], targetId: 'red_bomber' }];
+  if (lesson === 4) return [{ unitId: 'blue_sniper', waypoints: [{ x: x - 60, y: y - 110 }], targetId: 'red_bomber' }];
   return [{ unitId: 'blue_flanker', waypoints: [
     { x: x + 110, y: y + 40 }, { x: x + 100, y: y - 50 },
   ] }];
@@ -71,7 +71,9 @@ describe.each([
   it.each([0, 1, 2, 3, 4])('lesson %i does not pass with an empty plan', lesson => {
     const result = playLesson(lesson, width, height, false);
     expect(result.met).toBe(false);
-    expect(result.redEnd).toEqual(result.redStart);
+    // In the focus lesson both enemies start in range, so an idle sniper
+    // still fires (at the closer decoy).
+    if (lesson !== 4) expect(result.redEnd).toEqual(result.redStart);
   });
 
   it('hold lesson does not pass with a plain path', () => {

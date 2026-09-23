@@ -29,7 +29,7 @@ export const TUTORIAL_LESSONS = [
   },
   {
     title: '5/5 · Focus fire',
-    instruction: 'End the sniper’s path on the red bomber to focus it. Focused units stop once the target is in range and shoot it before closer enemies.',
+    instruction: 'Both enemies are in range, and the soldier is closer. Drag from your sniper and release on the red bomber to focus it: the sniper holds position and shoots the bomber first.',
     success: 'Focused shot! The bomber blew up among its own team. Focus picks your target; without it, units shoot the closest enemy.',
     retry: 'Release the sniper’s path right on the bomber. A crosshair shows the focus order.',
   },
@@ -61,11 +61,11 @@ export function createTutorialEncounter(lesson: number): { units: Unit[]; elevat
   }
   if (lesson === 4) {
     return {
-      units: [createUnit('blue_sniper', 'sniper', 'blue', { x, y: y + 250 }),
-        createUnit('red_decoy', 'soldier', 'red', { x: x + 70, y: y - 100 }),
-        createUnit('red_bomber', 'bomber', 'red', { x: x - 60, y: y - 150 }),
-        createUnit('red_left', 'soldier', 'red', { x: x - 95, y: y - 170 }),
-        createUnit('red_right', 'soldier', 'red', { x: x - 25, y: y - 175 })],
+      units: [createUnit('blue_sniper', 'sniper', 'blue', { x, y: y + 150 }),
+        createUnit('red_decoy', 'soldier', 'red', { x: x + 60, y: y - 40 }),
+        createUnit('red_bomber', 'bomber', 'red', { x: x - 60, y: y - 110 }),
+        createUnit('red_left', 'soldier', 'red', { x: x - 95, y: y - 130 }),
+        createUnit('red_right', 'soldier', 'red', { x: x - 25, y: y - 135 })],
       elevationZones: [],
     };
   }
