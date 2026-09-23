@@ -227,25 +227,17 @@ export class PathDrawer {
   }
 
   /** Mortar dead zone: dashed ring inside which it cannot lob shells. */
-  private drawMortarDeadZone(gfx: Graphics, mortar: Unit, strong: boolean): void {
+  private drawMortarDeadZone(gfx: Graphics, mortar: Unit): void {
     const color = this.theme.labelWarn;
     const { x, y } = mortar.pos;
     gfx.circle(x, y, MORTAR_MIN_RANGE);
-    gfx.fill({ color, alpha: strong ? 0.08 : 0.04 });
+    gfx.fill({ color, alpha: 0.08 });
     const ring: Vec2[] = [];
     for (let i = 0; i <= 48; i++) {
       const a = (i / 48) * Math.PI * 2;
       ring.push({ x: x + Math.cos(a) * MORTAR_MIN_RANGE, y: y + Math.sin(a) * MORTAR_MIN_RANGE });
     }
-    this.dashPath(ring, color, strong ? 2 : 1.5, strong ? 0.8 : 0.45, gfx);
-  }
-
-  /** Every mortar's dead zone, both teams: safe ground next to an enemy
-   *  mortar is worth knowing about when planning. */
-  private renderMortarZones(): void {
-    for (const unit of this.units) {
-      if (unit.alive && unit.type === 'mortar') this.drawMortarDeadZone(this.gfx, unit, false);
-    }
+    this.dashPath(ring, color, 2, 0.8, gfx);
   }
 
   private dashPath(points: Vec2[], color: number, width: number, alpha: number, gfx: Graphics = this.gfx): void {
@@ -275,7 +267,7 @@ export class PathDrawer {
         }
       }
     }
-    this.gfx.stroke();
+    gfx.stroke();
   }
 
   /** Rocket glyph players drag from; lighter while no rocket is drawn. */
@@ -458,7 +450,6 @@ export class PathDrawer {
       this.onZoneHighlight?.(null);
     }
 
-    this.renderMortarZones();
     this.renderRockets();
 
     // Hide unused pool labels
@@ -603,7 +594,7 @@ export class PathDrawer {
     if (unit.type === 'mortar') {
       // Highlight where it can't fire, and preview a shell's blast on the
       // enemy it would target from here.
-      this.drawMortarDeadZone(this.hoverGfx, { ...unit, pos }, true);
+      this.drawMortarDeadZone(this.hoverGfx, { ...unit, pos });
       const probe = { ...unit, pos };
       let nearest: Unit | null = null;
       for (const u of this.units) {
