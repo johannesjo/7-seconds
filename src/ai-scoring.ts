@@ -26,6 +26,9 @@ const WEIGHTS: Record<UnitType, {
   zombie:  { distIdeal: [0, 30],    distPenaltyScale: 0.1,  los: 5,  elevation: 0,  cover: 0,  flank: 5 },
   shielder: { distIdeal: [0, 30], distPenaltyScale: 0.3, los: 5, elevation: 0, cover: 5, flank: 5 },
   bomber:   { distIdeal: [0, 20], distPenaltyScale: 0.3, los: 5, elevation: 0, cover: 0, flank: 0 },
+  // Indirect fire: no line of sight needed, so hide behind cover at mid range.
+  mortar:   { distIdeal: [160, 300], distPenaltyScale: 0.15, los: 0, elevation: 10, cover: 30, flank: 0 },
+  rocketeer: { distIdeal: [140, 260], distPenaltyScale: 0.15, los: 0, elevation: 0, cover: 30, flank: 5 },
 };
 
 /** Score a candidate position for a given unit. Higher is better. */

@@ -1,7 +1,7 @@
 import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
 import { PathDrawer } from './path-drawer';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS, MORTAR_BLAST_RADIUS } from './constants';
 import { EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
@@ -383,6 +383,11 @@ export class Renderer {
       // Rotate gun barrel
       const nose = container.getChildAt(1) as Graphics;
       nose.rotation = unit.gunAngle;
+      if (unit.type === 'rocketeer') {
+        const warhead = container.getChildAt(3) as Graphics;
+        warhead.rotation = unit.gunAngle;
+        warhead.visible = !unit.rocketFired;
+      }
       if (unit.type === 'shielder') {
         // Keep the facing arc in sync with live and replay shield condition.
         nose.clear();
@@ -399,7 +404,7 @@ export class Renderer {
         }
       }
       // Rotate body with the gun for person-shaped units
-      if (unit.type === 'soldier' || unit.type === 'sniper' || unit.type === 'zombie' || unit.type === 'shielder' || unit.type === 'bomber') {
+      if (unit.type !== 'blade') {
         (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
       }
       if (unit.type === 'blade') {
@@ -501,6 +506,16 @@ export class Renderer {
       // Inner glow
       shape.circle(0, 0, r * 0.5);
       shape.fill({ color: 0xffff00, alpha: 0.3 + (1 - hpRatio) * 0.4 });
+    } else if (unit.type === 'mortar') {
+      // Squat base plate with the tube drawn as its nose.
+      const r = unit.radius;
+      shape.roundRect(-r, -r * 0.8, r * 2, r * 1.6, 3);
+      shape.fill(color);
+      shape.circle(0, 0, r * 0.45);
+      shape.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
+    } else if (unit.type === 'rocketeer') {
+      shape.ellipse(0, 0, unit.radius, unit.radius * 0.75);
+      shape.fill(color);
     } else if (unit.type === 'zombie') {
       const darkColor = unit.team === 'blue' ? this.theme.blueDark : this.theme.redDark;
       shape.ellipse(0, 0, unit.radius * 1.3, unit.radius * 0.9);
@@ -518,6 +533,13 @@ export class Renderer {
         const nr = unit.radius * 1.4;
         nose.rect(unit.radius - 1, -1.5, nr + 1, 3);
         nose.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
+      } else if (unit.type === 'mortar') {
+        nose.rect(0, -3.5, unit.radius * 1.3, 7);
+        nose.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
+      } else if (unit.type === 'rocketeer') {
+        // Launch tube over the shoulder (the loaded warhead is its own child).
+        nose.rect(-unit.radius * 0.8, unit.radius * 0.35, unit.radius * 2.2, 4.5);
+        nose.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
       } else {
         const nr = unit.radius * 0.6;
         nose.poly([unit.radius + nr, 0, unit.radius - 1, -nr * 0.35, unit.radius - 1, nr * 0.35]);
@@ -531,6 +553,14 @@ export class Renderer {
     const hpBar = new Graphics();
     this.updateHealthBar(hpBar, unit);
     container.addChild(hpBar);
+
+    if (unit.type === 'rocketeer') {
+      // Child 3: warhead in the tube, hidden once the rocket is away.
+      const warhead = new Graphics();
+      warhead.circle(unit.radius * 1.4, unit.radius * 0.35 + 2.25, 2.6);
+      warhead.fill({ color: this.theme.bomber, alpha: 0.9 });
+      container.addChild(warhead);
+    }
 
     return container;
   }
@@ -559,6 +589,14 @@ export class Renderer {
 
     for (const p of projectiles) {
       const color = p.team === 'blue' ? this.theme.blueProjectile : this.theme.redProjectile;
+      if (p.kind === 'shell') {
+        this.drawShell(p, color);
+        continue;
+      }
+      if (p.kind === 'rocket') {
+        this.drawRocket(p, color);
+        continue;
+      }
 
       // Draw trail
       if (p.trail && p.trail.length > 1) {
@@ -576,6 +614,45 @@ export class Renderer {
     }
 
     this.app.stage.addChild(this.projectileGraphics);
+  }
+
+  /** Shell: landing zone that firms up as it falls, a ground shadow, and the
+   *  round itself lifted along its arc. */
+  private drawShell(p: Projectile, color: number): void {
+    const g = this.projectileGraphics!;
+    const t = Math.min(1, (p.age ?? 0) / (p.flightTime ?? 1));
+    const blast = p.blastRadius ?? MORTAR_BLAST_RADIUS;
+    g.circle(p.target.x, p.target.y, blast);
+    g.fill({ color, alpha: 0.05 + 0.12 * t });
+    g.circle(p.target.x, p.target.y, blast);
+    g.setStrokeStyle({ width: 1.5, color, alpha: 0.3 + 0.5 * t });
+    g.stroke();
+    g.circle(p.target.x, p.target.y, blast * (1 - t));
+    g.setStrokeStyle({ width: 1, color, alpha: 0.5 });
+    g.stroke();
+    g.ellipse(p.pos.x, p.pos.y, 4, 2.5);
+    g.fill({ color: 0x000000, alpha: 0.2 });
+    const lift = Math.sin(Math.PI * t) * 70;
+    g.circle(p.pos.x, p.pos.y - lift, p.radius + Math.sin(Math.PI * t) * 2);
+    g.fill(color);
+  }
+
+  /** Rocket: smoky trail and a body pointing along its flight. */
+  private drawRocket(p: Projectile, color: number): void {
+    const g = this.projectileGraphics!;
+    const trail = p.trail ?? [];
+    for (let i = 1; i < trail.length; i++) {
+      g.setStrokeStyle({ width: 1 + i, color: this.theme.muzzleCore, alpha: (i / trail.length) * 0.35 });
+      g.moveTo(trail[i - 1].x, trail[i - 1].y);
+      g.lineTo(trail[i].x, trail[i].y);
+      g.stroke();
+    }
+    const a = Math.atan2(p.vel.y, p.vel.x);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const pt = (fx: number, fy: number) => [p.pos.x + cos * fx - sin * fy, p.pos.y + sin * fx + cos * fy];
+    g.poly([...pt(8, 0), ...pt(-6, -3.5), ...pt(-4, 0), ...pt(-6, 3.5)]);
+    g.fill(color);
   }
 
   getUnitContainer(id: string): Container | undefined {

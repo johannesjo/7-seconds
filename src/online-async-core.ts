@@ -1,8 +1,10 @@
 import type { Vec2 } from './types';
 import type { OnlineGameState } from './online-types';
+import { validPoints } from './path-orders';
 
-/** A team's planned movement for one round: waypoints per unit. */
-export type PathList = { unitId: string; waypoints: Vec2[] }[];
+/** A team's planned orders for one round: waypoints per unit, plus a
+ *  rocketeer's drawn rocket flight. */
+export type PathList = { unitId: string; waypoints: Vec2[]; rocketPath?: Vec2[] }[];
 
 export type AsyncTeam = 'blue' | 'red';
 
@@ -33,11 +35,17 @@ function fnv1aString(hash: number, s: string): number {
   return hash;
 }
 
+const ROCKET_TAG = 0x524f434b; // 'ROCK'
+
 /** Canonicalise a path list so hashing is order-independent across clients:
  *  units sorted by id, waypoints kept in drawn order (order is significant). */
 export function canonicalisePaths(paths: PathList): PathList {
   return [...paths]
-    .map(p => ({ unitId: p.unitId, waypoints: p.waypoints }))
+    .map(p => ({
+      unitId: p.unitId,
+      waypoints: p.waypoints,
+      ...(p.rocketPath?.length ? { rocketPath: p.rocketPath } : {}),
+    }))
     .sort((a, b) => (a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0));
 }
 
@@ -52,6 +60,18 @@ export function hashPaths(paths: PathList): number {
     for (const w of p.waypoints) {
       h = fnv1a(h, Math.round(w.x * 100));
       h = fnv1a(h, Math.round(w.y * 100));
+    }
+    // Only hashed when present, so plain paths hash exactly as before. The
+    // tag keeps rocket points from colliding with waypoint coordinates. Only
+    // the points the engine will accept are hashed, and junk can't throw.
+    const rocket = validPoints(p.rocketPath);
+    if (rocket.length > 0) {
+      h = fnv1a(h, ROCKET_TAG);
+      h = fnv1a(h, rocket.length);
+      for (const r of rocket) {
+        h = fnv1a(h, Math.round(r.x * 100));
+        h = fnv1a(h, Math.round(r.y * 100));
+      }
     }
   }
   return h >>> 0; // unsigned 32-bit

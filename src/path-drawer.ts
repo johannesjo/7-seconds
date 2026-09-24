@@ -1,31 +1,15 @@
 import { Graphics, Container, Rectangle, Text } from 'pixi.js';
 import { Unit, Team, Vec2, ElevationZone } from './types';
-import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S } from './constants';
-import { getElevationLevel } from './units';
+import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S, ROCKET_MAX_PATH, ROCKET_BLAST_RADIUS, MORTAR_BLAST_RADIUS, MORTAR_MIN_RANGE } from './constants';
+import { samplePath, clampPathLength } from './path-orders';
+import { getElevationLevel, mortarCanReach } from './units';
 import { Theme, NIGHT_THEME } from './theme';
 import { MAX_PREDICTION_TIME_S, predictPath, type PathPrediction } from './path-preview';
 
-/** Sample a polyline from raw pointer positions, keeping points >= minDist apart. */
-function samplePath(raw: Vec2[], minDist: number): Vec2[] {
-  if (raw.length === 0) return [];
-  const result: Vec2[] = [raw[0]];
-  for (let i = 1; i < raw.length; i++) {
-    const last = result[result.length - 1];
-    const dx = raw[i].x - last.x;
-    const dy = raw[i].y - last.y;
-    if (dx * dx + dy * dy >= minDist * minDist) {
-      result.push(raw[i]);
-    }
-  }
-  // Always include the actual endpoint (release position)
-  if (raw.length > 1) {
-    const end = raw[raw.length - 1];
-    const last = result[result.length - 1];
-    if (end.x !== last.x || end.y !== last.y) {
-      result.push(end);
-    }
-  }
-  return result;
+function polylineLength(points: Vec2[]): number {
+  let length = 0;
+  for (let i = 1; i < points.length; i++) length += distancePt(points[i - 1], points[i]);
+  return length;
 }
 
 function distancePt(a: Vec2, b: Vec2): number {
@@ -60,6 +44,47 @@ function pointAtDistance(pts: Vec2[], dist: number): { pos: Vec2; angle: number 
   };
 }
 
+/** Where a rocketeer's rocket launches from: the end of its move path. */
+function launchPoint(unit: Unit): Vec2 {
+  return unit.waypoints[unit.waypoints.length - 1] ?? unit.pos;
+}
+
+// Big enough to grab with a thumb, and far enough out not to cover the unit.
+const ROCKET_HANDLE_OFFSET = 38;
+const ROCKET_HANDLE_RADIUS = 26;
+const ROCKET_HANDLE_DRAW_RADIUS = 15;
+
+/** The grab point for drawing a rocket: just ahead of the launch point, along
+ *  the last leg of the move path (or toward the enemy side when standing). */
+function rocketHandle(unit: Unit): Vec2 {
+  const launch = launchPoint(unit);
+  const prev = unit.waypoints.length >= 2 ? unit.waypoints[unit.waypoints.length - 2] : unit.pos;
+  let dx = launch.x - prev.x;
+  let dy = launch.y - prev.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) {
+    dx = 0;
+    dy = unit.team === 'blue' ? -1 : 1;
+  } else {
+    dx /= len;
+    dy /= len;
+  }
+  const margin = ROCKET_HANDLE_RADIUS;
+  return {
+    x: Math.max(margin, Math.min(MAP_WIDTH - margin, launch.x + dx * ROCKET_HANDLE_OFFSET)),
+    y: Math.max(margin, Math.min(MAP_HEIGHT - margin, launch.y + dy * ROCKET_HANDLE_OFFSET)),
+  };
+}
+
+/** Clear a unit's orders. The rocket launches from the end of the move path,
+ *  so a new move voids it. */
+function resetOrders(unit: Unit): void {
+  unit.waypoints = [];
+  unit.moveTarget = null;
+  unit.rocketPath = [];
+  unit.rocketFired = false;
+}
+
 export class PathDrawer {
   private stage: Container;
   private units: Unit[] = [];
@@ -71,6 +96,9 @@ export class PathDrawer {
   private hoveredUnit: Unit | null = null;
   private hoveredEnemy: Unit | null = null;
   private rawPoints: Vec2[] = [];
+  /** Rocketeer whose rocket flight is being drawn, and the raw stroke. */
+  private rocketUnit: Unit | null = null;
+  private rawRocket: Vec2[] = [];
   private enabled = false;
   private canvas: HTMLCanvasElement | null = null;
   theme: Theme = NIGHT_THEME;
@@ -165,6 +193,145 @@ export class PathDrawer {
     gfx.fill({ color, alpha: alpha * 0.8 });
   }
 
+  /** Rocket orders for the active team: each rocketeer's handle, its drawn
+   *  flight path and the blast at the end. */
+  private renderRockets(): void {
+    const color = this.theme.bomber;
+    for (const unit of this.units) {
+      if (!unit.alive || unit.team !== this.team || unit.type !== 'rocketeer') continue;
+      const launch = launchPoint(unit);
+      const drawing = unit === this.rocketUnit;
+      // Sample the live stroke as on release, so the preview and its "max"
+      // cut-off match what gets saved.
+      const drawn = drawing
+        ? samplePath(this.rawRocket, PATH_SAMPLE_DISTANCE).slice(1)
+        : unit.rocketPath ?? [];
+      const path = clampPathLength(drawn, launch, ROCKET_MAX_PATH);
+      if (drawing && path.length > 0 && polylineLength([launch, ...drawn]) > ROCKET_MAX_PATH) {
+        // Past the rocket's reach: show the stroke faintly so the cut-off reads.
+        this.strokePath(this.gfx, [launch, ...drawn], color, 1.5, 0.25);
+        const cut = path[path.length - 1];
+        const label = this.acquireLabel();
+        label.text = 'max';
+        label.style.fill = this.theme.labelWarn;
+        label.position.set(cut.x, cut.y - 8);
+        label.alpha = 1;
+      }
+      if (path.length > 0) {
+        this.dashPath([launch, ...path], color, drawing ? 3 : 2, drawing ? 1 : 0.8);
+        const end = path[path.length - 1];
+        // When it blasts: after the move to the launch point, plus flight time.
+        const move = unit.waypoints.length > 0
+          ? this.prediction(unit, [unit.pos, ...unit.waypoints]).travelTime
+          : 0;
+        const at = move === null ? null : move + polylineLength([launch, ...path]) / unit.projectileSpeed;
+        const late = at === null || at > ROUND_DURATION_S;
+        const text = late ? 'too late' : `blast ~${at.toFixed(1)}s`;
+        this.drawBlast(this.gfx, end, ROCKET_BLAST_RADIUS, color, drawing ? 1 : 0.8, text, late);
+      }
+      if (!drawing) this.drawRocketHandle(rocketHandle(unit), color, path.length === 0);
+    }
+  }
+
+  /** Blast area: filled disc with a solid rim and a label, so players can
+   *  judge what it will catch. */
+  private drawBlast(gfx: Graphics, at: Vec2, radius: number, color: number, alpha: number, text = 'blast', warn = false): void {
+    gfx.circle(at.x, at.y, radius);
+    gfx.fill({ color, alpha: 0.16 * alpha });
+    gfx.circle(at.x, at.y, radius);
+    gfx.setStrokeStyle({ width: 2, color, alpha: 0.85 * alpha });
+    gfx.stroke();
+    gfx.circle(at.x, at.y, 2.5);
+    gfx.fill({ color, alpha });
+    if (gfx === this.gfx) {
+      const label = this.acquireLabel();
+      label.text = text;
+      label.style.fill = warn ? this.theme.labelWarn : this.theme.labelFill;
+      label.position.set(at.x, at.y + radius + 14);
+      label.alpha = alpha;
+    }
+  }
+
+  /** Mortar dead zone: dashed ring inside which it cannot lob shells. */
+  private drawMortarDeadZone(gfx: Graphics, mortar: Unit): void {
+    const color = this.theme.labelWarn;
+    const { x, y } = mortar.pos;
+    gfx.circle(x, y, MORTAR_MIN_RANGE);
+    gfx.fill({ color, alpha: 0.08 });
+    const ring: Vec2[] = [];
+    for (let i = 0; i <= 48; i++) {
+      const a = (i / 48) * Math.PI * 2;
+      ring.push({ x: x + Math.cos(a) * MORTAR_MIN_RANGE, y: y + Math.sin(a) * MORTAR_MIN_RANGE });
+    }
+    this.dashPath(ring, color, 2, 0.8, gfx);
+  }
+
+  private dashPath(points: Vec2[], color: number, width: number, alpha: number, gfx: Graphics = this.gfx): void {
+    const DASH = 8;
+    const GAP = 5;
+    gfx.setStrokeStyle({ width, color, alpha });
+    let on = true;
+    let left = DASH;
+    for (let i = 1; i < points.length; i++) {
+      let from = points[i - 1];
+      const to = points[i];
+      let seg = Math.hypot(to.x - from.x, to.y - from.y);
+      while (seg > 0) {
+        const step = Math.min(left, seg);
+        const t = step / seg;
+        const next = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+        if (on) {
+          gfx.moveTo(from.x, from.y);
+          gfx.lineTo(next.x, next.y);
+        }
+        seg -= step;
+        left -= step;
+        from = next;
+        if (left <= 0) {
+          on = !on;
+          left = on ? DASH : GAP;
+        }
+      }
+    }
+    gfx.stroke();
+  }
+
+  /** Rocket glyph players drag from; lighter while no rocket is drawn. */
+  private drawRocketHandle(at: Vec2, color: number, empty: boolean): void {
+    const r = ROCKET_HANDLE_DRAW_RADIUS;
+    this.gfx.circle(at.x, at.y, r);
+    this.gfx.fill({ color, alpha: empty ? 0.2 : 0.35 });
+    this.gfx.circle(at.x, at.y, r);
+    this.gfx.setStrokeStyle({ width: 2, color, alpha: 0.95 });
+    this.gfx.stroke();
+    this.gfx.poly([at.x, at.y - 9, at.x + 4.5, at.y + 3, at.x, at.y + 7, at.x - 4.5, at.y + 3]);
+    this.gfx.fill({ color, alpha: 0.95 });
+  }
+
+  private findRocketHandle(px: number, py: number): Unit | null {
+    for (const unit of this.units) {
+      if (!unit.alive || unit.team !== this.team || unit.type !== 'rocketeer') continue;
+      const toHandle = distancePt(rocketHandle(unit), { x: px, y: py });
+      if (toHandle > ROCKET_HANDLE_RADIUS) continue;
+      // The handle overlaps units' tap areas: it only wins when the pointer
+      // is nearer to it than to any of our units.
+      const nearerUnit = this.units.some(u => u.alive && u.team === this.team
+        && distancePt(u.pos, { x: px, y: py }) <= toHandle);
+      if (!nearerUnit) return unit;
+    }
+    return null;
+  }
+
+  /** Baseline for the time label at a path's end: above it, unless one of
+   *  our rocketeers has its rocket handle there, then on the other side. */
+  private endLabelY(unit: Unit, end: Vec2, overLimit: boolean): number {
+    const gap = overLimit ? 12 : unit.radius + 6;
+    const launch = launchPoint(unit);
+    const handleAbove = unit.type === 'rocketeer' && unit.team === this.team
+      && launch.x === end.x && launch.y === end.y && rocketHandle(unit).y < end.y;
+    return handleAbove ? end.y + gap + 14 : end.y - gap;
+  }
+
   private prediction(unit: Unit, points: Vec2[]): PathPrediction {
     const cached = this.predictionCache.get(unit);
     if (cached && cached.speed === unit.speed && cached.momentum === unit.momentum &&
@@ -218,6 +385,8 @@ export class PathDrawer {
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rawPoints = [];
+    this.rocketUnit = null;
+    this.rawRocket = [];
     this.inspectedUnit = null;
     this.onInspectUnit?.(null);
     this.hoverGfx.clear();
@@ -228,10 +397,7 @@ export class PathDrawer {
   /** Clear all waypoints for a team (called at start of their planning phase). */
   clearPaths(team: Team): void {
     for (const unit of this.units) {
-      if (unit.team === team && unit.alive) {
-        unit.waypoints = [];
-        unit.moveTarget = null;
-      }
+      if (unit.team === team && unit.alive) resetOrders(unit);
     }
     this.renderPaths();
   }
@@ -275,7 +441,7 @@ export class PathDrawer {
       const timeLabel = this.acquireLabel();
       timeLabel.text = this.timeText(travelTime);
       timeLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.labelFill;
-      timeLabel.position.set(last.x, last.y - (overLimit ? 12 : unit.radius + 6));
+      timeLabel.position.set(last.x, this.endLabelY(unit, last, overLimit));
       timeLabel.alpha = alpha;
       if (overLimit) {
         const roundLabel = this.acquireLabel();
@@ -311,7 +477,7 @@ export class PathDrawer {
       const liveLabel = this.acquireLabel();
       liveLabel.text = this.timeText(travelTime);
       liveLabel.style.fill = rawOverLimit ? this.theme.labelWarn : this.theme.labelFill;
-      liveLabel.position.set(endpoint.x, endpoint.y - (rawOverLimit ? 12 : this.selectedUnit.radius + 6));
+      liveLabel.position.set(endpoint.x, this.endLabelY(this.selectedUnit, endpoint, rawOverLimit));
       liveLabel.alpha = 1.0;
       if (rawOverLimit) {
         const roundLabel = this.acquireLabel();
@@ -322,6 +488,8 @@ export class PathDrawer {
     } else {
       this.onZoneHighlight?.(null);
     }
+
+    this.renderRockets();
 
     // Hide unused pool labels
     for (let i = this.labelIndex; i < this.labelPool.length; i++) {
@@ -355,6 +523,14 @@ export class PathDrawer {
         const pulseRadius = unit.radius + 4 + pulse * 4;
         this.hoverGfx.circle(unit.pos.x, unit.pos.y, pulseRadius);
         this.hoverGfx.setStrokeStyle({ width: 2, color: teamColor, alpha: 0.3 + pulse * 0.4 });
+        this.hoverGfx.stroke();
+      }
+
+      if (unit.type === 'rocketeer' && unit !== this.rocketUnit && !(unit.rocketPath?.length)) {
+        // No rocket drawn yet: pulse its handle the same way.
+        const handle = rocketHandle(unit);
+        this.hoverGfx.circle(handle.x, handle.y, ROCKET_HANDLE_DRAW_RADIUS + 3 + pulse * 4);
+        this.hoverGfx.setStrokeStyle({ width: 2, color: this.theme.bomber, alpha: 0.25 + pulse * 0.45 });
         this.hoverGfx.stroke();
       }
     }
@@ -392,7 +568,7 @@ export class PathDrawer {
         const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
         this.hoverLabel.text = this.timeText(travelTime);
         this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
-        this.hoverLabel.position.set(last.x, last.y - (overLimit ? 12 : this.hoveredUnit.radius + 6));
+        this.hoverLabel.position.set(last.x, this.endLabelY(this.hoveredUnit, last, overLimit));
         this.hoverLabel.alpha = 1;
         this.hoverLabel.visible = true;
       }
@@ -423,7 +599,7 @@ export class PathDrawer {
         const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
         this.hoverLabel.text = this.timeText(travelTime);
         this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
-        this.hoverLabel.position.set(last.x, last.y - (overLimit ? 12 : this.hoveredEnemy.radius + 6));
+        this.hoverLabel.position.set(last.x, this.endLabelY(this.hoveredEnemy, last, overLimit));
         this.hoverLabel.alpha = 0.6;
         this.hoverLabel.visible = true;
       }
@@ -461,6 +637,19 @@ export class PathDrawer {
     this.hoverGfx.stroke();
     this.hoverGfx.circle(pos.x, pos.y, range + unit.radius);
     this.hoverGfx.fill({ color: ringColor, alpha: this.theme.rangeFillAlpha });
+
+    if (unit.type === 'mortar') {
+      // Highlight where it can't fire, and preview a shell's blast on the
+      // enemy it would target from here.
+      this.drawMortarDeadZone(this.hoverGfx, { ...unit, pos });
+      const probe = { ...unit, pos };
+      let nearest: Unit | null = null;
+      for (const u of this.units) {
+        if (!u.alive || u.team === unit.team || !mortarCanReach(probe, u, this.elevationZones)) continue;
+        if (!nearest || distancePt(pos, u.pos) < distancePt(pos, nearest.pos)) nearest = u;
+      }
+      if (nearest) this.drawBlast(this.hoverGfx, nearest.pos, MORTAR_BLAST_RADIUS, color, 0.9);
+    }
   }
 
   clearGraphics(): void {
@@ -538,13 +727,24 @@ export class PathDrawer {
     if (e.button === 2) return;
     const pos = this.toLocal(e.global);
 
+    const rocketeer = this.findRocketHandle(pos.x, pos.y);
+    if (rocketeer) {
+      this.hoveredEnemy = null;
+      this.hoveredUnit = rocketeer;
+      this.rocketUnit = rocketeer;
+      rocketeer.rocketPath = [];
+      rocketeer.rocketFired = false;
+      this.rawRocket = [{ ...launchPoint(rocketeer) }];
+      this.renderPaths();
+      return;
+    }
+
     const closest = this.findNearestUnit(pos.x, pos.y);
     if (closest) {
       this.hoveredEnemy = null;
       this.hoveredUnit = closest;
       this.selectedUnit = closest;
-      closest.waypoints = [];
-      closest.moveTarget = null;
+      resetOrders(closest);
       this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
       this.renderPaths();
       return;
@@ -562,7 +762,7 @@ export class PathDrawer {
     const pos = this.toLocal(e.global);
 
     // Update hover state
-    if (!this.selectedUnit) {
+    if (!this.selectedUnit && !this.rocketUnit) {
       const prev = this.hoveredUnit;
       this.hoveredUnit = this.findNearestUnit(pos.x, pos.y);
       // If not hovering own unit, check for enemy
@@ -575,6 +775,12 @@ export class PathDrawer {
       if (this.hoveredUnit !== prev || this.hoveredEnemy !== prevEnemy) this.renderHoverLayer();
     }
 
+    if (this.rocketUnit) {
+      this.rawRocket.push({ x: pos.x, y: pos.y });
+      this.renderPaths();
+      return;
+    }
+
     // Drawing mode
     if (this.selectedUnit) {
       this.rawPoints.push({ x: pos.x, y: pos.y });
@@ -583,7 +789,18 @@ export class PathDrawer {
   };
 
   private onPointerUp = (): void => {
-    if (!this.enabled || !this.selectedUnit) return;
+    if (!this.enabled) return;
+    if (this.rocketUnit) {
+      const unit = this.rocketUnit;
+      const sampled = samplePath(this.rawRocket, PATH_SAMPLE_DISTANCE).slice(1);
+      unit.rocketPath = clampPathLength(sampled, launchPoint(unit), ROCKET_MAX_PATH);
+      unit.rocketFired = false;
+      this.rocketUnit = null;
+      this.rawRocket = [];
+      this.renderPaths();
+      return;
+    }
+    if (!this.selectedUnit) return;
 
     const waypoints = samplePath(this.rawPoints, PATH_SAMPLE_DISTANCE);
     // Skip the first point (unit's current position)
@@ -600,8 +817,7 @@ export class PathDrawer {
     const pos = this.toLocal(e.global);
     const unit = this.findNearestUnit(pos.x, pos.y);
     if (unit) {
-      unit.waypoints = [];
-      unit.moveTarget = null;
+      resetOrders(unit);
       this.renderPaths();
     }
   };

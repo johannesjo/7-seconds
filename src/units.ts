@@ -1,5 +1,5 @@
 import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone, ReplayUnitSnapshot, ReplayProjectileSnapshot } from './types';
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE, SHIELD_MAX_HITS } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE, SHIELD_MAX_HITS, MORTAR_MIN_RANGE } from './constants';
 
 interface ProjectileHit {
   pos: Vec2;
@@ -228,6 +228,8 @@ export function generateRandomComposition(): { type: UnitType; count: number }[]
     { type: 'soldier', weight: 2.5 },
     { type: 'sniper', weight: 1 },
     { type: 'shielder', weight: 0.5 },
+    { type: 'mortar', weight: 0.5 },
+    { type: 'rocketeer', weight: 0.5 },
   ];
   const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
 
@@ -779,6 +781,14 @@ export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string
   return nearestVisible ?? nearestAny;
 }
 
+/** True when `target` sits inside the mortar's firing band: beyond its minimum
+ *  range, within its (elevation-boosted) maximum. No line of sight needed. */
+export function mortarCanReach(mortar: Unit, target: Unit, elevationZones: ElevationZone[]): boolean {
+  const d = distance(mortar.pos, target.pos);
+  const max = mortar.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(mortar.pos, elevationZones));
+  return d >= MORTAR_MIN_RANGE && d <= max + mortar.radius + target.radius;
+}
+
 /** Count how many elevation zones overlap a position (0 = flat ground). */
 export function getElevationLevel(pos: Vec2, zones: ElevationZone[]): number {
   let level = 0;
@@ -1110,6 +1120,7 @@ export function snapshotToUnit(s: ReplayUnitSnapshot): Unit {
     alive: s.alive,
     radius: s.radius,
     shieldHits: s.shieldHits,
+    rocketFired: s.rocketFired,
     speed: 0,
     damage: 0,
     range: 0,
@@ -1127,9 +1138,12 @@ export function snapshotToUnit(s: ReplayUnitSnapshot): Unit {
 /** Convert a replay projectile snapshot to a Projectile object for rendering. */
 export function snapshotToProjectile(s: ReplayProjectileSnapshot): Projectile {
   return {
+    kind: s.kind,
+    age: s.progress,
+    flightTime: s.progress === undefined ? undefined : 1,
     pos: { x: s.x, y: s.y },
     vel: { x: s.vx, y: s.vy },
-    target: { x: 0, y: 0 },
+    target: { x: s.tx ?? 0, y: s.ty ?? 0 },
     damage: s.damage,
     radius: s.radius,
     team: s.team,

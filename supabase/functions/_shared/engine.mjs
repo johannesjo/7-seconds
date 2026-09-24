@@ -12,8 +12,17 @@ var UNIT_STATS = {
   sniper: { hp: 15, speed: 70, damage: 30, range: 300, radius: 7, fireCooldown: 2.5, projectileSpeed: 1200, projectileRadius: 5, turnSpeed: 1.2 },
   zombie: { hp: 20, speed: 55, damage: 14, range: 20, radius: 8, fireCooldown: 0.8, projectileSpeed: 300, projectileRadius: 4, turnSpeed: 3 },
   shielder: { hp: 40, speed: 45, damage: 10, range: 20, radius: 11, fireCooldown: 1, projectileSpeed: 300, projectileRadius: 4, turnSpeed: 2 },
-  bomber: { hp: 25, speed: 50, damage: 0, range: 0, radius: 9, fireCooldown: 99, projectileSpeed: 0, projectileRadius: 0, turnSpeed: 3 }
+  bomber: { hp: 25, speed: 50, damage: 0, range: 0, radius: 9, fireCooldown: 99, projectileSpeed: 0, projectileRadius: 0, turnSpeed: 3 },
+  // Mortar: `damage` is the shell's blast damage; projectileSpeed is unused (fixed flight time).
+  mortar: { hp: 30, speed: 55, damage: 30, range: 320, radius: 10, fireCooldown: 3, projectileSpeed: 0, projectileRadius: 4, turnSpeed: 1.5 },
+  // Rocketeer: no auto weapon — one player-drawn rocket per round (`damage` = blast damage).
+  rocketeer: { hp: 35, speed: 80, damage: 45, range: 0, radius: 9, fireCooldown: 99, projectileSpeed: 260, projectileRadius: 5, turnSpeed: 3 }
 };
+var MORTAR_MIN_RANGE = 110;
+var MORTAR_BLAST_RADIUS = 55;
+var MORTAR_FLIGHT_S = 1.1;
+var ROCKET_BLAST_RADIUS = 60;
+var ROCKET_MAX_PATH = 650;
 var ARMY_COMPOSITION = [
   { type: "soldier", count: 3 },
   { type: "sniper", count: 1 }
@@ -46,7 +55,7 @@ function isValidUnit(u) {
   return !!u && typeof u.id === "string" && typeof u.type === "string" && Object.prototype.hasOwnProperty.call(UNIT_STATS, u.type) && VALID_TEAMS.has(u.team) && isFiniteNumber(u.x) && isFiniteNumber(u.y) && isFiniteNumber(u.hp) && u.hp >= 0 && isFiniteNumber(u.maxHp) && u.maxHp > 0 && isFiniteNumber(u.radius) && u.radius >= 0 && isFiniteNumber(u.speed) && u.speed >= 0 && isFiniteNumber(u.range) && u.range >= 0 && isFiniteNumber(u.gunAngle);
 }
 function isPlausibleGameState(state) {
-  return !!state && Array.isArray(state.units) && state.units.length <= MAX_ONLINE_UNITS && Array.isArray(state.obstacles) && state.obstacles.length <= MAX_ONLINE_OBSTACLES && Array.isArray(state.elevationZones) && state.elevationZones.length <= MAX_ONLINE_ELEVATION_ZONES && Number.isFinite(state.mapWidth) && state.mapWidth > 0 && Number.isFinite(state.mapHeight) && state.mapHeight > 0 && state.units.every(isValidUnit) && state.obstacles.every(isValidRect) && state.elevationZones.every(isValidRect);
+  return !!state && Array.isArray(state.units) && state.units.length <= MAX_ONLINE_UNITS && Array.isArray(state.obstacles) && state.obstacles.length <= MAX_ONLINE_OBSTACLES && Array.isArray(state.elevationZones) && state.elevationZones.length <= MAX_ONLINE_ELEVATION_ZONES && Number.isFinite(state.mapWidth) && state.mapWidth > 0 && Number.isFinite(state.mapHeight) && state.mapHeight > 0 && state.units.every(isValidUnit) && new Set(state.units.map((u) => u.id)).size === state.units.length && state.obstacles.every(isValidRect) && state.elevationZones.every(isValidRect);
 }
 
 // src/units.ts
@@ -146,9 +155,9 @@ function detourWaypoints(a, b, obstacles, padding, depth = 0) {
   let bestCorner = validCorners[0];
   let bestDist = Infinity;
   for (const c of validCorners) {
-    const dist2 = Math.hypot(c.x - a.x, c.y - a.y) + Math.hypot(b.x - c.x, b.y - c.y);
-    if (dist2 < bestDist) {
-      bestDist = dist2;
+    const dist3 = Math.hypot(c.x - a.x, c.y - a.y) + Math.hypot(b.x - c.x, b.y - c.y);
+    if (dist3 < bestDist) {
+      bestDist = dist3;
       bestCorner = c;
     }
   }
@@ -225,7 +234,9 @@ function generateRandomComposition() {
   const pool = [
     { type: "soldier", weight: 2.5 },
     { type: "sniper", weight: 1 },
-    { type: "shielder", weight: 0.5 }
+    { type: "shielder", weight: 0.5 },
+    { type: "mortar", weight: 0.5 },
+    { type: "rocketeer", weight: 0.5 }
   ];
   const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
   const unitCount = 3 + Math.floor(Math.random() * 3);
@@ -391,14 +402,14 @@ function pushOutOfObstacles(pos, radius, obstacles) {
       const closestY = clamp(pos.y, obs.y, obs.y + obs.h);
       const dx = pos.x - closestX;
       const dy = pos.y - closestY;
-      const dist2 = dx * dx + dy * dy;
-      if (dist2 < radius * radius && dist2 > 1e-3) {
-        const dist3 = Math.sqrt(dist2);
+      const dist22 = dx * dx + dy * dy;
+      if (dist22 < radius * radius && dist22 > 1e-3) {
+        const dist3 = Math.sqrt(dist22);
         const push = radius - dist3 + 0.5;
         pos.x += dx / dist3 * push;
         pos.y += dy / dist3 * push;
         pushed = true;
-      } else if (dist2 <= 1e-3) {
+      } else if (dist22 <= 1e-3) {
         const toLeft = pos.x - obs.x;
         const toRight = obs.x + obs.w - pos.x;
         const toTop = pos.y - obs.y;
@@ -437,16 +448,16 @@ function moveUnit(unit, dt, obstacles, allUnits = [], rng) {
   }
   const dx = unit.moveTarget.x - unit.pos.x;
   const dy = unit.moveTarget.y - unit.pos.y;
-  const dist2 = Math.sqrt(dx * dx + dy * dy);
-  if (dist2 < 2) {
+  const dist3 = Math.sqrt(dx * dx + dy * dy);
+  if (dist3 < 2) {
     unit.pos.x = unit.moveTarget.x;
     unit.pos.y = unit.moveTarget.y;
     unit.vel = { x: 0, y: 0 };
     if (unit.type === "blade") unit.momentum = 0;
     return;
   }
-  let dirX = dx / dist2;
-  let dirY = dy / dist2;
+  let dirX = dx / dist3;
+  let dirY = dy / dist3;
   if (unit.type === "blade") {
     const actualSpeed = Math.sqrt(unit.vel.x ** 2 + unit.vel.y ** 2);
     const forwardDot = actualSpeed > 1 ? unit.vel.x / actualSpeed * dirX + unit.vel.y / actualSpeed * dirY : 0;
@@ -516,8 +527,8 @@ function moveUnit(unit, dt, obstacles, allUnits = [], rng) {
       dirY /= len;
     }
   }
-  const moveX = dirX * Math.min(step, dist2);
-  const moveY = dirY * Math.min(step, dist2);
+  const moveX = dirX * Math.min(step, dist3);
+  const moveY = dirY * Math.min(step, dist3);
   const oldX = unit.pos.x;
   const oldY = unit.pos.y;
   let newX = oldX + moveX;
@@ -585,12 +596,12 @@ function separateUnits(units, obstacles = []) {
         const b = alive[j];
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
-        const dist2 = Math.sqrt(dx * dx + dy * dy);
+        const dist3 = Math.sqrt(dx * dx + dy * dy);
         const minDist = a.radius + b.radius + 1;
-        if (dist2 < minDist && dist2 > 0.01) {
-          const overlap = (minDist - dist2) / 2;
-          const nx = dx / dist2;
-          const ny = dy / dist2;
+        if (dist3 < minDist && dist3 > 0.01) {
+          const overlap = (minDist - dist3) / 2;
+          const nx = dx / dist3;
+          const ny = dy / dist3;
           const aNewX = a.pos.x - nx * overlap;
           const aNewY = a.pos.y - ny * overlap;
           const bNewX = b.pos.x + nx * overlap;
@@ -621,7 +632,7 @@ function separateUnits(units, obstacles = []) {
           a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
           b.pos.x = clamp(b.pos.x, b.radius, MAP_WIDTH - b.radius);
           b.pos.y = clamp(b.pos.y, b.radius, MAP_HEIGHT - b.radius);
-        } else if (dist2 <= 0.01) {
+        } else if (dist3 <= 0.01) {
           a.pos.x -= 1;
           a.pos.y -= 1;
           b.pos.x += 1;
@@ -662,6 +673,11 @@ function findTarget(attacker, allUnits, preferredId, obstacles = []) {
     }
   }
   return nearestVisible ?? nearestAny;
+}
+function mortarCanReach(mortar, target, elevationZones) {
+  const d = distance(mortar.pos, target.pos);
+  const max = mortar.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(mortar.pos, elevationZones));
+  return d >= MORTAR_MIN_RANGE && d <= max + mortar.radius + target.radius;
 }
 function getElevationLevel(pos, zones) {
   let level = 0;
@@ -707,9 +723,9 @@ function bladeAoeAttack(unit, units, dt) {
     if (!enemy.alive || enemy.team === unit.team) continue;
     const dx = enemy.pos.x - unit.pos.x;
     const dy = enemy.pos.y - unit.pos.y;
-    const dist2 = Math.sqrt(dx * dx + dy * dy);
+    const dist3 = Math.sqrt(dx * dx + dy * dy);
     const hitRange = unit.range + unit.radius + enemy.radius;
-    if (dist2 <= hitRange) {
+    if (dist3 <= hitRange) {
       const wasBefore = enemy.hp;
       applyDamage(enemy, scaledDamage);
       hits.push({
@@ -719,11 +735,11 @@ function bladeAoeAttack(unit, units, dt) {
         team: unit.team,
         damage: scaledDamage
       });
-      if (dist2 > 0) {
+      if (dist3 > 0) {
         const kbSpeed = knockback / 0.15;
         enemy.knockbackVel = {
-          x: dx / dist2 * kbSpeed,
-          y: dy / dist2 * kbSpeed
+          x: dx / dist3 * kbSpeed,
+          y: dy / dist3 * kbSpeed
         };
         const selfKbSpeed = (20 + speedRatio * 60) / 0.15;
         const velSpeed = Math.sqrt(unit.vel.x ** 2 + unit.vel.y ** 2);
@@ -748,8 +764,8 @@ function bomberExplode(bomber, allUnits) {
     if (!u.alive || u.id === bomber.id) continue;
     const dx = u.pos.x - bomber.pos.x;
     const dy = u.pos.y - bomber.pos.y;
-    const dist2 = Math.sqrt(dx * dx + dy * dy);
-    if (dist2 <= EXPLOSION_RADIUS + u.radius) {
+    const dist3 = Math.sqrt(dx * dx + dy * dy);
+    if (dist3 <= EXPLOSION_RADIUS + u.radius) {
       const before = u.hp;
       applyDamage(u, EXPLOSION_DAMAGE);
       hits.push({
@@ -811,6 +827,7 @@ function tryFireProjectile(unit, target, dt, elevationZones = []) {
 function updateProjectiles(projectiles, units, dt, obstacles = []) {
   const alive = [];
   const hits = [];
+  const shieldBreaks = [];
   for (const p of projectiles) {
     const oldPos = { x: p.pos.x, y: p.pos.y };
     const moveX = p.vel.x * dt;
@@ -836,6 +853,15 @@ function updateProjectiles(projectiles, units, dt, obstacles = []) {
         if (unit.type === "shielder" && (unit.shieldHits ?? 0) < SHIELD_MAX_HITS) {
           if (!isFlanked(projAngle, unit.gunAngle)) {
             unit.shieldHits = (unit.shieldHits ?? 0) + 1;
+            if (unit.shieldHits === SHIELD_MAX_HITS) {
+              shieldBreaks.push({
+                pos: { x: unit.pos.x, y: unit.pos.y },
+                targetId: unit.id,
+                team: p.team,
+                angle: projAngle,
+                facingAngle: unit.gunAngle
+              });
+            }
             if (!p.piercing) {
               consumed = true;
               break;
@@ -877,46 +903,43 @@ function updateProjectiles(projectiles, units, dt, obstacles = []) {
     }
     if (!consumed) alive.push(p);
   }
-  return { alive, hits };
+  return { alive, hits, shieldBreaks };
 }
 
 // src/battlefield.ts
 function randomInRange(min, max) {
   return Math.floor(Math.random() * (max - min)) + min;
 }
-function generateObstacles() {
-  const obstacles = [];
-  const pairCount = randomInRange(1, 2);
-  const hasCenter = Math.random() > 0.5;
-  for (let i = 0; i < pairCount; i++) {
-    const w = randomInRange(30, 60);
-    const h = randomInRange(30, 60);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
-    obstacles.push({ x, y, w, h });
-    obstacles.push({ x, y: MAP_HEIGHT - y - h, w, h });
+var STANDARD_LAYOUTS = [
+  // Central barricade: advance behind cover or take either exposed side hill.
+  {
+    obstacles: [[0.5, 0.5, 70, 52], [0.5, 0.32, 54, 40]],
+    elevationZones: [[0.22, 0.36, 100, 70], [0.78, 0.36, 100, 70]]
+  },
+  // Split gates: the middle hill is valuable, but both outer lanes bypass it.
+  {
+    obstacles: [[0.31, 0.5, 40, 86], [0.69, 0.5, 40, 86], [0.5, 0.28, 52, 40]],
+    elevationZones: [[0.5, 0.5, 90, 72]]
+  },
+  // Offset positions: side cover protects approaches to hills; the center stays open.
+  {
+    obstacles: [[0.31, 0.43, 45, 42], [0.69, 0.31, 45, 42]],
+    elevationZones: [[0.22, 0.32, 100, 65], [0.78, 0.42, 100, 65]]
   }
-  if (hasCenter || obstacles.length < 3) {
-    const w = randomInRange(30, 60);
-    const h = randomInRange(30, 60);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = (MAP_HEIGHT - h) / 2;
-    obstacles.push({ x, y, w, h });
-  }
-  return obstacles;
-}
-function generateElevationZones() {
-  const zones = [];
-  const pairCount = randomInRange(1, 3);
-  for (let i = 0; i < pairCount; i++) {
-    const w = randomInRange(80, 160);
-    const h = randomInRange(60, 120);
-    const x = randomInRange(50, MAP_WIDTH - 50 - w);
-    const y = randomInRange(MAP_HEIGHT * 0.25, MAP_HEIGHT * 0.45 - h);
-    zones.push({ x, y, w, h });
-    zones.push({ x, y: MAP_HEIGHT - y - h, w, h });
-  }
-  return zones;
+];
+function generateBattlefield(layoutIndex = Math.floor(Math.random() * STANDARD_LAYOUTS.length)) {
+  const layout = STANDARD_LAYOUTS[layoutIndex];
+  if (!layout) throw new RangeError(`Unknown battlefield layout: ${layoutIndex}`);
+  const scale = Math.min(MAP_WIDTH / 360, MAP_HEIGHT / 620);
+  const expand = (rects) => rects.flatMap(([cx, cy, baseW, baseH]) => {
+    const w = baseW * scale;
+    const h = baseH * scale;
+    const x = cx * MAP_WIDTH - w / 2;
+    const y = cy * MAP_HEIGHT - h / 2;
+    const rect = { x, y, w, h };
+    return cy === 0.5 ? [rect] : [rect, { ...rect, y: MAP_HEIGHT - y - h }];
+  });
+  return { obstacles: expand(layout.obstacles), elevationZones: expand(layout.elevationZones) };
 }
 function generateCtfObstacles() {
   const obstacles = [];
@@ -1005,6 +1028,148 @@ function checkCtfCapture(state) {
   return null;
 }
 
+// src/ordnance.ts
+function dist2(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+function findMortarTarget(mortar, allUnits, elevationZones) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const u of allUnits) {
+    if (!u.alive || u.team === mortar.team || !mortarCanReach(mortar, u, elevationZones)) continue;
+    const d = dist2(mortar.pos, u.pos);
+    if (d < bestDist) {
+      best = u;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+function fireMortar(mortar, target, dt) {
+  mortar.fireTimer -= dt;
+  if (mortar.fireTimer > 0) return [];
+  const aim = Math.atan2(target.pos.y - mortar.pos.y, target.pos.x - mortar.pos.x);
+  let diff = aim - mortar.gunAngle;
+  diff = (diff + Math.PI) % (2 * Math.PI) - Math.PI;
+  if (diff < -Math.PI) diff += 2 * Math.PI;
+  if (Math.abs(diff) > 0.3) return [];
+  mortar.fireTimer = mortar.fireCooldown;
+  const origin = { x: mortar.pos.x, y: mortar.pos.y };
+  const landing = { x: target.pos.x, y: target.pos.y };
+  return [{
+    kind: "shell",
+    pos: { ...origin },
+    origin,
+    target: landing,
+    vel: { x: (landing.x - origin.x) / MORTAR_FLIGHT_S, y: (landing.y - origin.y) / MORTAR_FLIGHT_S },
+    age: 0,
+    flightTime: MORTAR_FLIGHT_S,
+    damage: mortar.damage,
+    radius: mortar.projectileRadius,
+    blastRadius: MORTAR_BLAST_RADIUS,
+    team: mortar.team,
+    maxRange: Infinity,
+    distanceTraveled: 0
+  }];
+}
+function rocketReady(unit) {
+  return unit.type === "rocketeer" && unit.alive && !unit.rocketFired && (unit.rocketPath?.length ?? 0) > 0 && unit.moveTarget === null && unit.waypoints.length === 0;
+}
+function launchRocket(unit) {
+  unit.rocketFired = true;
+  const path = (unit.rocketPath ?? []).map((p) => ({ x: p.x, y: p.y }));
+  while (path.length > 0 && dist2(unit.pos, path[0]) < 1) path.shift();
+  if (path.length === 0) return null;
+  const first = path[0];
+  const d = dist2(unit.pos, first);
+  unit.gunAngle = Math.atan2(first.y - unit.pos.y, first.x - unit.pos.x);
+  return {
+    kind: "rocket",
+    pos: { x: unit.pos.x, y: unit.pos.y },
+    vel: { x: (first.x - unit.pos.x) / d * unit.projectileSpeed, y: (first.y - unit.pos.y) / d * unit.projectileSpeed },
+    target: path[path.length - 1],
+    path,
+    damage: unit.damage,
+    radius: unit.projectileRadius,
+    blastRadius: ROCKET_BLAST_RADIUS,
+    team: unit.team,
+    // Slack for a launch point that drifted from where the path was drawn.
+    maxRange: ROCKET_MAX_PATH + 100,
+    distanceTraveled: 0
+  };
+}
+function explode(pos, radius, damage, team, units, hits) {
+  for (const u of units) {
+    if (!u.alive || u.team === team) continue;
+    const d = dist2(pos, u.pos);
+    if (d > radius + u.radius * COLLISION_HITBOX_SCALE) continue;
+    const angle = Math.atan2(u.pos.y - pos.y, u.pos.x - pos.x);
+    const kbSpeed = 30 / 0.15;
+    u.knockbackVel = { x: Math.cos(angle) * kbSpeed, y: Math.sin(angle) * kbSpeed };
+    const before = u.hp;
+    applyDamage(u, damage);
+    hits.push({
+      pos: { x: u.pos.x, y: u.pos.y },
+      targetId: u.id,
+      killed: before > 0 && !u.alive,
+      team,
+      angle,
+      damage,
+      flanked: false
+    });
+  }
+}
+function updateOrdnance(projectiles, units, dt, obstacles) {
+  const alive = [];
+  const hits = [];
+  const explosions = [];
+  const burst = (p, at) => {
+    const radius = p.blastRadius ?? 0;
+    explosions.push({ pos: { x: at.x, y: at.y }, radius, team: p.team });
+    explode(at, radius, p.damage, p.team, units, hits);
+  };
+  for (const p of projectiles) {
+    if (p.kind === "shell") {
+      p.age = (p.age ?? 0) + dt;
+      const t = Math.min(1, p.age / (p.flightTime ?? MORTAR_FLIGHT_S));
+      const o = p.origin ?? p.pos;
+      p.pos = { x: o.x + (p.target.x - o.x) * t, y: o.y + (p.target.y - o.y) * t };
+      if (t >= 1) burst(p, p.target);
+      else alive.push(p);
+      continue;
+    }
+    const path = p.path ?? [];
+    const oldPos = { x: p.pos.x, y: p.pos.y };
+    let step = Math.hypot(p.vel.x, p.vel.y) * dt;
+    while (step > 0 && path.length > 0) {
+      const next = path[0];
+      const d = dist2(p.pos, next);
+      if (d <= step) {
+        p.pos = { x: next.x, y: next.y };
+        step -= d;
+        p.distanceTraveled += d;
+        path.shift();
+      } else {
+        const speed = Math.hypot(p.vel.x, p.vel.y);
+        p.vel = { x: (next.x - p.pos.x) / d * speed, y: (next.y - p.pos.y) / d * speed };
+        p.pos = { x: p.pos.x + (next.x - p.pos.x) / d * step, y: p.pos.y + (next.y - p.pos.y) / d * step };
+        p.distanceTraveled += step;
+        step = 0;
+      }
+    }
+    if (!p.trail) p.trail = [];
+    p.trail.push({ x: p.pos.x, y: p.pos.y });
+    if (p.trail.length > 8) p.trail.shift();
+    const outside = p.pos.x < 0 || p.pos.x > MAP_WIDTH || p.pos.y < 0 || p.pos.y > MAP_HEIGHT;
+    const wall = obstacles.some((o) => segmentHitsRect(oldPos, p.pos, o, p.radius));
+    const struck = units.some((u) => u.alive && u.team !== p.team && dist2(p.pos, u.pos) <= p.radius + u.radius * COLLISION_HITBOX_SCALE);
+    if (wall) burst(p, oldPos);
+    else if (outside || struck || path.length === 0 || p.distanceTraveled > p.maxRange) burst(p, p.pos);
+    else alive.push(p);
+  }
+  return { alive, hits, explosions };
+}
+
 // src/ai-scoring.ts
 var WEIGHTS = {
   sniper: { distIdeal: [180, 300], distPenaltyScale: 0.15, los: 30, elevation: 25, cover: 20, flank: 5 },
@@ -1012,16 +1177,19 @@ var WEIGHTS = {
   soldier: { distIdeal: [50, 120], distPenaltyScale: 0.15, los: 20, elevation: 15, cover: 15, flank: 25 },
   zombie: { distIdeal: [0, 30], distPenaltyScale: 0.1, los: 5, elevation: 0, cover: 0, flank: 5 },
   shielder: { distIdeal: [0, 30], distPenaltyScale: 0.3, los: 5, elevation: 0, cover: 5, flank: 5 },
-  bomber: { distIdeal: [0, 20], distPenaltyScale: 0.3, los: 5, elevation: 0, cover: 0, flank: 0 }
+  bomber: { distIdeal: [0, 20], distPenaltyScale: 0.3, los: 5, elevation: 0, cover: 0, flank: 0 },
+  // Indirect fire: no line of sight needed, so hide behind cover at mid range.
+  mortar: { distIdeal: [160, 300], distPenaltyScale: 0.15, los: 0, elevation: 10, cover: 30, flank: 0 },
+  rocketeer: { distIdeal: [140, 260], distPenaltyScale: 0.15, los: 0, elevation: 0, cover: 30, flank: 5 }
 };
 function scorePosition(ctx) {
   const { candidate, unit, enemies, obstacles, elevationZones } = ctx;
   const w = WEIGHTS[unit.type];
   const dx = candidate.x - unit.pos.x;
   const dy = candidate.y - unit.pos.y;
-  const dist2 = Math.sqrt(dx * dx + dy * dy);
+  const dist3 = Math.sqrt(dx * dx + dy * dy);
   const maxDist = unit.speed * ROUND_DURATION_S;
-  if (dist2 > maxDist) return -Infinity;
+  if (dist3 > maxDist) return -Infinity;
   let score = 0;
   let nearestEnemy = null;
   let nearestDist = Infinity;
@@ -1130,6 +1298,34 @@ function createRng(seed) {
   };
 }
 
+// src/path-orders.ts
+function validPoints(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const p of list) {
+    if (p && typeof p.x === "number" && typeof p.y === "number" && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+      out.push({ x: p.x, y: p.y });
+    }
+  }
+  return out;
+}
+function clampPathLength(points, start, max) {
+  const out = [];
+  let prev = start;
+  let left = max;
+  for (const p of points) {
+    const d = Math.hypot(p.x - prev.x, p.y - prev.y);
+    if (d > left) {
+      if (left > 0) out.push({ x: prev.x + (p.x - prev.x) / d * left, y: prev.y + (p.y - prev.y) / d * left });
+      break;
+    }
+    out.push(p);
+    left -= d;
+    prev = p;
+  }
+  return out;
+}
+
 // src/game.ts
 var FIXED_DT = 1 / 60;
 var GameEngine = class _GameEngine {
@@ -1167,6 +1363,9 @@ var GameEngine = class _GameEngine {
   rng = Math.random;
   seed = 0;
   lockstepMode = false;
+  practice;
+  initialState;
+  onInspectUnit;
   constructor(renderer, onEvent, opts) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -1178,6 +1377,9 @@ var GameEngine = class _GameEngine {
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.onlineHostMode = opts?.onlineHost ?? false;
+    this.practice = opts?.practice;
+    this.initialState = opts?.initialState;
+    this.onInspectUnit = opts?.onInspectUnit;
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
   get phase() {
@@ -1193,7 +1395,13 @@ var GameEngine = class _GameEngine {
     return this.seed + this.roundNumber;
   }
   startBattle() {
-    if (this.ctfMode) {
+    if (this.initialState) {
+      this.loadOnlineGameState(this.initialState);
+    } else if (this.practice) {
+      this.obstacles = this.practice.obstacles ?? [];
+      this.elevationZones = this.practice.elevationZones;
+      this.units = this.practice.units;
+    } else if (this.ctfMode) {
       this.obstacles = generateCtfObstacles();
       this.elevationZones = generateCtfElevationZones();
       this.units = [...createCtfArmy("blue", this.obstacles), ...createCtfArmy("red", this.obstacles)];
@@ -1202,11 +1410,12 @@ var GameEngine = class _GameEngine {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
     } else {
-      this.obstacles = generateObstacles();
-      this.elevationZones = generateElevationZones();
+      const battlefield = generateBattlefield();
+      this.obstacles = battlefield.obstacles;
+      this.elevationZones = battlefield.elevationZones;
     }
     const allBlocks = this.obstacles;
-    if (!this.ctfMode) {
+    if (!this.ctfMode && !this.practice && !this.initialState) {
       if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
         const redUnits = createMissionArmy("red", this.hordeRedArmy, allBlocks);
         const waveTag = `w${Date.now() % 1e4}`;
@@ -1225,6 +1434,7 @@ var GameEngine = class _GameEngine {
     this.running = true;
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer.highlightZonesAt(pos));
+      this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
       this.renderer.renderElevationZones(this.elevationZones);
       this.renderer.renderObstacles(this.obstacles);
       if (this.ctfMode) {
@@ -1239,6 +1449,10 @@ var GameEngine = class _GameEngine {
   /** Called by the UI "Done" button to end the current planning phase. */
   confirmPlan() {
     if (this._phase === "blue-planning") {
+      if (this.practice) {
+        this.setPhase("playing");
+        return;
+      }
       this.setPhase("cover");
       if (!this.aiMode) {
         this.coverTimeout = setTimeout(() => {
@@ -1261,6 +1475,10 @@ var GameEngine = class _GameEngine {
   setPhase(phase) {
     this._phase = phase;
     if (phase === "blue-planning") {
+      for (const u of this.units) {
+        u.rocketFired = false;
+        if (u.team === "blue") u.rocketPath = [];
+      }
       this.pathDrawer?.clearPaths("blue");
       if (this.hordeMode) this.generateAiPaths();
       this.pathDrawer?.enable("blue", this.units, this.elevationZones);
@@ -1347,6 +1565,30 @@ var GameEngine = class _GameEngine {
         }
       }
       unit.waypoints = bestWaypoints.length > 0 ? bestWaypoints : [bestPos];
+      if (unit.type === "rocketeer") this.planAiRocket(unit, enemies);
+    }
+  }
+  /** AI rocket: from where the rocketeer will stop, around cover, at the
+   *  nearest enemy's current position. */
+  planAiRocket(unit, enemies) {
+    const launch = unit.waypoints[unit.waypoints.length - 1] ?? unit.pos;
+    const byDistance = [...enemies].sort((a, b) => Math.hypot(a.pos.x - launch.x, a.pos.y - launch.y) - Math.hypot(b.pos.x - launch.x, b.pos.y - launch.y));
+    unit.rocketFired = false;
+    unit.rocketPath = [];
+    for (const target of byDistance) {
+      const full = [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }];
+      const route = clampPathLength(full, launch, ROCKET_MAX_PATH);
+      if (route.length !== full.length || route[route.length - 1] !== full[full.length - 1]) continue;
+      let prev = launch;
+      const clear = route.every((p) => {
+        const ok = !this.obstacles.some((o) => segmentHitsRect(prev, p, o, unit.projectileRadius));
+        prev = p;
+        return ok;
+      });
+      if (clear) {
+        unit.rocketPath = route;
+        return;
+      }
     }
   }
   tick = (ticker) => {
@@ -1381,7 +1623,7 @@ var GameEngine = class _GameEngine {
     this.roundTimer -= dt;
     this.simulationTick++;
     const redDelayed = this.updateHordeDelay(dt);
-    this.updateChaseAI();
+    if (this.aiMode) this.updateChaseAI();
     this.updateMovement(dt, redDelayed);
     this.updateCombat(dt);
     const hits = this.updateProjectiles(dt);
@@ -1398,7 +1640,9 @@ var GameEngine = class _GameEngine {
     if (redDelayed) this.hordeStartDelay -= dt;
     return redDelayed;
   }
-  /** Zombies, shielders, and bombers on the red team always chase closest enemy. */
+  /** AI-mode only: zombies, shielders, and bombers on the red team chase the
+   *  closest enemy. Gated by aiMode at the call site — never overrides the paths
+   *  of a human-controlled red team. */
   updateChaseAI() {
     for (const unit of this.units) {
       if (!unit.alive || unit.team !== "red" || unit.type !== "zombie" && unit.type !== "shielder" && unit.type !== "bomber") continue;
@@ -1423,6 +1667,14 @@ var GameEngine = class _GameEngine {
   updateCombat(dt) {
     for (const unit of this.units) {
       if (!unit.alive) continue;
+      if (unit.type === "mortar") {
+        this.updateMortar(unit, dt);
+        continue;
+      }
+      if (unit.type === "rocketeer") {
+        this.updateRocketeer(unit, dt);
+        continue;
+      }
       const target = findTarget(unit, this.units, null, this.obstacles);
       if (unit.type === "blade") {
         if (target) {
@@ -1477,10 +1729,78 @@ var GameEngine = class _GameEngine {
       }
     }
   }
+  /** Mortar: lob shells at any enemy in its firing band, over obstacles. */
+  updateMortar(unit, dt) {
+    const target = findMortarTarget(unit, this.units, this.elevationZones);
+    const facing = target ?? findTarget(unit, this.units, null, this.obstacles);
+    if (facing) {
+      updateGunAngle(unit, Math.atan2(facing.pos.y - unit.pos.y, facing.pos.x - unit.pos.x), dt);
+    }
+    if (!target) {
+      unit.fireTimer = Math.max(0, unit.fireTimer - dt);
+      return;
+    }
+    const shells = fireMortar(unit, target, dt);
+    if (shells.length === 0) return;
+    this.projectiles.push(...shells);
+    this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
+    this.recordFire(unit, shells[0].damage);
+  }
+  /** Rocketeer: face the nearest enemy; launch its drawn rocket on arrival. */
+  updateRocketeer(unit, dt) {
+    if (rocketReady(unit)) {
+      const rocket = launchRocket(unit);
+      if (!rocket) return;
+      this.projectiles.push(rocket);
+      this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
+      this.recordFire(unit, rocket.damage);
+      return;
+    }
+    const target = findTarget(unit, this.units, null, this.obstacles);
+    if (target) updateGunAngle(unit, Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x), dt);
+  }
+  recordFire(unit, damage) {
+    this.replayEvents.push({
+      frame: this.replayFrames.length,
+      type: "fire",
+      pos: { x: unit.pos.x, y: unit.pos.y },
+      angle: unit.gunAngle,
+      damage,
+      flanked: false,
+      team: unit.team
+    });
+  }
+  recordExplosion(e) {
+    this.renderer?.effects?.addExplosion(e.pos, e.radius);
+    this.replayEvents.push({
+      frame: this.replayFrames.length,
+      type: "explosion",
+      pos: e.pos,
+      angle: 0,
+      damage: 0,
+      flanked: false,
+      team: e.team,
+      radius: e.radius
+    });
+  }
   /** Update projectile positions and resolve collisions. Returns hit results. */
   updateProjectiles(dt) {
-    const { alive: aliveProjectiles, hits } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
-    this.projectiles = aliveProjectiles;
+    const bullets = this.projectiles.filter((p) => !p.kind);
+    const ordnance = updateOrdnance(this.projectiles.filter((p) => p.kind), this.units, dt, this.obstacles);
+    const { alive: aliveProjectiles, hits, shieldBreaks } = updateProjectiles(bullets, this.units, dt, this.obstacles);
+    this.projectiles = [...aliveProjectiles, ...ordnance.alive];
+    for (const e of ordnance.explosions) this.recordExplosion(e);
+    hits.push(...ordnance.hits);
+    for (const shieldBreak of shieldBreaks) {
+      this.replayEvents.push({
+        ...shieldBreak,
+        frame: this.replayFrames.length,
+        type: "shield-break",
+        damage: 0,
+        flanked: false
+      });
+      this.renderer?.effects?.addShieldBreakCue(shieldBreak.pos, shieldBreak.facingAngle);
+    }
     return hits;
   }
   /** Trigger visual effects for projectile hits and record replay events. */
@@ -1489,6 +1809,7 @@ var GameEngine = class _GameEngine {
     for (const hit of hits) {
       const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
+      if (hit.flanked) fx?.addFlankCue(hit.pos, hit.angle, hit.targetId);
       this.replayEvents.push({
         frame: this.replayFrames.length,
         type: hit.killed ? "kill" : "hit",
@@ -1510,12 +1831,11 @@ var GameEngine = class _GameEngine {
   }
   /** Handle bomber chain explosions when bombers are killed. */
   handleBomberChainExplosions(hits) {
-    const fx = this.renderer?.effects ?? null;
     for (const hit of hits) {
       if (hit.killed) {
         const deadUnit = this.units.find((u) => u.id === hit.targetId);
         if (deadUnit && deadUnit.type === "bomber") {
-          fx?.addExplosion(deadUnit.pos, 80);
+          this.recordExplosion({ pos: { ...deadUnit.pos }, radius: 80, team: deadUnit.team });
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
             this.replayEvents.push({
@@ -1531,7 +1851,7 @@ var GameEngine = class _GameEngine {
             if (eh.killed) {
               const chainDead = this.units.find((u) => u.id === eh.targetId);
               if (chainDead?.type === "bomber") {
-                fx?.addExplosion(chainDead.pos, 80);
+                this.recordExplosion({ pos: { ...chainDead.pos }, radius: 80, team: chainDead.team });
               }
             }
           }
@@ -1587,6 +1907,8 @@ var GameEngine = class _GameEngine {
       if (!u.alive) return true;
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
+      if (u.type === "rocketeer" && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
+      if (u.type === "mortar") return !findMortarTarget(u, this.units, this.elevationZones);
       const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
     });
@@ -1612,7 +1934,9 @@ var GameEngine = class _GameEngine {
         hp: u.hp,
         maxHp: u.maxHp,
         alive: u.alive,
-        radius: u.radius
+        radius: u.radius,
+        shieldHits: u.shieldHits,
+        ...u.rocketFired ? { rocketFired: true } : {}
       })),
       projectiles: this.projectiles.map((p) => ({
         x: p.pos.x,
@@ -1624,7 +1948,13 @@ var GameEngine = class _GameEngine {
         team: p.team,
         maxRange: p.maxRange,
         distanceTraveled: p.distanceTraveled,
-        trail: p.trail ? p.trail.map((t) => ({ ...t })) : void 0
+        trail: p.trail ? p.trail.map((t) => ({ ...t })) : void 0,
+        ...p.kind ? { kind: p.kind } : {},
+        ...p.kind === "shell" ? {
+          tx: p.target.x,
+          ty: p.target.y,
+          progress: Math.min(1, (p.age ?? 0) / (p.flightTime ?? 1))
+        } : {}
       }))
     };
     if (this.ctfState) {
@@ -1716,10 +2046,13 @@ var GameEngine = class _GameEngine {
       if (!Array.isArray(p.waypoints)) continue;
       const unit = this.units.find((u) => u.id === p.unitId);
       if (unit && unit.team === team) {
-        const valid = p.waypoints.slice(0, maxWaypoints).filter(
-          (w) => typeof w.x === "number" && typeof w.y === "number" && Number.isFinite(w.x) && Number.isFinite(w.y)
-        );
-        unit.waypoints = valid;
+        unit.waypoints = validPoints(p.waypoints.slice(0, maxWaypoints));
+        unit.rocketFired = false;
+        unit.rocketPath = unit.type === "rocketeer" && Array.isArray(p.rocketPath) ? clampPathLength(
+          validPoints(p.rocketPath.slice(0, maxWaypoints)),
+          unit.waypoints[unit.waypoints.length - 1] ?? unit.pos,
+          ROCKET_MAX_PATH
+        ) : [];
       }
     }
   }
@@ -1838,8 +2171,13 @@ function fnv1aString(hash, s) {
   for (let i = 0; i < s.length; i++) hash = fnv1a(hash, s.charCodeAt(i));
   return hash;
 }
+var ROCKET_TAG = 1380926283;
 function canonicalisePaths(paths) {
-  return [...paths].map((p) => ({ unitId: p.unitId, waypoints: p.waypoints })).sort((a, b) => a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0);
+  return [...paths].map((p) => ({
+    unitId: p.unitId,
+    waypoints: p.waypoints,
+    ...p.rocketPath?.length ? { rocketPath: p.rocketPath } : {}
+  })).sort((a, b) => a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0);
 }
 function hashPaths(paths) {
   let h = 2166136261;
@@ -1849,6 +2187,15 @@ function hashPaths(paths) {
     for (const w of p.waypoints) {
       h = fnv1a(h, Math.round(w.x * 100));
       h = fnv1a(h, Math.round(w.y * 100));
+    }
+    const rocket = validPoints(p.rocketPath);
+    if (rocket.length > 0) {
+      h = fnv1a(h, ROCKET_TAG);
+      h = fnv1a(h, rocket.length);
+      for (const r of rocket) {
+        h = fnv1a(h, Math.round(r.x * 100));
+        h = fnv1a(h, Math.round(r.y * 100));
+      }
     }
   }
   return h >>> 0;

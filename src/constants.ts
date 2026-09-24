@@ -20,7 +20,20 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
   zombie:  { hp: 20,  speed: 55,  damage: 14, range: 20,  radius: 8, fireCooldown: 0.8, projectileSpeed: 300, projectileRadius: 4, turnSpeed: 3.0 },
   shielder: { hp: 40, speed: 45, damage: 10, range: 20, radius: 11, fireCooldown: 1.0, projectileSpeed: 300, projectileRadius: 4, turnSpeed: 2.0 },
   bomber:   { hp: 25, speed: 50, damage: 0,  range: 0,  radius: 9,  fireCooldown: 99,  projectileSpeed: 0,   projectileRadius: 0, turnSpeed: 3.0 },
+  // Mortar: `damage` is the shell's blast damage; projectileSpeed is unused (fixed flight time).
+  mortar:   { hp: 30, speed: 55, damage: 30, range: 320, radius: 10, fireCooldown: 3.0, projectileSpeed: 0, projectileRadius: 4, turnSpeed: 1.5 },
+  // Rocketeer: no auto weapon — one player-drawn rocket per round (`damage` = blast damage).
+  rocketeer: { hp: 35, speed: 80, damage: 45, range: 0, radius: 9, fireCooldown: 99, projectileSpeed: 260, projectileRadius: 5, turnSpeed: 3.0 },
 };
+
+/** Mortar can't lob shells at enemies closer than this (centre to centre). */
+export const MORTAR_MIN_RANGE = 110;
+export const MORTAR_BLAST_RADIUS = 55;
+/** Seconds a shell is in the air — long enough to step out of the blast by moving on. */
+export const MORTAR_FLIGHT_S = 1.1;
+export const ROCKET_BLAST_RADIUS = 60;
+/** Longest rocket path a player can draw. */
+export const ROCKET_MAX_PATH = 650;
 
 export const ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
   { type: 'soldier', count: 3 },

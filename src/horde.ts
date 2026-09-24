@@ -70,9 +70,19 @@ function makeUnitUpgrade(
   };
 }
 
-/** Returns true if the player owns at least one ranged (non-blade) blue unit. */
+/** Units with an auto-firing weapon whose range an upgrade can extend.
+ *  Blades are melee; the rocketeer's reach is its drawn rocket path. */
+const hasRange = (u: Unit): boolean => u.type !== 'blade' && u.type !== 'rocketeer';
+
+/** Units firing ordinary bullets (shells and rockets burst instead). */
+const firesBullets = (u: Unit): boolean => hasRange(u) && u.type !== 'mortar';
+
+/** Returns true if the player owns at least one ranged blue unit. */
 const hasRangedUnits = (units: Unit[]): boolean =>
-  units.some(u => u.team === 'blue' && u.type !== 'blade');
+  units.some(u => u.team === 'blue' && hasRange(u));
+
+const hasBulletUnits = (units: Unit[]): boolean =>
+  units.some(u => u.team === 'blue' && firesBullets(u));
 
 export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   makeStatUpgrade('hp_15', '+15 HP', 'All units gain +15 max HP', 'common', u => {
@@ -83,10 +93,10 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
     u.damage += 10;
   }),
   { ...makeStatUpgrade('range_20', '+20 Range', 'All units gain +20 range', 'common', u => {
-    if (u.type !== 'blade') u.range += 20;
+    if (hasRange(u)) u.range += 20;
   }), canApply: hasRangedUnits },
   { ...makeStatUpgrade('range_50', '+50 Range', 'All units gain +50 range', 'uncommon', u => {
-    if (u.type !== 'blade') u.range += 50;
+    if (hasRange(u)) u.range += 50;
   }), canApply: hasRangedUnits },
   makeStatUpgrade('speed_15', '+15 Speed', 'All units gain +15 speed', 'common', u => {
     u.speed += 15;
@@ -96,7 +106,7 @@ export const ALL_STAT_UPGRADES: HordeUpgrade[] = [
   }),
   { ...makeStatUpgrade('piercing', 'Piercing Rounds', 'All projectiles pass through enemies', 'rare', u => {
     u.piercing = true;
-  }), once: true, minWave: 10, canApply: hasRangedUnits },
+  }), once: true, minWave: 10, canApply: hasBulletUnits },
   { ...makeStatUpgrade('double_fire', 'Double Time', 'All units fire twice as fast', 'epic', u => {
     u.fireCooldown *= 0.5;
   }), once: true, minWave: 10 },
@@ -145,6 +155,8 @@ export const ALL_RECRUIT_UPGRADES: HordeUpgrade[] = [
   makeRecruitUpgrade('soldier'),
   makeRecruitUpgrade('sniper'),
   makeRecruitUpgrade('shielder'),
+  makeRecruitUpgrade('mortar'),
+  makeRecruitUpgrade('rocketeer'),
 ];
 
 /** Rarity weights: higher = more likely to appear in the pool. */

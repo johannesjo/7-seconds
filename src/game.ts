@@ -1,9 +1,10 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
-import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ROCKET_MAX_PATH } from './constants';
 import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELEVATION_ZONES } from './online-types';
 import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateBattlefield, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
+import { findMortarTarget, fireMortar, rocketReady, launchRocket, updateOrdnance, type Explosion } from './ordnance';
 // Type-only: the concrete Renderer / PathDrawer pull in pixi.js. Keeping them
 // out of the runtime import graph lets this module (and its static headless
 // helpers resolveRound / generateInitialState) run in a non-DOM context such as
@@ -11,8 +12,10 @@ import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 // builds its PathDrawer through renderer.createPathDrawer().
 import type { PathDrawer } from './path-drawer';
 import type { Renderer } from './renderer';
+import type { PathList } from './online-async-core';
 import { scorePosition, generateCandidates } from './ai-scoring';
 import { createRng } from './rng';
+import { clampPathLength, validPoints } from './path-orders';
 
 const FIXED_DT = 1 / 60;
 
@@ -56,7 +59,7 @@ export class GameEngine {
   private rng: () => number = Math.random;
   private seed = 0;
   private lockstepMode = false;
-  private practice?: { units: Unit[]; elevationZones: ElevationZone[] };
+  private practice?: { units: Unit[]; elevationZones: ElevationZone[]; obstacles?: Obstacle[] };
   private initialState?: OnlineGameState;
   private onInspectUnit?: (unit: Unit | null) => void;
 
@@ -71,7 +74,7 @@ export class GameEngine {
     onlineHost?: boolean;
     onPhaseChange?: (phase: TurnPhase) => void;
     seed?: number;
-    practice?: { units: Unit[]; elevationZones: ElevationZone[] };
+    practice?: { units: Unit[]; elevationZones: ElevationZone[]; obstacles?: Obstacle[] };
     initialState?: OnlineGameState;
     onInspectUnit?: (unit: Unit | null) => void;
   }) {
@@ -113,7 +116,7 @@ export class GameEngine {
     if (this.initialState) {
       this.loadOnlineGameState(this.initialState);
     } else if (this.practice) {
-      this.obstacles = [];
+      this.obstacles = this.practice.obstacles ?? [];
       this.elevationZones = this.practice.elevationZones;
       this.units = this.practice.units;
     } else if (this.ctfMode) {
@@ -207,6 +210,13 @@ export class GameEngine {
     this._phase = phase;
 
     if (phase === 'blue-planning') {
+      // Reload every rocketeer and drop blue's old rocket orders here rather
+      // than relying on the drawer: Horde carries units into a fresh engine
+      // whose drawer doesn't know them yet.
+      for (const u of this.units) {
+        u.rocketFired = false;
+        if (u.team === 'blue') u.rocketPath = [];
+      }
       this.pathDrawer?.clearPaths('blue');
       if (this.hordeMode) this.generateAiPaths();
       this.pathDrawer?.enable('blue', this.units, this.elevationZones);
@@ -310,6 +320,33 @@ export class GameEngine {
       }
 
       unit.waypoints = bestWaypoints.length > 0 ? bestWaypoints : [bestPos];
+      if (unit.type === 'rocketeer') this.planAiRocket(unit, enemies);
+    }
+  }
+
+  /** AI rocket: from where the rocketeer will stop, around cover, at the
+   *  nearest enemy's current position. */
+  private planAiRocket(unit: Unit, enemies: Unit[]): void {
+    const launch = unit.waypoints[unit.waypoints.length - 1] ?? unit.pos;
+    const byDistance = [...enemies].sort((a, b) =>
+      Math.hypot(a.pos.x - launch.x, a.pos.y - launch.y) - Math.hypot(b.pos.x - launch.x, b.pos.y - launch.y));
+    unit.rocketFired = false;
+    unit.rocketPath = [];
+    // Nearest enemy whose detour route is within reach and clears cover.
+    for (const target of byDistance) {
+      const full = [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }];
+      const route = clampPathLength(full, launch, ROCKET_MAX_PATH);
+      if (route.length !== full.length || route[route.length - 1] !== full[full.length - 1]) continue;
+      let prev = launch;
+      const clear = route.every(p => {
+        const ok = !this.obstacles.some(o => segmentHitsRect(prev, p, o, unit.projectileRadius));
+        prev = p;
+        return ok;
+      });
+      if (clear) {
+        unit.rocketPath = route;
+        return;
+      }
     }
   }
 
@@ -415,6 +452,15 @@ export class GameEngine {
     for (const unit of this.units) {
       if (!unit.alive) continue;
 
+      if (unit.type === 'mortar') {
+        this.updateMortar(unit, dt);
+        continue;
+      }
+      if (unit.type === 'rocketeer') {
+        this.updateRocketeer(unit, dt);
+        continue;
+      }
+
       const target = findTarget(unit, this.units, null, this.obstacles);
 
       // Blade uses AoE melee attack instead of projectiles
@@ -476,10 +522,72 @@ export class GameEngine {
     }
   }
 
+  /** Mortar: lob shells at any enemy in its firing band, over obstacles. */
+  private updateMortar(unit: Unit, dt: number): void {
+    const target = findMortarTarget(unit, this.units, this.elevationZones);
+    const facing = target ?? findTarget(unit, this.units, null, this.obstacles);
+    if (facing) {
+      updateGunAngle(unit, Math.atan2(facing.pos.y - unit.pos.y, facing.pos.x - unit.pos.x), dt);
+    }
+    if (!target) {
+      unit.fireTimer = Math.max(0, unit.fireTimer - dt);
+      return;
+    }
+    const shells = fireMortar(unit, target, dt);
+    if (shells.length === 0) return;
+    this.projectiles.push(...shells);
+    this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
+    this.recordFire(unit, shells[0].damage);
+  }
+
+  /** Rocketeer: face the nearest enemy; launch its drawn rocket on arrival. */
+  private updateRocketeer(unit: Unit, dt: number): void {
+    if (rocketReady(unit)) {
+      const rocket = launchRocket(unit);
+      if (!rocket) return;
+      this.projectiles.push(rocket);
+      this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
+      this.recordFire(unit, rocket.damage);
+      return;
+    }
+    const target = findTarget(unit, this.units, null, this.obstacles);
+    if (target) updateGunAngle(unit, Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x), dt);
+  }
+
+  private recordFire(unit: Unit, damage: number): void {
+    this.replayEvents.push({
+      frame: this.replayFrames.length,
+      type: 'fire',
+      pos: { x: unit.pos.x, y: unit.pos.y },
+      angle: unit.gunAngle,
+      damage,
+      flanked: false,
+      team: unit.team,
+    });
+  }
+
+  private recordExplosion(e: Explosion): void {
+    this.renderer?.effects?.addExplosion(e.pos, e.radius);
+    this.replayEvents.push({
+      frame: this.replayFrames.length,
+      type: 'explosion',
+      pos: e.pos,
+      angle: 0,
+      damage: 0,
+      flanked: false,
+      team: e.team,
+      radius: e.radius,
+    });
+  }
+
   /** Update projectile positions and resolve collisions. Returns hit results. */
   private updateProjectiles(dt: number): ReturnType<typeof updateProjectiles>['hits'] {
-    const { alive: aliveProjectiles, hits, shieldBreaks } = updateProjectiles(this.projectiles, this.units, dt, this.obstacles);
-    this.projectiles = aliveProjectiles;
+    const bullets = this.projectiles.filter(p => !p.kind);
+    const ordnance = updateOrdnance(this.projectiles.filter(p => p.kind), this.units, dt, this.obstacles);
+    const { alive: aliveProjectiles, hits, shieldBreaks } = updateProjectiles(bullets, this.units, dt, this.obstacles);
+    this.projectiles = [...aliveProjectiles, ...ordnance.alive];
+    for (const e of ordnance.explosions) this.recordExplosion(e);
+    hits.push(...ordnance.hits);
     for (const shieldBreak of shieldBreaks) {
       this.replayEvents.push({
         ...shieldBreak,
@@ -524,12 +632,11 @@ export class GameEngine {
 
   /** Handle bomber chain explosions when bombers are killed. */
   private handleBomberChainExplosions(hits: ReturnType<typeof updateProjectiles>['hits']): void {
-    const fx = this.renderer?.effects ?? null;
     for (const hit of hits) {
       if (hit.killed) {
         const deadUnit = this.units.find(u => u.id === hit.targetId);
         if (deadUnit && deadUnit.type === 'bomber') {
-          fx?.addExplosion(deadUnit.pos, 80);
+          this.recordExplosion({ pos: { ...deadUnit.pos }, radius: 80, team: deadUnit.team });
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
             this.replayEvents.push({
@@ -546,7 +653,7 @@ export class GameEngine {
             if (eh.killed) {
               const chainDead = this.units.find(u => u.id === eh.targetId);
               if (chainDead?.type === 'bomber') {
-                fx?.addExplosion(chainDead.pos, 80);
+                this.recordExplosion({ pos: { ...chainDead.pos }, radius: 80, team: chainDead.team });
               }
             }
           }
@@ -608,6 +715,10 @@ export class GameEngine {
       // Use actual velocity — moveTarget can be stuck on obstacles
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
+      // About to launch a drawn rocket is not idle.
+      if (u.type === 'rocketeer' && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
+      // A mortar is busy while any enemy sits in its firing band, seen or not.
+      if (u.type === 'mortar') return !findMortarTarget(u, this.units, this.elevationZones);
       const target = findTarget(u, this.units, null, this.obstacles);
       return !target || !isInRange(u, target, this.elevationZones);
     });
@@ -640,6 +751,7 @@ export class GameEngine {
         alive: u.alive,
         radius: u.radius,
         shieldHits: u.shieldHits,
+        ...(u.rocketFired ? { rocketFired: true } : {}),
       })),
       projectiles: this.projectiles.map(p => ({
         x: p.pos.x,
@@ -652,6 +764,10 @@ export class GameEngine {
         maxRange: p.maxRange,
         distanceTraveled: p.distanceTraveled,
         trail: p.trail ? p.trail.map(t => ({ ...t })) : undefined,
+        ...(p.kind ? { kind: p.kind } : {}),
+        ...(p.kind === 'shell' ? {
+          tx: p.target.x, ty: p.target.y, progress: Math.min(1, (p.age ?? 0) / (p.flightTime ?? 1)),
+        } : {}),
       })),
     };
 
@@ -748,22 +864,26 @@ export class GameEngine {
   }
 
   /** Set waypoints for a team's units. Validates and caps input from remote peer. */
-  private setPaths(team: Team, paths: { unitId: string; waypoints: Vec2[] }[]): void {
+  private setPaths(team: Team, paths: PathList): void {
     const maxWaypoints = 100;
     for (const p of paths) {
       if (!Array.isArray(p.waypoints)) continue;
       const unit = this.units.find(u => u.id === p.unitId);
       if (unit && unit.team === team) {
-        const valid = p.waypoints.slice(0, maxWaypoints).filter(
-          w => typeof w.x === 'number' && typeof w.y === 'number'
-            && Number.isFinite(w.x) && Number.isFinite(w.y),
-        );
-        unit.waypoints = valid;
+        // Copy into fresh objects: the engine must never alias (or trust) the
+        // caller's path list, which is also what gets hashed and persisted.
+        unit.waypoints = validPoints(p.waypoints.slice(0, maxWaypoints));
+        unit.rocketFired = false;
+        unit.rocketPath = unit.type === 'rocketeer' && Array.isArray(p.rocketPath)
+          // Measured from the launch point (end of the move), as when drawn.
+          ? clampPathLength(validPoints(p.rocketPath.slice(0, maxWaypoints)),
+            unit.waypoints[unit.waypoints.length - 1] ?? unit.pos, ROCKET_MAX_PATH)
+          : [];
       }
     }
   }
 
-  setBluePaths(paths: { unitId: string; waypoints: Vec2[] }[]): void {
+  setBluePaths(paths: PathList): void {
     this.setPaths('blue', paths);
   }
 
@@ -805,7 +925,7 @@ export class GameEngine {
     return { obstacles: this.obstacles, elevationZones: this.elevationZones };
   }
 
-  setRedPaths(paths: { unitId: string; waypoints: Vec2[] }[]): void {
+  setRedPaths(paths: PathList): void {
     this.setPaths('red', paths);
   }
 
@@ -840,8 +960,8 @@ export class GameEngine {
    *  the player is purely cosmetic; THIS is what gets persisted. */
   static resolveRound(
     startState: OnlineGameState,
-    bluePaths: { unitId: string; waypoints: Vec2[] }[],
-    redPaths: { unitId: string; waypoints: Vec2[] }[],
+    bluePaths: PathList,
+    redPaths: PathList,
     seed: number,
     maxTicks: number,
   ): { endState: OnlineGameState; gameOver: boolean } {

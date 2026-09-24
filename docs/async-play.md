@@ -10,7 +10,8 @@ Online play is already a **deterministic lockstep** simulation. A round's
 outcome is fully reproducible from:
 
 - the **starting unit state** of that round (`OnlineGameState`),
-- each side's **waypoints** for the round (`OnlinePathData`),
+- each side's **orders** for the round (`PathList`: waypoints per unit, plus
+  a rocketeer's drawn `rocketPath`),
 - the **match seed** (`GameEngine` derives the per-round PRNG as
   `createRng(seed + roundNumber)` — see `src/game.ts`).
 
@@ -242,6 +243,12 @@ above are not enough on their own.
 
 - **Test before merge:** `npm run dev` on this branch against the live backend.
 - **Launch:** merge to `main`, then rebuild + redeploy the client (GitHub Pages).
+- **Rules changes (e.g. new unit types):** deploy `resolve-round` with the
+  rebuilt engine bundle **before** shipping the client. An older server rejects
+  states with unit types it doesn't know (`isPlausibleGameState`), so matches
+  wedge. Older clients still in use (cached web builds, un-updated Android
+  installs) resolve rounds with old rules and fail `verifyReveal` on plans that
+  contain a `rocketPath`, so plan a forced update for them.
 
 ## Notes / non-goals
 
