@@ -182,9 +182,9 @@ changes — Postgres rows + Realtime instead of the WebRTC channel.
   anyone but yourself). This deployment is **push-only**; email is left
   unconfigured. Reach caveat: Web Push covers desktop Chrome/Firefox (browser
   running) and Android Chrome, but not iOS Safari unless the app is installed as
-  a PWA. Native Android FCM is scaffolded in the schema (`players.fcm_token`)
-  but still requires a Firebase project + `@capacitor/push-notifications` —
-  deferred.
+  a PWA. Native Android FCM is implemented via `players.fcm_token` and
+  `@capacitor/push-notifications`; Firebase and release setup are described in
+  [android-notifications.md](android-notifications.md).
 - **Phase 3:** a "your games" lobby for concurrent matches, turn expiry /
   auto-forfeit, and optional hardening of the reveal step.
 

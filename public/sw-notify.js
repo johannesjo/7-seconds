@@ -16,15 +16,23 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || '/';
+  let target;
+  try {
+    target = new URL(event.notification.data?.url || self.registration.scope, self.registration.scope);
+    if (target.origin !== self.location.origin || !target.href.startsWith(self.registration.scope)) {
+      target = new URL(self.registration.scope);
+    }
+  } catch {
+    target = new URL(self.registration.scope);
+  }
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const client of list) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          return client.focus();
+        if (client.url.startsWith(self.registration.scope) && 'navigate' in client) {
+          return client.navigate(target.href).then((navigated) => navigated?.focus());
         }
       }
-      return clients.openWindow(target);
+      return clients.openWindow(target.href);
     })
   );
 });

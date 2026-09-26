@@ -1,7 +1,7 @@
 // Supabase Edge Function: notify-turn
 //
 // Triggered by a Database Webhook on INSERT into public.turns (a "commit").
-// Notifies the opponent — via email and/or Web Push — when it becomes their
+// Notifies the opponent — via email, Web Push, and/or Android FCM — when it becomes their
 // turn (i.e. they have not yet submitted the current round). Runs on Deno with
 // the service role, so it can read other players' contact rows.
 //
@@ -11,6 +11,9 @@
 // @ts-nocheck
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
+import { JWT } from 'npm:google-auth-library@9';
+import { sendFcmWithAuth } from './fcm.ts';
+import { isAuthorizedWebhook, shouldNotifyOpponent, TURN_NOTIFICATION_BODY } from './turn.ts';
 
 const APP_URL = Deno.env.get('NOTIFY_APP_URL') ?? 'https://johannesjo.github.io/7-seconds/';
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
@@ -18,6 +21,7 @@ const NOTIFY_FROM_EMAIL = Deno.env.get('NOTIFY_FROM_EMAIL') ?? '7 Seconds <onboa
 const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY');
 const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY');
 const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') ?? 'mailto:noreply@example.com';
+const FCM_SERVICE_ACCOUNT_JSON = Deno.env.get('FCM_SERVICE_ACCOUNT_JSON');
 
 const admin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -30,16 +34,17 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
 
 async function sendEmail(to: string, link: string): Promise<void> {
   if (!RESEND_API_KEY) return;
-  await fetch('https://api.resend.com/emails', {
+  const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: NOTIFY_FROM_EMAIL,
       to,
-      subject: "It's your turn — 7 Seconds",
-      html: `<p>Your friend made their move. <a href="${link}">Open the match</a> to plan your turn.</p>`,
+      subject: 'Your match needs you — 7 Seconds',
+      html: `<p>${TURN_NOTIFICATION_BODY} <a href="${link}">Open the match</a>.</p>`,
     }),
   });
+  if (!response.ok) throw new Error(`Email send failed (${response.status})`);
 }
 
 // Only deliver to well-known push services — the endpoint comes from a
@@ -68,12 +73,35 @@ async function sendPush(subscription: { endpoint?: string } | null, link: string
   if (!subscription || !isAllowedPushEndpoint(subscription.endpoint)) return;
   await webpush.sendNotification(
     subscription as webpush.PushSubscription,
-    JSON.stringify({ title: '7 Seconds', body: "It's your turn to plan!", url: link }),
+    JSON.stringify({ title: '7 Seconds', body: TURN_NOTIFICATION_BODY, url: link }),
   );
+}
+
+let fcmAuth: { projectId: string; client: JWT } | null = null;
+async function sendAndroidPush(token: string, matchId: string): Promise<void> {
+  if (!FCM_SERVICE_ACCOUNT_JSON) return;
+  if (!fcmAuth) {
+    const credentials = JSON.parse(FCM_SERVICE_ACCOUNT_JSON);
+    if (!credentials.project_id || !credentials.client_email || !credentials.private_key) {
+      throw new Error('FCM service account is incomplete');
+    }
+    fcmAuth = {
+      projectId: credentials.project_id,
+      client: new JWT({
+        email: credentials.client_email,
+        key: credentials.private_key,
+        scopes: ['https://www.googleapis.com/auth/firebase.messaging'],
+      }),
+    };
+  }
+  await sendFcmWithAuth(token, matchId, fcmAuth.projectId, fcmAuth.client);
 }
 
 Deno.serve(async (req) => {
   try {
+    if (!isAuthorizedWebhook(req.headers.get('Authorization'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'))) {
+      return new Response('unauthorized', { status: 401 });
+    }
     const payload = await req.json();
     const record = payload.record ?? payload.new;
     if (!record?.match_id) return new Response('ignored', { status: 200 });
@@ -81,28 +109,37 @@ Deno.serve(async (req) => {
     const { match_id, round, player: committer } = record;
 
     const { data: match } = await admin
-      .from('matches').select('host_player, guest_player').eq('id', match_id).single();
+      .from('matches').select('host_player, guest_player, status, current_round').eq('id', match_id).single();
     if (!match) return new Response('no match', { status: 200 });
+    if (match.status !== 'active' || match.current_round !== round) return new Response('stale match', { status: 200 });
+    if (committer !== match.host_player && committer !== match.guest_player) return new Response('invalid committer', { status: 200 });
 
     const opponent = committer === match.host_player ? match.guest_player : match.host_player;
     if (!opponent) return new Response('no opponent', { status: 200 });
 
-    // If the opponent already submitted this round, it's not their turn — skip.
+    // A committed opponent may still need to reopen the app to reveal their
+    // plan once both commits exist. Skip only after they have revealed.
     const { data: oppTurn } = await admin
-      .from('turns').select('team')
+      .from('turns').select('paths')
       .eq('match_id', match_id).eq('round', round).eq('player', opponent).maybeSingle();
-    if (oppTurn) return new Response('both submitted', { status: 200 });
+    if (!shouldNotifyOpponent(match, committer, round, oppTurn)) {
+      return new Response('opponent already revealed', { status: 200 });
+    }
 
     const { data: contact } = await admin
-      .from('players').select('email, web_push, notify_email, notify_push')
+      .from('players').select('email, web_push, fcm_token, notify_email, notify_push')
       .eq('id', opponent).maybeSingle();
     if (!contact) return new Response('no contact', { status: 200 });
 
     const link = `${APP_URL}?amatch=${encodeURIComponent(match_id)}`;
-    const jobs: Promise<unknown>[] = [];
-    if (contact.notify_email && contact.email) jobs.push(sendEmail(contact.email, link).catch(() => {}));
-    if (contact.notify_push && contact.web_push) jobs.push(sendPush(contact.web_push, link).catch(() => {}));
-    await Promise.all(jobs);
+    const jobs: Promise<void>[] = [];
+    if (contact.notify_email && contact.email) jobs.push(sendEmail(contact.email, link));
+    if (contact.notify_push && contact.web_push) jobs.push(sendPush(contact.web_push, link));
+    if (contact.notify_push && contact.fcm_token) jobs.push(sendAndroidPush(contact.fcm_token, match_id));
+    const results = await Promise.allSettled(jobs);
+    for (const result of results) {
+      if (result.status === 'rejected') console.error('notify-turn delivery failed', result.reason);
+    }
 
     return new Response('ok', { status: 200 });
   } catch (e) {

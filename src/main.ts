@@ -9,16 +9,16 @@ import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 import { findMatch } from './online-matchmaking';
 import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
-import type { PathList, MatchOutcome } from './online-async-core';
+import type { PathList } from './online-async-core';
 import { outcomeNeedsYou } from './online-async-core';
 import { createAsyncMatch, loadMatch, getAsyncJoinId, loadMyMatches, getAsyncShareUrl } from './online-async';
 import { currentUserId } from './online-auth';
-import { registerTurnNotifications, setTurnNotifications } from './online-push';
+import { initializeTurnNotifications, getTurnNotificationStatus, setTurnNotifications } from './online-push';
+import { rememberOpenMatch, renderMatches } from './match-list';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineGameState } from './online-types';
 import { PathDrawer } from './path-drawer';
 import { recordMatchResultOnce, getOverallScore } from './online-score';
-import { requestNotificationPermission, notify } from './notify';
 import { createTutorialEncounter, TUTORIAL_LESSONS, tutorialObjectiveMet } from './tutorial';
 
 // DOM elements
@@ -85,12 +85,14 @@ const asyncNotifyCb = document.getElementById('async-notify-cb') as HTMLInputEle
 const asyncNotifyHint = document.getElementById('async-notify-hint')!;
 const asyncFirstMoveBtn = document.getElementById('async-first-move-btn')!;
 const asyncForfeitBtn = document.getElementById('async-forfeit-btn')!;
-const myMatchesBtn = document.getElementById('my-matches-btn')!;
+const asyncBackBtn = document.getElementById('async-back-btn')!;
 const myMatchesBadge = document.getElementById('my-matches-badge')!;
 const matchesScreen = document.getElementById('matches-screen')!;
 const matchesStatus = document.getElementById('matches-status')!;
 const matchesList = document.getElementById('matches-list')!;
 const matchesBackBtn = document.getElementById('matches-back-btn')!;
+const matchesNewBtn = document.getElementById('matches-new-btn')!;
+const matchesRefreshBtn = document.getElementById('matches-refresh-btn') as HTMLButtonElement;
 const onlineRandomBtn = document.getElementById('online-random-btn')!;
 const onlineLobby = document.getElementById('online-lobby')!;
 const onlineStatus = document.getElementById('online-status')!;
@@ -146,7 +148,7 @@ function showUnitInfo(unit: Unit | null): void {
 const toastEl = document.getElementById('toast')!;
 let toastTimer: number | undefined;
 /** Transient in-app banner that auto-dismisses. Used for the "it's your turn"
- *  cue while the app is focused; backgrounded users get notify() instead. */
+ *  cue while the app is focused; the server delivers background push alerts. */
 function showToast(message: string): void {
   toastEl.textContent = message;
   toastEl.style.opacity = '1';
@@ -182,6 +184,8 @@ let hordeAppliedUpgrades = new Map<string, number>();
 // state is the local player's board: drawn during planning and animated by the
 // headless engine when a resolved round plays back.
 let onlineActive = false;
+let returnToMatches = false;
+let asyncStartVersion = 0;
 let playbackPathDrawer: PathDrawer | null = null;
 let playbackUnits: Unit[] = [];
 let playbackElevationZones: ElevationZone[] = [];
@@ -710,6 +714,8 @@ retryEncounterBtn.addEventListener('click', () => {
 });
 
 newBattleBtn.addEventListener('click', () => {
+  const reopenMatches = returnToMatches;
+  returnToMatches = false;
   recorderMod?.cancelIfRecording();
   engine?.stop();
   engine = null;
@@ -731,7 +737,7 @@ newBattleBtn.addEventListener('click', () => {
   onlineActive = false;
   onlineLobby.style.display = 'none';
   // The other funnel back to the menu (a match just ended — e.g. an open-match
-  // forfeit). Recount so the "My Matches" badge doesn't keep a stale count.
+  // forfeit). Recount so the menu badge doesn't keep a stale count.
   void refreshMatchesBadge();
 
   // Reset horde state
@@ -748,6 +754,7 @@ newBattleBtn.addEventListener('click', () => {
 
   showPreview();
   showScreen('prompt');
+  if (reopenMatches) void openMatchesList();
 });
 
 // Exit game button (in battle HUD)
@@ -815,14 +822,24 @@ const ASYNC_ROUND_END_TICK = Math.round(ROUND_DURATION_S * 60);
 
 /** Tear down any in-progress async match. */
 function destroyAsync(): void {
+  asyncStartVersion++;
   asyncController?.destroy();
   asyncController = null;
+  playbackPathDrawer?.destroy();
+  playbackPathDrawer = null;
   renderer?.ticker.remove(asyncTickCallback);
   stopPlaybackEngine();
   asyncNotify.style.display = 'none';
   asyncFirstMoveBtn.style.display = 'none';
   asyncForfeitBtn.style.display = 'none';
+  asyncBackBtn.style.display = 'none';
 }
+
+asyncBackBtn.addEventListener('click', () => {
+  if (planningOverlay.classList.contains('active') && playbackUnits.some(unit => unit.waypoints.length > 0)
+      && !confirm('Leave this match? Your unsubmitted paths will not be saved.')) return;
+  newBattleBtn.click();
+});
 
 // Host's "Plan your first move" button: dismiss the share-link lobby and reveal
 // the planning overlay (set up underneath in onPlanTurn) so the host can draw.
@@ -1014,14 +1031,10 @@ function asyncHooks(): AsyncGameHooks {
       asyncFirstMoveBtn.style.display = 'none';
       planningOverlay.classList.add('active');
       confirmBtn.classList.add('active');
-      // Re-prompted after a failed submit: keep the error toast readable and
-      // don't send a "your turn" push for a turn the player just tried to take.
+      // Re-prompted after a failed submit: keep the error toast readable.
       if (afterError) return;
-      // It's the player's turn: in-app toast when focused; notify() (OS / native
-      // Capacitor on Android) covers the backgrounded case and self-guards on
-      // visibility, so the two never double-fire.
+      // Background turn alerts are delivered by the server via native/Web Push.
       if (document.visibilityState === 'visible') showToast("It's your turn!");
-      notify('7 Seconds', "It's your turn to plan!");
     },
 
     onAwaitOpponent(round, awaitingGuest) {
@@ -1124,37 +1137,48 @@ let asyncMatchmade = false;
 
 /** Start an async match: create a new one (host) or open/join an existing one. */
 async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean } = {}): Promise<void> {
-  asyncMatchmade = opts.matchmade ?? false;
-  await initRenderer();
   destroyAsync();
+  const version = asyncStartVersion;
+  asyncMatchmade = opts.matchmade ?? false;
+  returnToMatches = true;
+  onlineActive = true;
+  asyncBackBtn.style.display = 'block';
+  closeMatchesList();
   showScreen('battle');
   onlineLobby.style.display = 'flex';
+  onlineCancelBtn.textContent = 'Back to matches';
   onlineShareContainer.style.display = 'none';
   onlineStatus.style.display = '';
   showOnlineRecord(); // overall W/L (self-hides when there are no games yet)
   asyncNotify.style.display = 'flex';
-  // Reflect current push state in the checkbox (permission granted ≈ subscribed).
-  asyncNotifyCb.checked = typeof Notification !== 'undefined' && Notification.permission === 'granted';
-  asyncNotifyHint.textContent = '';
-  void registerTurnNotifications();
+  void refreshNotificationSetting();
+  setOnlineStatus(roomId ? 'Loading match…' : 'Creating match…', true);
+  await initRenderer();
+  if (version !== asyncStartVersion) return;
 
   let id = roomId;
   if (!id) {
     // Cap concurrent open matches so a player can't strand a pile of zombies a
     // friend never joins (and clutter their own list). Existing matches can
-    // always be resumed/forfeited from "My Matches".
+    // always be resumed/forfeited from the match hub.
     const mine = await loadMyMatches();
-    const liveCount = mine?.filter(s =>
-      s.match.status === 'open' || s.match.status === 'active').length ?? 0;
+    if (version !== asyncStartVersion) return;
+    if (!mine) {
+      setOnlineStatus('Could not load your matches. Go back and try again.');
+      return;
+    }
+    const liveCount = mine.filter(s =>
+      s.match.status === 'open' || s.match.status === 'active').length;
     if (liveCount >= MAX_CONCURRENT_ASYNC_MATCHES) {
-      setOnlineStatus(`You already have ${liveCount} matches on the go. Finish or forfeit one from "My Matches" before starting another.`);
+      setOnlineStatus(`You have ${liveCount} unfinished matches. Go back to your matches and finish or forfeit one before starting another.`);
       return;
     }
     setOnlineStatus('Creating match...', true);
     const generated = GameEngine.generateInitialState();
     const created = await createAsyncMatch(generated);
+    if (version !== asyncStartVersion) return;
     if (!created) {
-      setOnlineStatus('Could not create match. Async play needs the backend enabled.');
+      setOnlineStatus('Could not create a match. Check your connection, then go back and try again.');
       return;
     }
     id = created.match.id;
@@ -1169,107 +1193,109 @@ async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean
   // so without this the field shows up empty. getAsyncShareUrl is id-only/pure.
   onlineShareUrl.value = getAsyncShareUrl(id);
 
-  asyncController = new AsyncGameController(id, asyncHooks());
-  const ok = await asyncController.start();
-  if (!ok) { asyncController = null; }
+  const controller = new AsyncGameController(id, asyncHooks());
+  asyncController = controller;
+  const ok = await controller.start();
+  if (version !== asyncStartVersion) return;
+  if (!ok) {
+    controller.destroy();
+    asyncController = null;
+  } else {
+    rememberOpenMatch(id);
+  }
 }
 
-// Play a Friend — create a durable match and share its link. Live when the
-// friend is also present (Realtime), play-by-mail when they're not.
-onlineAsyncBtn.addEventListener('click', () => {
-  requestNotificationPermission();
-  void startAsyncGame(null);
-});
+// One entry point for starting and returning to durable online matches.
+onlineAsyncBtn.addEventListener('click', () => { void openMatchesList(); });
 
-// --- My Matches: resume any in-flight async match (drop-in / drop-out) -----
-
-const MATCH_OUTCOME_UI: Record<MatchOutcome, { text: string; color: string }> = {
-  'your-turn': { text: 'Your turn', color: 'var(--color-btn-green-text)' },
-  'their-turn': { text: 'Their turn', color: 'var(--color-online-status)' },
-  'waiting-for-guest': { text: 'Waiting for a friend to join', color: 'var(--color-online-status)' },
-  'resolving': { text: 'Playing…', color: 'var(--color-online-status)' },
-  'you-won': { text: 'You won', color: 'var(--color-result-blue)' },
-  'you-lost': { text: 'You lost', color: 'var(--color-result-red)' },
-  'abandoned': { text: 'Abandoned', color: 'var(--color-online-status)' },
-};
-
-/** Reveal the "My Matches" menu entry (with an unread badge) only for players
- *  who already have a session — never forces an anonymous account on load. */
+/** Passive menu refresh: never creates an anonymous account on load. */
 async function refreshMatchesBadge(): Promise<void> {
-  if (!(await currentUserId())) { myMatchesBtn.style.display = 'none'; return; }
+  if (!(await currentUserId())) { myMatchesBadge.style.display = 'none'; return; }
   const summaries = await loadMyMatches();
-  if (!summaries || summaries.length === 0) { myMatchesBtn.style.display = 'none'; return; }
-  myMatchesBtn.style.display = '';
-  const needsYou = summaries.filter(s => outcomeNeedsYou(s.outcome)).length;
-  myMatchesBadge.textContent = String(needsYou);
+  if (!summaries) return;
+  const needsYou = summaries.filter(s => s.match.status === 'active' && outcomeNeedsYou(s.outcome)).length;
+  myMatchesBadge.textContent = `${needsYou} turn${needsYou === 1 ? '' : 's'}`;
   myMatchesBadge.style.display = needsYou > 0 ? '' : 'none';
 }
 
+let matchesLoadVersion = 0;
+
+function closeMatchesList(): void {
+  matchesLoadVersion++;
+  matchesScreen.style.display = 'none';
+  promptScreen.inert = false;
+  battleScreen.inert = false;
+}
+
 async function openMatchesList(): Promise<void> {
-  matchesScreen.style.display = 'flex';
-  matchesList.innerHTML = '';
+  const alreadyOpen = matchesScreen.style.display === 'block';
+  const version = ++matchesLoadVersion;
+  matchesScreen.style.display = 'block';
+  promptScreen.inert = true;
+  battleScreen.inert = true;
+  if (!alreadyOpen) {
+    matchesScreen.scrollTop = 0;
+    document.getElementById('matches-title')!.focus();
+  }
+  matchesList.replaceChildren();
   matchesStatus.style.display = '';
-  matchesStatus.textContent = 'Loading…';
-  const summaries = await loadMyMatches();
+  matchesStatus.textContent = 'Loading your matches…';
+  matchesRefreshBtn.disabled = true;
+  matchesRefreshBtn.textContent = 'Refresh';
+  // A new player can browse the hub without creating an account yet.
+  const summaries = await currentUserId() ? await loadMyMatches() : [];
+  if (version !== matchesLoadVersion) return;
+  matchesRefreshBtn.disabled = false;
   if (!summaries) {
-    matchesStatus.textContent = 'Could not load your matches. Check your connection and try again.';
+    matchesStatus.textContent = 'Could not load your matches. Check your connection, then retry.';
+    matchesRefreshBtn.textContent = 'Retry';
     return;
   }
   if (summaries.length === 0) {
-    matchesStatus.textContent = 'No matches yet. Start an Async match to play a friend over time.';
+    matchesStatus.textContent = 'No matches yet. Tap “New match”, then send the invite link to a friend.';
     return;
   }
   matchesStatus.style.display = 'none';
-  // Surface matches that need the player first, newest within each group.
-  const sorted = [...summaries].sort(
-    (a, b) => Number(outcomeNeedsYou(b.outcome)) - Number(outcomeNeedsYou(a.outcome)),
-  );
-  for (const s of sorted) {
-    const ui = MATCH_OUTCOME_UI[s.outcome];
-    const row = document.createElement('button');
-    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;box-sizing:border-box;padding:14px 16px;font-size:15px;background:var(--color-online-url-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:6px;cursor:pointer;text-align:left';
-    const left = document.createElement('span');
-    left.textContent = `Round ${s.match.currentRound}`;
-    left.style.opacity = '0.8';
-    const right = document.createElement('span');
-    right.textContent = ui.text;
-    right.style.color = ui.color;
-    right.style.fontWeight = 'bold';
-    row.append(left, right);
-    row.addEventListener('click', () => {
-      matchesScreen.style.display = 'none';
-      void startAsyncGame(s.match.id);
-    });
-    matchesList.appendChild(row);
-  }
+  renderMatches(matchesList, summaries, id => { void startAsyncGame(id); });
 }
 
-myMatchesBtn.addEventListener('click', () => { void openMatchesList(); });
+matchesNewBtn.addEventListener('click', () => { void startAsyncGame(null); });
+matchesRefreshBtn.addEventListener('click', () => { void openMatchesList(); });
 matchesBackBtn.addEventListener('click', () => {
-  matchesScreen.style.display = 'none';
+  closeMatchesList();
+  returnToMatches = false;
+  onlineAsyncBtn.focus();
   void refreshMatchesBadge();
 });
+matchesScreen.addEventListener('keydown', event => {
+  if (event.key === 'Escape') matchesBackBtn.click();
+});
 
-// Async notification opt-in (email + web push)
+async function refreshNotificationSetting(): Promise<void> {
+  const version = asyncStartVersion;
+  asyncNotifyCb.disabled = true;
+  asyncNotifyCb.checked = false;
+  asyncNotifyHint.textContent = 'Checking notifications…';
+  const status = await getTurnNotificationStatus();
+  if (version !== asyncStartVersion) return;
+  asyncNotifyCb.checked = status.enabled;
+  asyncNotifyCb.disabled = !status.available;
+  asyncNotifyHint.textContent = status.available ? '' : 'Turn notifications are unavailable in this version of the app or browser.';
+}
+
+// Native push / Web Push opt-in, only after an explicit user gesture.
 asyncNotifyCb.addEventListener('change', async () => {
-  if (!asyncNotifyCb.checked) {
-    await setTurnNotifications(false);
-    asyncNotifyHint.textContent = '';
-    return;
-  }
-  // Enabling: await the permission grant before subscribing — Web Push can only
-  // capture a subscription once permission is 'granted'.
-  asyncNotifyHint.textContent = 'Enabling…';
-  await requestNotificationPermission();
-  const granted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
-  if (!granted) {
-    asyncNotifyCb.checked = false;
-    asyncNotifyHint.textContent = 'Notifications are blocked in your browser settings.';
-    return;
-  }
-  const ok = await setTurnNotifications(true);
-  asyncNotifyCb.checked = ok;
-  asyncNotifyHint.textContent = ok ? "You'll be notified when it's your turn." : 'Could not enable notifications.';
+  const version = asyncStartVersion;
+  const enabled = asyncNotifyCb.checked;
+  asyncNotifyCb.disabled = true;
+  asyncNotifyHint.textContent = enabled ? 'Enabling…' : 'Turning off…';
+  const ok = await setTurnNotifications(enabled).catch(() => false);
+  if (version !== asyncStartVersion) return;
+  asyncNotifyCb.disabled = false;
+  asyncNotifyCb.checked = ok ? enabled : !enabled;
+  asyncNotifyHint.textContent = ok
+    ? (enabled ? "You'll be notified when it's your turn." : 'Turn notifications are off.')
+    : 'Could not save notifications. Check your connection and notification permissions, then try again.';
 });
 
 // How long a matchmade guest waits for the host's freshly-created match row to
@@ -1281,7 +1307,8 @@ const JOIN_LAG_INTERVAL_MS = 500;
 // Online vs Random — client-side matchmaking via Supabase Realtime
 onlineRandomBtn.addEventListener('click', async () => {
   onlineActive = true;
-  requestNotificationPermission();
+  returnToMatches = false;
+  onlineCancelBtn.textContent = 'Cancel search';
 
   await initRenderer();
 
@@ -1353,13 +1380,7 @@ onlineCopyBtn.addEventListener('click', async () => {
 onlineCancelBtn.addEventListener('click', () => {
   cancelMatchmaking?.();
   cancelMatchmaking = null;
-  destroyAsync();
-  onlineActive = false;
-  onlineLobby.style.display = 'none';
-  showScreen('prompt');
-  // Leaving a match is the funnel back to the menu after taking a turn, so
-  // recount here — otherwise the "My Matches" badge keeps a stale count.
-  void refreshMatchesBadge();
+  newBattleBtn.click();
 });
 
 window.addEventListener('age-verified-async-join', ((e: CustomEvent<string>) => {
@@ -1371,6 +1392,9 @@ window.addEventListener('beforeunload', () => {
   asyncController?.destroy();
 });
 
+// A push tap uses the same entry route and age gate as a shared invite link.
+void initializeTurnNotifications(id => { window.location.assign(getAsyncShareUrl(id)); });
+
 // Initialize renderer and show battlefield preview behind start screen
 (async () => {
   await initRenderer();
@@ -1379,8 +1403,7 @@ window.addEventListener('beforeunload', () => {
   showPreview();
   showScreen('prompt');
 
-  // Reveal "My Matches" (with an unread badge) if this player already has
-  // matches — passive session read, so it never signs anyone in on load.
+  // Count available turns without signing in a new player on load.
   void refreshMatchesBadge();
 
   // Async match link (?amatch=) — distinct from live ?join= WebRTC rooms.

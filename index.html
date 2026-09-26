@@ -12,6 +12,7 @@
 
       /* Base */
       --color-bg: #111;
+      --color-matches-bg: #111;
       --color-text: #eee;
       --color-text-muted: #eee;
 
@@ -144,6 +145,52 @@
     .beta-tag { font-size: 10px; vertical-align: super; opacity: 0.6; letter-spacing: 1px; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Online match hub */
+    #matches-screen {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      overflow-y: auto;
+      background: var(--color-matches-bg);
+      padding: calc(20px + var(--sat)) 16px calc(24px + var(--sab));
+    }
+    .matches-content { width: 100%; max-width: 560px; margin: 0 auto; }
+    .matches-header, .matches-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    #matches-screen h2 { font-size: 26px; color: var(--color-online-title); }
+    #matches-title:focus { outline: none; }
+    .matches-intro { margin: 14px 0 20px; font-size: 15px; line-height: 1.5; color: var(--color-online-status); }
+    #matches-screen button {
+      font: inherit;
+      color: var(--color-text);
+      background: var(--color-btn-bg);
+      border: 1px solid var(--color-btn-border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      cursor: pointer;
+    }
+    #matches-screen button:hover { border-color: var(--color-btn-hover-border); background: var(--color-btn-hover-bg); }
+    #matches-screen button:focus-visible, #matches-screen summary:focus-visible { outline: 3px solid var(--color-online-title); outline-offset: 3px; }
+    #matches-screen button:disabled { opacity: 0.6; cursor: wait; }
+    #matches-screen #matches-new-btn { background: var(--color-btn-green-bg); color: var(--color-btn-green-text); border-color: var(--color-btn-green-border); font-weight: bold; flex: 1; }
+    #matches-status { margin-top: 18px; line-height: 1.5; font-size: 14px; color: var(--color-online-status); }
+    .match-group { margin-top: 24px; }
+    .match-group h3, .match-group summary { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--color-online-status); }
+    .match-group summary { cursor: pointer; padding: 8px 0; }
+    #matches-screen .match-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; text-align: left; background: var(--color-online-url-bg); margin-top: 10px; }
+    #matches-screen .match-row[data-outcome="your-turn"] { border-left: 4px solid var(--color-btn-green-border); }
+    .match-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .match-label { font-size: 12px; color: var(--color-online-status); overflow-wrap: anywhere; }
+    .match-info strong { font-size: 17px; }
+    .match-detail { font-size: 13px; line-height: 1.4; color: var(--color-online-status); }
+    .match-action { font-size: 14px; font-weight: 600; white-space: nowrap; color: var(--color-btn-green-text); }
+    .matches-note { font-size: 12px; line-height: 1.5; color: var(--color-online-status); margin-top: 24px; }
+    @media (max-width: 480px) {
+      #matches-screen h2 { font-size: 23px; }
+      #matches-screen .match-row { align-items: stretch; flex-direction: column; gap: 12px; }
+      .match-action { align-self: flex-end; }
+    }
+
     /* Battle Screen */
     #battle-screen {
       position: relative;
@@ -242,6 +289,7 @@
     }
     #confirm-btn.active { display: block; }
     #confirm-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); opacity: 1; }
+    #async-back-btn { display: none; position: fixed; bottom: calc(4px + var(--sab)); left: 8px; min-height: 44px; padding: 8px 12px; font: inherit; font-size: 13px; background: var(--color-btn-bg); color: var(--color-text); border: 1px solid var(--color-btn-border); border-radius: 4px; cursor: pointer; z-index: 12; }
     #planning-overlay.tutorial { width: min(460px, calc(100% - 32px)); text-align: center; }
     #planning-overlay.tutorial #planning-label { font-size: 18px; letter-spacing: 1px; }
     #planning-overlay.tutorial #planning-instructions { display: block; opacity: 1; line-height: 1.5; }
@@ -470,6 +518,7 @@
     /* Day-mode paper aesthetic */
     body.day-mode {
       --color-bg: transparent;
+      --color-matches-bg: #f5f0e0;
       --color-text: #443322;
       --color-text-muted: #665544;
 
@@ -569,9 +618,8 @@
       <button id="ai-btn">vs AI</button>
       <button id="tutorial-btn">Learn to play</button>
       <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-horde-bg);color:var(--color-btn-horde-text);border:2px solid var(--color-btn-horde-border);border-radius:4px;cursor:pointer">Horde</button>
-      <button id="online-async-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Friend</button>
+      <button id="online-async-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Friend <span id="my-matches-badge" style="display:none;font-size:12px;letter-spacing:0">0 turns</span></button>
       <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Stranger <span class="beta-tag">BETA</span></button>
-      <button id="my-matches-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-bg);color:var(--color-text);border:2px solid var(--color-btn-border);border-radius:4px;cursor:pointer;display:none">My Matches <span id="my-matches-badge" style="display:none;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border-radius:10px;padding:1px 8px;font-size:12px;margin-left:4px">0</span></button>
       <button id="battle-btn">Local PvP</button>
     </div>
     <!-- CTF buttons hidden for now -->
@@ -617,6 +665,7 @@
       <span id="planning-instructions">Click a unit, drag to draw a path. Repeat for each unit.</span>
     </div>
     <button id="confirm-btn">Done</button>
+    <button id="async-back-btn" aria-label="Back to matches">← Matches</button>
     <button id="skip-tutorial-btn">Back to menu</button>
     <div id="unit-info" hidden role="status" aria-live="polite">
       <strong id="unit-info-title"></strong>
@@ -655,11 +704,21 @@
     <button id="online-cancel-btn" style="padding:8px 24px;font-size:14px;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;opacity:0.7;margin-top:8px">Cancel</button>
   </div>
 
-  <div id="matches-screen" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;gap:16px;background:var(--color-overlay-lobby);z-index:30;padding:calc(24px + var(--sat)) 16px calc(24px + var(--sab));overflow-y:auto">
-    <h2 style="font-size:26px;letter-spacing:3px;text-transform:uppercase;color:var(--color-online-title);margin:0">My Matches</h2>
-    <p id="matches-status" style="font-size:14px;color:var(--color-online-status);margin:0">Loading…</p>
-    <div id="matches-list" style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:440px"></div>
-    <button id="matches-back-btn" style="padding:10px 28px;font-size:14px;background:var(--color-btn-bg);color:var(--color-text);border:1px solid var(--color-btn-border);border-radius:4px;cursor:pointer;margin-top:8px">Back</button>
+  <div id="matches-screen" role="dialog" aria-modal="true" aria-labelledby="matches-title">
+    <div class="matches-content">
+      <div class="matches-header">
+        <h2 id="matches-title" tabindex="-1">Play a Friend</h2>
+        <button id="matches-back-btn">Menu</button>
+      </div>
+      <p class="matches-intro">Plan separately. Each round plays when both moves are in. Submitted moves are saved, so you can leave and return later.</p>
+      <div class="matches-toolbar">
+        <button id="matches-new-btn">+ New match</button>
+        <button id="matches-refresh-btn">Refresh</button>
+      </div>
+      <p id="matches-status" role="status" aria-live="polite">Loading your matches…</p>
+      <div id="matches-list"></div>
+      <p class="matches-note">Start a new match to get an invite link for your friend. Return on this device to find your saved matches here.</p>
+    </div>
   </div>
 
   <div id="cover-screen">

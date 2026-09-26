@@ -188,7 +188,7 @@ export interface MatchSummary {
   outcome: MatchOutcome;
 }
 
-/** Load every match the signed-in player participates in, newest first, each
+/** Load all live matches plus recent history for the signed-in player, each
  *  collapsed to a single player-facing outcome (your-turn / their-turn / …).
  *  This is the data behind the "my matches" / resume screen — the durable turn
  *  log means a player can leave any match and pick it back up from here.
@@ -199,18 +199,19 @@ export async function loadMyMatches(limit = 40): Promise<MatchSummary[] | null> 
   if (!uid) return null;
   const client = getSupabaseClient();
 
-  const res = await withRetry(
-    () => client.from('matches').select()
-      .or(`host_player.eq.${uid},guest_player.eq.${uid}`)
-      .order('updated_at', { ascending: false })
-      .limit(limit),
-    { label: 'loadMyMatches' },
-  );
-  if (res.error || !res.data) {
-    dlog(`async: loadMyMatches failed: ${res.error?.message}`);
+  const query = () => client.from('matches').select()
+    .or(`host_player.eq.${uid},guest_player.eq.${uid}`)
+    .order('updated_at', { ascending: false });
+  // History must never push an older unfinished match out of the resume list.
+  const results = await Promise.all([
+    withRetry(() => query().in('status', ['open', 'active']), { label: 'loadMyMatches live' }),
+    withRetry(() => query().in('status', ['host_won', 'guest_won', 'abandoned']).limit(limit), { label: 'loadMyMatches history' }),
+  ]).catch(() => null);
+  if (!results || results.some(res => res.error || !res.data)) {
+    dlog('async: loadMyMatches failed');
     return null;
   }
-  const matches = (res.data as MatchRow[]).map(mapMatch);
+  const matches = results.flatMap(res => (res.data as MatchRow[]).map(mapMatch));
 
   // Batch the current-round turns for in-play matches in one query (avoids N+1).
   const live = matches.filter(m => m.status === 'open' || m.status === 'active');
@@ -219,9 +220,9 @@ export async function loadMyMatches(limit = 40): Promise<MatchSummary[] | null> 
     const tres = await withRetry(
       () => client.from('turns').select().in('match_id', live.map(m => m.id)),
       { label: 'loadMyMatches turns' },
-    );
-    if (tres.error) {
-      dlog(`async: loadMyMatches turns failed: ${tres.error.message}`);
+    ).catch(() => null);
+    if (!tres || tres.error) {
+      dlog(`async: loadMyMatches turns failed: ${tres?.error?.message ?? 'connection error'}`);
       return null;
     }
     for (const row of (tres.data as (TurnRow & { match_id: string })[] | null) ?? []) {

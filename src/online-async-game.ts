@@ -193,12 +193,14 @@ export class AsyncGameController {
    *  subscribe to changes, and drive the first applicable step. */
   async start(): Promise<boolean> {
     this.userId = await this.io.getUserId();
+    if (this.destroyed) return false;
     if (!this.userId) {
       this.showError('Online play is unavailable right now.');
       return false;
     }
 
     let match = await this.io.loadMatch(this.id);
+    if (this.destroyed) return false;
     if (!match) {
       this.showError('Match not found.');
       return false;
@@ -206,6 +208,7 @@ export class AsyncGameController {
     // Join as guest if there's an open seat and we're not the host.
     if (match.status === 'open' && match.hostPlayer !== this.userId) {
       match = await this.io.joinMatch(this.id);
+      if (this.destroyed) return false;
       if (!match) {
         this.showError('Could not join this match.');
         return false;
@@ -279,6 +282,7 @@ export class AsyncGameController {
     const previous = this.stash.load(key);
     this.stash.save(key, paths);
     const ok = await this.io.commit(this.id, round, this.myTeam, paths);
+    if (this.destroyed) return;
     if (!ok) {
       // We can't tell which plan the server holds: the new one may have landed
       // with its response lost, or the slot may hold the earlier plan (e.g.
@@ -408,7 +412,7 @@ export class AsyncGameController {
     // null = transient load failure: do nothing rather than act on a phantom
     // empty list (which would wrongly re-prompt a committed player to redraw).
     // A later realtime event or reopen re-drives evaluate().
-    if (allTurns == null) return;
+    if (this.destroyed || allTurns == null) return;
     const turns = turnsForRound(allTurns, round);
     const action = nextRoundAction(turns, this.myTeam);
     // 'open' means no guest has joined yet (only the host can be here). We still

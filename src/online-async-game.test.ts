@@ -148,6 +148,48 @@ const bluePlan: PathList = [{ unitId: 'b1', waypoints: [{ x: 1, y: 2 }] }];
 const redPlan: PathList = [{ unitId: 'r1', waypoints: [{ x: 3, y: 4 }] }];
 
 describe('AsyncGameController', () => {
+  it('ignores a failed submission after the player has left the match', async () => {
+    const be = new FakeBackend('late-submit', 'host');
+    const spy = makeHooks();
+    let finishCommit!: (ok: boolean) => void;
+    const io = { ...be.ioFor('host'), commit: () => new Promise<boolean>(resolve => { finishCommit = resolve; }) };
+    const controller = new AsyncGameController('late-submit', spy.hooks, { io, stash: memStash(), pollEnv: null });
+    await controller.start();
+    const pending = controller.submitPlan(bluePlan);
+    controller.destroy();
+    finishCommit(false);
+    await pending;
+    expect(spy.errors).toEqual([]);
+    expect(be.listeners.size).toBe(0);
+  });
+
+  it.each(['auth', 'match', 'join', 'turns'])('does not reopen a match left while %s was loading', async (stage) => {
+    const be = new FakeBackend('cancelled', 'host');
+    const base = be.ioFor('guest');
+    const spy = makeHooks();
+    const env = fakePollEnv();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const io: AsyncIO = {
+      ...base,
+      getUserId: async () => { if (stage === 'auth') await gate; return base.getUserId(); },
+      loadMatch: async id => { if (stage === 'match') await gate; return base.loadMatch(id); },
+      joinMatch: async id => { if (stage === 'join') await gate; return base.joinMatch(id); },
+      fetchTurns: async id => { if (stage === 'turns') await gate; return base.fetchTurns(id); },
+    };
+    const controller = new AsyncGameController('cancelled', spy.hooks, { io, pollEnv: env });
+    const opening = controller.start();
+    await flush();
+    controller.destroy();
+    release();
+    await opening;
+    expect(spy.planTurns).toEqual([]);
+    expect(spy.awaitOpp).toEqual([]);
+    expect(spy.plays).toEqual([]);
+    expect(spy.errors).toEqual([]);
+    expect(be.listeners.size).toBe(0);
+  });
+
   it('runs a round through commit, auto-reveal, and resolve for both players', async () => {
     const be = new FakeBackend('m1', 'host-uid');
     const hostSpy = makeHooks();
