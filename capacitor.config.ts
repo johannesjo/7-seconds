@@ -8,11 +8,6 @@ const config: CapacitorConfig = {
     url: "https://johannesjo.github.io/7-seconds/",
     cleartext: false,
   },
-  plugins: {
-    PushNotifications: {
-      presentationOptions: ["sound", "alert"],
-    },
-  },
 };
 
 export default config;

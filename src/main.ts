@@ -1,4 +1,6 @@
 import { Renderer } from './renderer';
+import { Capacitor } from '@capacitor/core';
+import { notifyLocalTurn } from './notify';
 import { GameEngine } from './game';
 import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateBattlefield, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
@@ -83,6 +85,8 @@ const onlineAsyncBtn = document.getElementById('online-async-btn')!;
 const asyncNotify = document.getElementById('async-notify')!;
 const asyncNotifyCb = document.getElementById('async-notify-cb') as HTMLInputElement;
 const asyncNotifyHint = document.getElementById('async-notify-hint')!;
+const asyncNotifyLabel = document.getElementById('async-notify-label')!;
+const LOCAL_TURN_HINT = 'Keep this match open for alerts. Closing the app stops turn checks.';
 const asyncFirstMoveBtn = document.getElementById('async-first-move-btn')!;
 const asyncForfeitBtn = document.getElementById('async-forfeit-btn')!;
 const asyncBackBtn = document.getElementById('async-back-btn')!;
@@ -148,7 +152,7 @@ function showUnitInfo(unit: Unit | null): void {
 const toastEl = document.getElementById('toast')!;
 let toastTimer: number | undefined;
 /** Transient in-app banner that auto-dismisses. Used for the "it's your turn"
- *  cue while the app is focused; the server delivers background push alerts. */
+ *  cue while the app is focused. */
 function showToast(message: string): void {
   toastEl.textContent = message;
   toastEl.style.opacity = '1';
@@ -1031,10 +1035,14 @@ function asyncHooks(): AsyncGameHooks {
       asyncFirstMoveBtn.style.display = 'none';
       planningOverlay.classList.add('active');
       confirmBtn.classList.add('active');
-      // Re-prompted after a failed submit: keep the error toast readable.
+      // Re-prompted after a failed submit: keep the error toast readable and
+      // don't alert for a turn the player just tried to take.
       if (afterError) return;
-      // Background turn alerts are delivered by the server via native/Web Push.
+      // Browsers use Web Push; Android can show an ordinary local alert if the
+      // running match receives a turn update while its WebView is backgrounded.
       if (document.visibilityState === 'visible') showToast("It's your turn!");
+      const matchId = asyncController?.matchId;
+      if (matchId) void notifyLocalTurn(matchId, round);
     },
 
     onAwaitOpponent(round, awaitingGuest) {
@@ -1273,6 +1281,8 @@ matchesScreen.addEventListener('keydown', event => {
 
 async function refreshNotificationSetting(): Promise<void> {
   const version = asyncStartVersion;
+  const local = Capacitor.isNativePlatform();
+  asyncNotifyLabel.textContent = local ? 'Turn alerts on this device' : "Notify me when it's my turn";
   asyncNotifyCb.disabled = true;
   asyncNotifyCb.checked = false;
   asyncNotifyHint.textContent = 'Checking notifications…';
@@ -1280,10 +1290,12 @@ async function refreshNotificationSetting(): Promise<void> {
   if (version !== asyncStartVersion) return;
   asyncNotifyCb.checked = status.enabled;
   asyncNotifyCb.disabled = !status.available;
-  asyncNotifyHint.textContent = status.available ? '' : 'Turn notifications are unavailable in this version of the app or browser.';
+  asyncNotifyHint.textContent = status.available
+    ? (local ? LOCAL_TURN_HINT : '')
+    : 'Turn notifications are unavailable in this version of the app or browser.';
 }
 
-// Native push / Web Push opt-in, only after an explicit user gesture.
+// Local Android notifications / Web Push opt-in after an explicit user gesture.
 asyncNotifyCb.addEventListener('change', async () => {
   const version = asyncStartVersion;
   const enabled = asyncNotifyCb.checked;
@@ -1294,7 +1306,7 @@ asyncNotifyCb.addEventListener('change', async () => {
   asyncNotifyCb.disabled = false;
   asyncNotifyCb.checked = ok ? enabled : !enabled;
   asyncNotifyHint.textContent = ok
-    ? (enabled ? "You'll be notified when it's your turn." : 'Turn notifications are off.')
+    ? (enabled ? (Capacitor.isNativePlatform() ? LOCAL_TURN_HINT : "You'll be notified when it's your turn.") : 'Turn notifications are off.')
     : 'Could not save notifications. Check your connection and notification permissions, then try again.';
 });
 
@@ -1392,7 +1404,7 @@ window.addEventListener('beforeunload', () => {
   asyncController?.destroy();
 });
 
-// A push tap uses the same entry route and age gate as a shared invite link.
+// A local notification tap uses the same entry route and age gate as an invite.
 void initializeTurnNotifications(id => { window.location.assign(getAsyncShareUrl(id)); });
 
 // Initialize renderer and show battlefield preview behind start screen

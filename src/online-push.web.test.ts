@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web', isNativePlatform: () => false, isPluginAvailable: () => false },
-  registerPlugin: () => ({}),
 }));
 vi.mock('./online-auth', () => ({ currentUserId: vi.fn(async () => 'player-1'), ensureAuth: vi.fn(async () => 'player-1') }));
 vi.mock('./online', () => ({ getSupabaseClient: () => ({ from: () => ({

@@ -1,73 +1,76 @@
 import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
-let permissionGranted = false;
-let permissionPromise: Promise<void> | null = null;
-let swRegistration: ServiceWorkerRegistration | null = null;
+const ENABLED_KEY = '7s-local-turn-notifications';
+const available = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('LocalNotifications');
+const appIsVisible = () => document.visibilityState === 'visible';
+let actionListener: Promise<unknown> | null = null;
+let openMatch: ((id: string) => void) | null = null;
+const notifiedTurns = new Set<string>();
 
-function isNative(): boolean {
-  return Capacitor.isNativePlatform();
+function enabledOnDevice(): boolean {
+  try { return localStorage.getItem(ENABLED_KEY) === '1'; } catch { return false; }
 }
 
-/** Request OS/browser notification permission once. Returns the shared promise
- *  so callers can await the grant before acting on it (e.g. Web Push needs
- *  permission resolved before it can subscribe). */
-export function requestNotificationPermission(): Promise<void> {
-  if (!permissionPromise) permissionPromise = doRequestPermission();
-  return permissionPromise;
+/** Local notices can open the same match route as an invite. No push service. */
+export async function initializeLocalTurnNotifications(onOpen: (id: string) => void): Promise<void> {
+  openMatch = onOpen;
+  if (!available()) return;
+  if (!actionListener) {
+    actionListener = LocalNotifications.addListener('localNotificationActionPerformed', ({ notification }) => {
+      const id: unknown = notification.extra?.matchId;
+      if (typeof id === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(id)) openMatch?.(id);
+    }).catch(() => { actionListener = null; });
+  }
+  await actionListener;
 }
 
-async function doRequestPermission(): Promise<void> {
-  if (isNative()) {
-    try {
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      const result = await LocalNotifications.requestPermissions();
-      permissionGranted = result.display === 'granted';
-    } catch (err) {
-      console.error('Failed to request notification permission:', err);
-    }
-  } else if ('Notification' in window) {
-    try {
-      const result = await Notification.requestPermission();
-      permissionGranted = result === 'granted';
-    } catch (err) {
-      console.error('Failed to request notification permission:', err);
-    }
-    if (permissionGranted && 'serviceWorker' in navigator) {
-      try {
-        swRegistration = await navigator.serviceWorker.register(
-          new URL('/sw-notify.js', import.meta.url).href,
-        );
-      } catch {
-        // SW optional — falls back to new Notification()
-      }
-    }
+export async function getLocalTurnNotificationStatus(): Promise<{ enabled: boolean; available: boolean }> {
+  if (!available()) return { enabled: false, available: false };
+  try {
+    const permission = await LocalNotifications.checkPermissions();
+    return { enabled: enabledOnDevice() && permission.display === 'granted', available: true };
+  } catch {
+    return { enabled: false, available: false };
   }
 }
 
-export async function notify(title: string, body: string): Promise<void> {
-  if (permissionPromise) await permissionPromise;
-  if (!permissionGranted || document.visibilityState === 'visible') return;
+export async function setLocalTurnNotifications(enabled: boolean): Promise<boolean> {
+  if (!available()) return false;
+  try {
+    if (enabled) {
+      let permission = await LocalNotifications.checkPermissions();
+      if (permission.display !== 'granted') permission = await LocalNotifications.requestPermissions();
+      if (permission.display !== 'granted') return false;
+    }
+    localStorage.setItem(ENABLED_KEY, enabled ? '1' : '0');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  if (isNative()) {
-    try {
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      await LocalNotifications.schedule({
-        notifications: [{ title, body, id: Date.now() }],
-      });
-    } catch (err) {
-      console.error('Failed to schedule notification:', err);
-    }
-  } else if (swRegistration) {
-    try {
-      await swRegistration.showNotification(title, { body });
-    } catch (err) {
-      console.error('Failed to show notification via SW:', err);
-    }
-  } else {
-    const n = new Notification(title, { body });
-    n.onclick = () => {
-      window.focus();
-      n.close();
-    };
+/** Best-effort alert when a running match detects a turn while backgrounded.
+ * The foreground already shows a toast. This does not perform background fetch. */
+export async function notifyLocalTurn(matchId: string, round: number): Promise<void> {
+  if (!available() || appIsVisible()) return;
+  const status = await getLocalTurnNotificationStatus();
+  const key = `${matchId}:${round}`;
+  if (!status.enabled || !enabledOnDevice() || appIsVisible() || notifiedTurns.has(key)) return;
+  // Android requires a signed 32-bit ID. Reuse a match's ID to replace old alerts.
+  let id = 0;
+  for (const char of matchId) id = (Math.imul(id, 31) + char.charCodeAt(0)) | 0;
+  id = (id & 0x7fffffff) || 1;
+  notifiedTurns.add(key);
+  try {
+    await LocalNotifications.schedule({
+      notifications: [{
+        id, title: '7 Seconds — your turn',
+        body: `Continue round ${round} in match ${matchId.toUpperCase()}.`,
+        extra: { matchId },
+      }],
+    });
+  } catch {
+    notifiedTurns.delete(key);
   }
 }
