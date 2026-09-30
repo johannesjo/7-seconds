@@ -79,7 +79,8 @@ function mapTurn(row: TurnRow): RoundTurn {
     round: row.round,
     team: row.team,
     player: row.player,
-    commitHash: row.commit_hash,
+    // bigint column: PostgREST may hand it back as a string.
+    commitHash: Number(row.commit_hash),
     paths: row.paths,
   };
 }
@@ -288,17 +289,24 @@ export async function revealTurn(
   id: string, round: number, team: AsyncTeam, paths: PathList,
 ): Promise<boolean> {
   const client = getSupabaseClient();
-  const { error } = await withRetry(
+  const { data, error } = await withRetry(
     () => client
       .from('turns')
       .update({ paths, revealed_at: new Date().toISOString() })
       .eq('match_id', id)
       .eq('round', round)
-      .eq('team', team),
+      .eq('team', team)
+      .select('match_id'),
     { label: `revealTurn r${round}/${team}` },
   );
   if (error) {
     dlog(`async: revealTurn r${round}/${team} failed: ${error.message}`);
+    return false;
+  }
+  // 0 rows (e.g. RLS mismatch) is a silent no-op, not a reveal: report it so
+  // the controller doesn't refresh-and-reveal in a tight loop.
+  if ((data?.length ?? 0) === 0) {
+    dlog(`async: revealTurn r${round}/${team} updated no rows`);
     return false;
   }
   return true;

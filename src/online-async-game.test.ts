@@ -804,4 +804,69 @@ describe('AsyncGameController', () => {
     expect(be.match.currentRound).toBe(2);
     host.destroy();
   });
+
+  it('still reveals when a commit landed but was reported as failed (no stash wipe)', async () => {
+    const be = new FakeBackend('m25', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
+    const io = be.ioFor('host-uid');
+    const realCommit = io.commit;
+    // The row is stored, but the response is lost and the client sees failure.
+    io.commit = async (...args) => { await realCommit(...args); return false; };
+    const spy = makeHooks();
+    const host = new AsyncGameController('m25', spy.hooks, { io, stash: memStash() });
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await flush();
+
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.commit('m25', 1, 'red', redPlan);
+    await guestIO.reveal('m25', 1, 'red', redPlan);
+    await flush();
+
+    expect(spy.plays.length).toBe(1);
+    expect(spy.plays[0].bluePaths).toEqual(bluePlan);
+    expect(spy.forfeitable).not.toContain(true);
+    host.destroy();
+  });
+
+  it('flags the re-prompt after a failed submit so the UI can skip "your turn"', async () => {
+    const be = new FakeBackend('m26', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
+    const io = be.ioFor('host-uid');
+    io.commit = async () => false;
+    const afterError: (boolean | undefined)[] = [];
+    const spy = makeHooks();
+    spy.hooks.onPlanTurn = (round, _s, _t, _a, err) => { spy.planTurns.push(round); afterError.push(err); };
+    const host = new AsyncGameController('m26', spy.hooks, { io, stash: memStash() });
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await flush();
+
+    expect(afterError).toEqual([false, true]);
+    host.destroy();
+  });
+
+  it('does not re-emit the same stuck-state error on every poll', async () => {
+    const be = new FakeBackend('m27', 'host-uid');
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m27');
+    await be.ioFor('host-uid').commit('m27', 1, 'blue', bluePlan);
+    await guestIO.commit('m27', 1, 'red', redPlan);
+
+    const env = fakePollEnv();
+    const spy = makeHooks();
+    const host = new AsyncGameController('m27', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash(), pollEnv: env });
+    await host.start();
+    await flush();
+    expect(spy.errors.length).toBe(1);
+
+    env.tick();
+    await flush();
+    env.tick();
+    await flush();
+    expect(spy.errors.length).toBe(1);
+    host.destroy();
+  });
 });

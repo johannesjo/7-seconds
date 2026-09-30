@@ -960,7 +960,7 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
 /** Bridge the async protocol controller to the UI / playback engine. */
 function asyncHooks(): AsyncGameHooks {
   return {
-    onPlanTurn(round, startState, myTeam, awaitingGuest) {
+    onPlanTurn(round, startState, myTeam, awaitingGuest, afterError) {
       asyncCurrentRound = round;
       asyncMyTeam = myTeam;
       stopPlaybackEngine();
@@ -1014,6 +1014,9 @@ function asyncHooks(): AsyncGameHooks {
       asyncFirstMoveBtn.style.display = 'none';
       planningOverlay.classList.add('active');
       confirmBtn.classList.add('active');
+      // Re-prompted after a failed submit: keep the error toast readable and
+      // don't send a "your turn" push for a turn the player just tried to take.
+      if (afterError) return;
       // It's the player's turn: in-app toast when focused; notify() (OS / native
       // Capacitor on Android) covers the backgrounded case and self-guards on
       // visibility, so the two never double-fire.
