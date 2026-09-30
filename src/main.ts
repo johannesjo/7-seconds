@@ -916,6 +916,11 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
   stopPlaybackEngine();
   asyncMatchEnded = false;
   asyncRoundFinished = false;
+  // The round reported back via onRoundPlayed when playback ends. onPlanTurn
+  // also sets this, but it never fires when a match is reopened mid-round (the
+  // controller goes straight to reveal/resolve) — a stale round made the
+  // controller drop the report and wedged the round.
+  asyncCurrentRound = input.round;
 
   // Vary the PRNG per round (matches the live path's seed + roundNumber scheme;
   // resolveRound and the cosmetic engine both start fresh with roundNumber=1, so
@@ -955,7 +960,7 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
 /** Bridge the async protocol controller to the UI / playback engine. */
 function asyncHooks(): AsyncGameHooks {
   return {
-    onPlanTurn(round, startState, myTeam, awaitingGuest) {
+    onPlanTurn(round, startState, myTeam, awaitingGuest, afterError) {
       asyncCurrentRound = round;
       asyncMyTeam = myTeam;
       stopPlaybackEngine();
@@ -1009,6 +1014,9 @@ function asyncHooks(): AsyncGameHooks {
       asyncFirstMoveBtn.style.display = 'none';
       planningOverlay.classList.add('active');
       confirmBtn.classList.add('active');
+      // Re-prompted after a failed submit: keep the error toast readable and
+      // don't send a "your turn" push for a turn the player just tried to take.
+      if (afterError) return;
       // It's the player's turn: in-app toast when focused; notify() (OS / native
       // Capacitor on Android) covers the backgrounded case and self-guards on
       // visibility, so the two never double-fire.
@@ -1091,6 +1099,9 @@ function asyncHooks(): AsyncGameHooks {
     },
 
     onError(message, canForfeit) {
+      // Also toast it: some errors are followed at once by a re-prompt to plan
+      // (a failed submit), which hides the lobby that shows the status line.
+      showToast(message);
       onlineShareContainer.style.display = 'none';
       asyncFirstMoveBtn.style.display = 'none';
       setOnlineStatus(message);

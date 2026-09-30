@@ -28,7 +28,7 @@ export interface AsyncGameHooks {
    *  `awaitingGuest` is true when no opponent has joined yet (host's first move
    *  before the friend arrives): the UI should keep the share link / invite up
    *  alongside planning, and skip the "it's your turn" notification. */
-  onPlanTurn(round: number, startState: OnlineGameState, myTeam: AsyncTeam, awaitingGuest: boolean): void;
+  onPlanTurn(round: number, startState: OnlineGameState, myTeam: AsyncTeam, awaitingGuest: boolean, afterError?: boolean): void;
   /** We've submitted; nothing to do until the opponent acts. `awaitingGuest`
    *  true means we're still waiting for a friend to *join* (keep the share link
    *  visible), not just to take their turn. */
@@ -40,7 +40,8 @@ export interface AsyncGameHooks {
   /** Recoverable problem worth surfacing (e.g. backend unavailable).
    *  `canForfeit` is true when the only clean way out is to concede this match
    *  (e.g. the committed plan was lost and can never pass reveal verification),
-   *  so the UI can offer a Forfeit action that calls forfeit(). */
+   *  so the UI can offer a Forfeit action that calls forfeit(). The same error
+   *  is not re-emitted by the safety-net poll until some other state is shown. */
   onError(message: string, canForfeit?: boolean): void;
 }
 
@@ -112,6 +113,9 @@ export interface PollEnv {
  *  guarantees the match can never silently hang if the socket dies. */
 export const POLL_INTERVAL_MS = 15_000;
 
+/** Failed reveal attempts (one per poll) before Forfeit is offered. */
+const MAX_REVEAL_FAILURES = 3;
+
 /** Default poll environment: real timers + Page Visibility, active only in a
  *  browser. In a headless/test context `document` is undefined and we return a
  *  no-op env so unit tests never spin real timers. */
@@ -167,6 +171,15 @@ export class AsyncGameController {
    *  with the round-1 advance so later rounds reuse it). */
   private playingSeed: number | null = null;
   private destroyed = false;
+  /** Last error shown, so a stuck state re-detected by every poll doesn't
+   *  re-fire the same error (and reset the UI) every 15s. Cleared whenever any
+   *  other state is shown. */
+  private lastError: string | null = null;
+  /** The next planning prompt follows a failed submit (UI skips "your turn"). */
+  private replanAfterError = false;
+  /** Consecutive failed reveals for revealFailRound. */
+  private revealFailures = 0;
+  private revealFailRound: number | null = null;
 
   constructor(id: string, hooks: AsyncGameHooks, opts: AsyncGameOptions = {}) {
     this.id = id;
@@ -181,20 +194,20 @@ export class AsyncGameController {
   async start(): Promise<boolean> {
     this.userId = await this.io.getUserId();
     if (!this.userId) {
-      this.hooks.onError('Online play is unavailable right now.');
+      this.showError('Online play is unavailable right now.');
       return false;
     }
 
     let match = await this.io.loadMatch(this.id);
     if (!match) {
-      this.hooks.onError('Match not found.');
+      this.showError('Match not found.');
       return false;
     }
     // Join as guest if there's an open seat and we're not the host.
     if (match.status === 'open' && match.hostPlayer !== this.userId) {
       match = await this.io.joinMatch(this.id);
       if (!match) {
-        this.hooks.onError('Could not join this match.');
+        this.showError('Could not join this match.');
         return false;
       }
     }
@@ -238,6 +251,12 @@ export class AsyncGameController {
     return `7s-async-${this.id}-r${round}-${this.myTeam}`;
   }
 
+  /** An earlier plan for the round, kept after a submit whose outcome is
+   *  unknown (see submitPlan). */
+  private altStashKey(round: number): string {
+    return `${this.stashKey(round)}-alt`;
+  }
+
   /** The durable match id (for keying a once-only win/loss record). */
   get matchId(): string { return this.id; }
 
@@ -256,10 +275,23 @@ export class AsyncGameController {
   async submitPlan(paths: PathList): Promise<void> {
     if (this.destroyed || !this.match) return;
     const round = this.match.currentRound;
-    this.stash.save(this.stashKey(round), paths);
+    const key = this.stashKey(round);
+    const previous = this.stash.load(key);
+    this.stash.save(key, paths);
     const ok = await this.io.commit(this.id, round, this.myTeam, paths);
     if (!ok) {
-      this.hooks.onError('Could not submit your turn. Try again.');
+      // We can't tell which plan the server holds: the new one may have landed
+      // with its response lost, or the slot may hold the earlier plan (e.g.
+      // committed from another tab). Keep both; the reveal step picks the one
+      // whose hash matches the stored commitment.
+      if (previous) this.stash.save(this.altStashKey(round), previous);
+      this.showError('Could not submit your turn. Try again.');
+      this.replanAfterError = true;
+      // The UI already tore down the drawing for this submit. Release the
+      // planning latch and re-evaluate so a still-uncommitted round re-prompts
+      // planning instead of leaving the player on a dead "waiting" screen.
+      if (this.planningRound === round) this.planningRound = null;
+      await this.evaluate();
       return;
     }
     await this.evaluate();
@@ -284,7 +316,7 @@ export class AsyncGameController {
     const seed = this.match.seed == null ? (this.playingSeed ?? undefined) : undefined;
     if (this.match.seed == null && seed == null) {
       // Defensive: never advance round 1 without persisting the write-once seed.
-      this.hooks.onError('Could not resolve the round; please retry.');
+      this.showError('Could not resolve the round; please retry.');
       return;
     }
     const landed = await this.io.persist(this.id, {
@@ -305,6 +337,7 @@ export class AsyncGameController {
     // so a transient failure (retries exhausted, still on this round) can retry.
     if (landed || (this.match != null && this.match.currentRound > round)) {
       this.stash.clear(this.stashKey(round));
+      this.stash.clear(this.altStashKey(round));
     } else if (this.match != null && this.match.currentRound === round) {
       // Neither our write nor a peer's advanced the round: the persist failed
       // transiently (retries are already exhausted inside persistRoundResult).
@@ -315,6 +348,12 @@ export class AsyncGameController {
       this.playingRound = null;
       this.playingSeed = null;
     }
+  }
+
+  private showError(message: string, canForfeit?: boolean): void {
+    if (message === this.lastError) return;
+    this.lastError = message;
+    this.hooks.onError(message, canForfeit);
   }
 
   private winnerStatus(state: OnlineGameState): MatchStatus {
@@ -348,6 +387,8 @@ export class AsyncGameController {
     const match = this.match;
 
     if (isTerminalStatus(match.status)) {
+      this.lastError = null;
+      this.replanAfterError = false;
       this.hooks.onGameOver(match.status, match.latestState);
       return;
     }
@@ -358,7 +399,7 @@ export class AsyncGameController {
     // reject an implausible snapshot so a malicious/buggy state can't hang or
     // crash this client. Forfeit is the clean exit (the state can't be fixed).
     if (!isPlausibleGameState(match.latestState)) {
-      this.hooks.onError('This match has an invalid game state and can no longer be played.', true);
+      this.showError('This match has an invalid game state and can no longer be played.', true);
       return;
     }
 
@@ -380,28 +421,65 @@ export class AsyncGameController {
       case 'commit':
         if (this.planningRound === round) return; // already planning this round
         this.planningRound = round;
-        this.hooks.onPlanTurn(round, match.latestState, this.myTeam, awaitingGuest);
+        this.lastError = null;
+        try {
+          this.hooks.onPlanTurn(round, match.latestState, this.myTeam, awaitingGuest, this.replanAfterError);
+        } catch (e) {
+          // Release the latch so a later evaluate re-prompts instead of
+          // skipping this round's planning forever.
+          console.error('async: failed to set up planning', e);
+          this.planningRound = null;
+        }
+        this.replanAfterError = false;
         return;
 
       case 'await-commit':
       case 'await-reveal':
+        this.lastError = null;
+        this.replanAfterError = false;
         this.hooks.onAwaitOpponent(round, awaitingGuest);
         return;
 
       case 'reveal': {
-        const mine = this.stash.load(this.stashKey(round));
-        if (!mine) {
+        const myTurn = turns.find(t => t.team === this.myTeam);
+        const candidates = [this.stash.load(this.stashKey(round)), this.stash.load(this.altStashKey(round))]
+          .filter((p): p is PathList => p != null);
+        if (candidates.length === 0) {
           // Paths lost (e.g. localStorage cleared, or committed on another
           // device). A redraw can't help: the server already holds our commit
           // hash, so any new paths would fail reveal verification and wedge the
           // round forever. Offer Forfeit as the honest, unwedgeable way out.
-          this.hooks.onError(
+          this.showError(
             'Your planned move for this round was lost and can no longer be revealed. You can forfeit this match to end it cleanly.',
             true,
           );
           return;
         }
-        await this.io.reveal(this.id, round, this.myTeam, mine);
+        // Only reveal paths that match what we committed. A mismatch would fail
+        // verification on both clients and the server, wedging the round.
+        const mine = candidates.find(p => myTurn != null && hashPaths(p) === myTurn.commitHash);
+        if (!mine) {
+          this.showError(
+            'Your planned move for this round no longer matches what you submitted and can\'t be revealed. You can forfeit this match to end it cleanly.',
+            true,
+          );
+          return;
+        }
+        const revealed = await this.io.reveal(this.id, round, this.myTeam, mine);
+        if (!revealed) {
+          // Stay on 'reveal' and let the poll / next realtime event retry
+          // (no tight re-evaluate loop), but tell the player — and once it keeps
+          // failing, offer Forfeit since it may never succeed (e.g. RLS).
+          this.revealFailures = this.revealFailRound === round ? this.revealFailures + 1 : 1;
+          this.revealFailRound = round;
+          if (this.revealFailures >= MAX_REVEAL_FAILURES) {
+            this.showError('Your move still can\'t be sent. You can keep waiting, or forfeit this match to end it.', true);
+          } else {
+            this.showError('Could not send your move. Retrying…');
+          }
+          return;
+        }
+        this.revealFailures = 0;
         await this.refresh();
         return;
       }
@@ -420,8 +498,14 @@ export class AsyncGameController {
     if (!blue || !red || !blue.paths || !red.paths) return;
 
     // Reject a peer that changed their paths after committing.
+    // A failed check can never pass later (the rows are fixed), so offer
+    // Forfeit instead of a dead end. An outdated client on either side is the
+    // usual innocent cause.
     if (!verifyReveal(blue) || !verifyReveal(red)) {
-      this.hooks.onError('Opponent submission failed verification.');
+      this.showError(
+        'Opponent submission failed verification (one of you may be on an outdated version). This round can\'t be played; you can forfeit to end the match.',
+        true,
+      );
       return;
     }
 
@@ -431,13 +515,25 @@ export class AsyncGameController {
     const seed = match.seed ?? deriveMatchSeed(this.id, hashPaths(blue.paths), hashPaths(red.paths));
     this.playingRound = round;
     this.playingSeed = seed;
-    this.hooks.onPlayRound({
-      round,
-      startState: match.latestState,
-      bluePaths: blue.paths,
-      redPaths: red.paths,
-      seed,
-    });
+    this.lastError = null;
+    this.replanAfterError = false;
+    try {
+      this.hooks.onPlayRound({
+        round,
+        startState: match.latestState,
+        bluePaths: blue.paths,
+        redPaths: red.paths,
+        seed,
+      });
+    } catch (e) {
+      // Playback never started, so onRoundPlayed will never come. Release the
+      // latch (otherwise every later evaluate skips this round forever) and
+      // surface the failure; the server resolver or a retry can still advance.
+      console.error('async: failed to play round', e);
+      this.playingRound = null;
+      this.playingSeed = null;
+      this.showError('Could not play this round. You can wait and retry, or forfeit the match.', true);
+    }
   }
 
   /** Concede the match: the local player loses, the opponent is recorded the
