@@ -916,6 +916,11 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
   stopPlaybackEngine();
   asyncMatchEnded = false;
   asyncRoundFinished = false;
+  // The round reported back via onRoundPlayed when playback ends. onPlanTurn
+  // also sets this, but it never fires when a match is reopened mid-round (the
+  // controller goes straight to reveal/resolve) — a stale round made the
+  // controller drop the report and wedged the round.
+  asyncCurrentRound = input.round;
 
   // Vary the PRNG per round (matches the live path's seed + roundNumber scheme;
   // resolveRound and the cosmetic engine both start fresh with roundNumber=1, so
@@ -1091,6 +1096,9 @@ function asyncHooks(): AsyncGameHooks {
     },
 
     onError(message, canForfeit) {
+      // Also toast it: some errors are followed at once by a re-prompt to plan
+      // (a failed submit), which hides the lobby that shows the status line.
+      showToast(message);
       onlineShareContainer.style.display = 'none';
       asyncFirstMoveBtn.style.display = 'none';
       setOnlineStatus(message);

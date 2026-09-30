@@ -680,5 +680,128 @@ describe('AsyncGameController', () => {
     expect(hostSpy.errors).toEqual([]);
     host.destroy();
   });
-});
 
+  it('re-prompts planning when a submit fails, instead of stranding the player', async () => {
+    const be = new FakeBackend('m20', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
+    const io = be.ioFor('host-uid');
+    let failNext = true;
+    const realCommit = io.commit;
+    io.commit = async (...args) => {
+      if (failNext) { failNext = false; return false; }
+      return realCommit(...args);
+    };
+    const spy = makeHooks();
+    const host = new AsyncGameController('m20', spy.hooks, { io, stash: memStash() });
+    await host.start();
+    await flush();
+    expect(spy.planTurns).toEqual([1]);
+
+    await host.submitPlan(bluePlan);
+    await flush();
+    expect(spy.errors.some(e => /could not submit/i.test(e))).toBe(true);
+    // Planning is offered again for the same round so the player can retry.
+    expect(spy.planTurns).toEqual([1, 1]);
+
+    await host.submitPlan(bluePlan);
+    await flush();
+    expect(be.turns.some(t => t.team === 'blue' && t.round === 1)).toBe(true);
+    host.destroy();
+  });
+
+  it('keeps the committed plan in the stash when a conflicting re-submit fails', async () => {
+    const be = new FakeBackend('m21', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
+    const io = be.ioFor('host-uid');
+    const spy = makeHooks();
+    const host = new AsyncGameController('m21', spy.hooks, { io, stash: memStash() });
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await flush();
+
+    // A second submit for the same round (e.g. a stale tab) conflicts.
+    io.commit = async () => false;
+    await host.submitPlan([{ unitId: 'b1', waypoints: [{ x: 50, y: 50 }] }]);
+    await flush();
+
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.commit('m21', 1, 'red', redPlan);
+    await guestIO.reveal('m21', 1, 'red', redPlan);
+    await flush();
+
+    // The original (committed) plan is what got revealed, so the round plays.
+    expect(spy.plays.length).toBe(1);
+    expect(spy.plays[0].bluePaths).toEqual(bluePlan);
+    host.destroy();
+  });
+
+  it('offers forfeit instead of revealing a stashed plan that does not match the commit', async () => {
+    const be = new FakeBackend('m22', 'host-uid');
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m22');
+    await be.ioFor('host-uid').commit('m22', 1, 'blue', bluePlan);
+    await guestIO.commit('m22', 1, 'red', redPlan);
+
+    // The stash holds a different plan than the one committed.
+    const stash = memStash();
+    stash.save('7s-async-m22-r1-blue', [{ unitId: 'b1', waypoints: [{ x: 7, y: 7 }] }]);
+    const spy = makeHooks();
+    const host = new AsyncGameController('m22', spy.hooks, { io: be.ioFor('host-uid'), stash });
+    await host.start();
+    await flush();
+
+    expect(be.turns.find(t => t.team === 'blue')!.paths).toBeNull();
+    expect(spy.forfeitable).toContain(true);
+    host.destroy();
+  });
+
+  it('offers forfeit when the opponent reveal fails verification', async () => {
+    const be = new FakeBackend('m23', 'host-uid');
+    const spy = makeHooks();
+    const host = new AsyncGameController('m23', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m23');
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await guestIO.commit('m23', 1, 'red', redPlan);
+    await guestIO.reveal('m23', 1, 'red', [{ unitId: 'r1', waypoints: [{ x: 99, y: 99 }] }]);
+    await flush();
+
+    expect(spy.plays.length).toBe(0);
+    expect(spy.forfeitable[spy.errors.findIndex(e => /verification/i.test(e))]).toBe(true);
+    host.destroy();
+  });
+
+  it('releases the playback latch when starting playback throws, so the round can be retried', async () => {
+    const be = new FakeBackend('m24', 'host-uid');
+    const spy = makeHooks();
+    let throwOnce = true;
+    const onPlayRound = spy.hooks.onPlayRound;
+    spy.hooks.onPlayRound = (input) => {
+      if (throwOnce) { throwOnce = false; throw new Error('boom'); }
+      onPlayRound(input);
+    };
+    const env = fakePollEnv();
+    const host = new AsyncGameController('m24', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash(), pollEnv: env });
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m24');
+    await host.start();
+    await flush();
+    await host.submitPlan(bluePlan);
+    await guestIO.commit('m24', 1, 'red', redPlan);
+    await guestIO.reveal('m24', 1, 'red', redPlan);
+    await flush();
+    expect(spy.plays.length).toBe(0);
+    expect(spy.forfeitable).toContain(true);
+
+    env.tick();
+    await flush();
+    expect(spy.plays.length).toBe(1);
+    await host.onRoundPlayed(1, makeState(80, 80), false);
+    await flush();
+    expect(be.match.currentRound).toBe(2);
+    host.destroy();
+  });
+});

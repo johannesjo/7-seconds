@@ -256,10 +256,22 @@ export class AsyncGameController {
   async submitPlan(paths: PathList): Promise<void> {
     if (this.destroyed || !this.match) return;
     const round = this.match.currentRound;
-    this.stash.save(this.stashKey(round), paths);
+    const key = this.stashKey(round);
+    const previous = this.stash.load(key);
+    this.stash.save(key, paths);
     const ok = await this.io.commit(this.id, round, this.myTeam, paths);
     if (!ok) {
+      // Put back whatever was stashed before: if the slot already holds an
+      // earlier commitment, that earlier plan is the only one that can pass
+      // reveal verification — revealing these new paths would wedge the round.
+      if (previous) this.stash.save(key, previous);
+      else this.stash.clear(key);
       this.hooks.onError('Could not submit your turn. Try again.');
+      // The UI already tore down the drawing for this submit. Release the
+      // planning latch and re-evaluate so a still-uncommitted round re-prompts
+      // planning instead of leaving the player on a dead "waiting" screen.
+      if (this.planningRound === round) this.planningRound = null;
+      await this.evaluate();
       return;
     }
     await this.evaluate();
@@ -401,7 +413,21 @@ export class AsyncGameController {
           );
           return;
         }
-        await this.io.reveal(this.id, round, this.myTeam, mine);
+        // Only reveal paths that match what we committed. A mismatch (e.g. the
+        // stash was overwritten by a later redraw) would fail verification on
+        // both clients and the server, wedging the round for good.
+        const myTurn = turns.find(t => t.team === this.myTeam);
+        if (myTurn && hashPaths(mine) !== myTurn.commitHash) {
+          this.hooks.onError(
+            'Your planned move for this round no longer matches what you submitted and can\'t be revealed. You can forfeit this match to end it cleanly.',
+            true,
+          );
+          return;
+        }
+        const revealed = await this.io.reveal(this.id, round, this.myTeam, mine);
+        // A failed reveal leaves us on 'reveal'; let the poll / next realtime
+        // event retry instead of re-evaluating in a tight loop.
+        if (!revealed) return;
         await this.refresh();
         return;
       }
@@ -420,8 +446,14 @@ export class AsyncGameController {
     if (!blue || !red || !blue.paths || !red.paths) return;
 
     // Reject a peer that changed their paths after committing.
+    // A failed check can never pass later (the rows are fixed), so offer
+    // Forfeit instead of a dead end. An outdated client on either side is the
+    // usual innocent cause.
     if (!verifyReveal(blue) || !verifyReveal(red)) {
-      this.hooks.onError('Opponent submission failed verification.');
+      this.hooks.onError(
+        'Opponent submission failed verification (one of you may be on an outdated version). This round can\'t be played; you can forfeit to end the match.',
+        true,
+      );
       return;
     }
 
@@ -431,13 +463,23 @@ export class AsyncGameController {
     const seed = match.seed ?? deriveMatchSeed(this.id, hashPaths(blue.paths), hashPaths(red.paths));
     this.playingRound = round;
     this.playingSeed = seed;
-    this.hooks.onPlayRound({
-      round,
-      startState: match.latestState,
-      bluePaths: blue.paths,
-      redPaths: red.paths,
-      seed,
-    });
+    try {
+      this.hooks.onPlayRound({
+        round,
+        startState: match.latestState,
+        bluePaths: blue.paths,
+        redPaths: red.paths,
+        seed,
+      });
+    } catch (e) {
+      // Playback never started, so onRoundPlayed will never come. Release the
+      // latch (otherwise every later evaluate skips this round forever) and
+      // surface the failure; the server resolver or a retry can still advance.
+      console.error('async: failed to play round', e);
+      this.playingRound = null;
+      this.playingSeed = null;
+      this.hooks.onError('Could not play this round. You can wait and retry, or forfeit the match.', true);
+    }
   }
 
   /** Concede the match: the local player loses, the opponent is recorded the
