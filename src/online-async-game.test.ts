@@ -869,4 +869,63 @@ describe('AsyncGameController', () => {
     expect(spy.errors.length).toBe(1);
     host.destroy();
   });
+
+  it('reveals a retried plan that landed after an earlier plan never reached the server', async () => {
+    const be = new FakeBackend('m28', 'host-uid');
+    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
+    const io = be.ioFor('host-uid');
+    const realCommit = io.commit;
+    let attempt = 0;
+    io.commit = async (...args) => {
+      attempt++;
+      if (attempt === 1) return false; // never reached the server
+      await realCommit(...args);
+      return false; // landed, but the response was lost
+    };
+    const spy = makeHooks();
+    const host = new AsyncGameController('m28', spy.hooks, { io, stash: memStash() });
+    await host.start();
+    await flush();
+    const oldPlan: PathList = [{ unitId: 'b1', waypoints: [{ x: 50, y: 50 }] }];
+    await host.submitPlan(oldPlan);
+    await flush();
+    await host.submitPlan(bluePlan);
+    await flush();
+
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.commit('m28', 1, 'red', redPlan);
+    await guestIO.reveal('m28', 1, 'red', redPlan);
+    await flush();
+
+    expect(spy.plays.length).toBe(1);
+    expect(spy.plays[0].bluePaths).toEqual(bluePlan);
+    host.destroy();
+  });
+
+  it('surfaces repeated reveal failures and then offers forfeit', async () => {
+    const be = new FakeBackend('m29', 'host-uid');
+    const guestIO = be.ioFor('guest-uid');
+    await guestIO.joinMatch('m29');
+    const io = be.ioFor('host-uid');
+    await io.commit('m29', 1, 'blue', bluePlan);
+    await guestIO.commit('m29', 1, 'red', redPlan);
+    io.reveal = async () => false;
+
+    const stash = memStash();
+    stash.save('7s-async-m29-r1-blue', bluePlan);
+    const env = fakePollEnv();
+    const spy = makeHooks();
+    const host = new AsyncGameController('m29', spy.hooks, { io, stash, pollEnv: env });
+    await host.start();
+    await flush();
+    expect(spy.errors.length).toBe(1);
+    expect(spy.forfeitable).toEqual([false]);
+
+    env.tick();
+    await flush();
+    env.tick();
+    await flush();
+    expect(spy.forfeitable[spy.forfeitable.length - 1]).toBe(true);
+    host.destroy();
+  });
 });

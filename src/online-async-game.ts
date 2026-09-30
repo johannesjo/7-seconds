@@ -113,6 +113,9 @@ export interface PollEnv {
  *  guarantees the match can never silently hang if the socket dies. */
 export const POLL_INTERVAL_MS = 15_000;
 
+/** Failed reveal attempts (one per poll) before Forfeit is offered. */
+const MAX_REVEAL_FAILURES = 3;
+
 /** Default poll environment: real timers + Page Visibility, active only in a
  *  browser. In a headless/test context `document` is undefined and we return a
  *  no-op env so unit tests never spin real timers. */
@@ -174,6 +177,9 @@ export class AsyncGameController {
   private lastError: string | null = null;
   /** The next planning prompt follows a failed submit (UI skips "your turn"). */
   private replanAfterError = false;
+  /** Consecutive failed reveals for revealFailRound. */
+  private revealFailures = 0;
+  private revealFailRound: number | null = null;
 
   constructor(id: string, hooks: AsyncGameHooks, opts: AsyncGameOptions = {}) {
     this.id = id;
@@ -245,6 +251,12 @@ export class AsyncGameController {
     return `7s-async-${this.id}-r${round}-${this.myTeam}`;
   }
 
+  /** An earlier plan for the round, kept after a submit whose outcome is
+   *  unknown (see submitPlan). */
+  private altStashKey(round: number): string {
+    return `${this.stashKey(round)}-alt`;
+  }
+
   /** The durable match id (for keying a once-only win/loss record). */
   get matchId(): string { return this.id; }
 
@@ -268,14 +280,11 @@ export class AsyncGameController {
     this.stash.save(key, paths);
     const ok = await this.io.commit(this.id, round, this.myTeam, paths);
     if (!ok) {
-      // Put back whatever was stashed before: if the slot already holds an
-      // earlier commitment, that earlier plan is the only one that can pass
-      // reveal verification — revealing these new paths would wedge the round.
-      // Without an earlier plan keep the new paths: the commit may have landed
-      // even though we saw a failure (e.g. the response was lost), and then
-      // they're the only paths that can be revealed. The reveal step refuses
-      // stashed paths that don't match the commit, so keeping them is safe.
-      if (previous) this.stash.save(key, previous);
+      // We can't tell which plan the server holds: the new one may have landed
+      // with its response lost, or the slot may hold the earlier plan (e.g.
+      // committed from another tab). Keep both; the reveal step picks the one
+      // whose hash matches the stored commitment.
+      if (previous) this.stash.save(this.altStashKey(round), previous);
       this.showError('Could not submit your turn. Try again.');
       this.replanAfterError = true;
       // The UI already tore down the drawing for this submit. Release the
@@ -328,6 +337,7 @@ export class AsyncGameController {
     // so a transient failure (retries exhausted, still on this round) can retry.
     if (landed || (this.match != null && this.match.currentRound > round)) {
       this.stash.clear(this.stashKey(round));
+      this.stash.clear(this.altStashKey(round));
     } else if (this.match != null && this.match.currentRound === round) {
       // Neither our write nor a peer's advanced the round: the persist failed
       // transiently (retries are already exhausted inside persistRoundResult).
@@ -431,8 +441,10 @@ export class AsyncGameController {
         return;
 
       case 'reveal': {
-        const mine = this.stash.load(this.stashKey(round));
-        if (!mine) {
+        const myTurn = turns.find(t => t.team === this.myTeam);
+        const candidates = [this.stash.load(this.stashKey(round)), this.stash.load(this.altStashKey(round))]
+          .filter((p): p is PathList => p != null);
+        if (candidates.length === 0) {
           // Paths lost (e.g. localStorage cleared, or committed on another
           // device). A redraw can't help: the server already holds our commit
           // hash, so any new paths would fail reveal verification and wedge the
@@ -443,11 +455,10 @@ export class AsyncGameController {
           );
           return;
         }
-        // Only reveal paths that match what we committed. A mismatch (e.g. the
-        // stash was overwritten by a later redraw) would fail verification on
-        // both clients and the server, wedging the round for good.
-        const myTurn = turns.find(t => t.team === this.myTeam);
-        if (myTurn && hashPaths(mine) !== myTurn.commitHash) {
+        // Only reveal paths that match what we committed. A mismatch would fail
+        // verification on both clients and the server, wedging the round.
+        const mine = candidates.find(p => myTurn != null && hashPaths(p) === myTurn.commitHash);
+        if (!mine) {
           this.showError(
             'Your planned move for this round no longer matches what you submitted and can\'t be revealed. You can forfeit this match to end it cleanly.',
             true,
@@ -455,9 +466,20 @@ export class AsyncGameController {
           return;
         }
         const revealed = await this.io.reveal(this.id, round, this.myTeam, mine);
-        // A failed reveal leaves us on 'reveal'; let the poll / next realtime
-        // event retry instead of re-evaluating in a tight loop.
-        if (!revealed) return;
+        if (!revealed) {
+          // Stay on 'reveal' and let the poll / next realtime event retry
+          // (no tight re-evaluate loop), but tell the player — and once it keeps
+          // failing, offer Forfeit since it may never succeed (e.g. RLS).
+          this.revealFailures = this.revealFailRound === round ? this.revealFailures + 1 : 1;
+          this.revealFailRound = round;
+          if (this.revealFailures >= MAX_REVEAL_FAILURES) {
+            this.showError('Your move still can\'t be sent. You can keep waiting, or forfeit this match to end it.', true);
+          } else {
+            this.showError('Could not send your move. Retrying…');
+          }
+          return;
+        }
+        this.revealFailures = 0;
         await this.refresh();
         return;
       }
