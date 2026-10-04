@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Container, Graphics, Sprite } from 'pixi.js';
 import type { Renderer, RenderOptions } from 'pixi.js';
 import { EffectsManager } from './effects';
@@ -78,6 +78,22 @@ describe('EffectsManager ground stains', () => {
     expect(stainLayer(stage).children).toHaveLength(1);
     const { width, height } = stainSprite(stage).texture;
     expect({ width, height }).toEqual({ width: 400, height: 700 });
+  });
+
+  it('falls back to plain Graphics stains if baking fails, instead of freezing the game loop', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const stage = new Container();
+      const renderer = { resolution: 1, render() { throw new Error('context lost'); } } as unknown as Renderer;
+      const fx = new EffectsManager(stage, renderer);
+      expect(() => bleed(fx, 3)).not.toThrow();
+
+      expect(error).toHaveBeenCalledOnce();
+      const stains = stainLayer(stage).children.find(c => !(c instanceof Sprite)) as Graphics;
+      expect(stains.context.instructions.length).toBeGreaterThan(0);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('keeps stains as visible Graphics when there is no renderer to bake with', () => {

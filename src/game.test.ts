@@ -170,3 +170,26 @@ describe('stop()', () => {
     }
   });
 });
+
+// Regression: when the last blue and red units died in the same step (e.g. a
+// bomber chain), horde counted it as a cleared wave and continued with no army.
+describe('horde mutual wipe', () => {
+  it('is a defeat, not a cleared wave', () => {
+    const events: { event: string; data?: unknown }[] = [];
+    const eng = new GameEngine(null, (event, data) => events.push({ event, data }), {
+      aiMode: true, horde: true, seed: 1,
+      hordeBlueUnits: [],
+      hordeRedArmy: [{ type: 'zombie', count: 1 }],
+      hordeMap: { obstacles: [], elevationZones: [] },
+    });
+    eng.startBattle();
+    eng.loadOnlineGameState(snapshot());
+    eng.confirmPlan();
+    for (const u of eng.getUnits()) u.alive = false;
+    for (let i = 0; i < 60; i++) eng.externalTick(1000 / 60);
+
+    expect(events.some(e => e.event === 'wave-clear')).toBe(false);
+    const end = events.find(e => e.event === 'end');
+    expect(end?.data).toMatchObject({ winner: 'red' });
+  });
+});

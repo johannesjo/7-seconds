@@ -599,7 +599,15 @@ export class EffectsManager {
   update(dt: number): void {
     this.cueTime += dt;
     this.effects = this.effects.filter(e => e.update(dt));
-    this.bakeStains();
+    try {
+      this.bakeStains();
+    } catch (err) {
+      // Runs inside pixi's ticker, where a throw stops the game loop for good.
+      // Keep drawing stains as plain Graphics instead (slower in long battles).
+      console.error('Baking blood stains failed; falling back to vector stains', err);
+      this.pixiRenderer = null;
+      this.stainLayer.addChild(this.groundStains);
+    }
   }
 
   /** Move pending stains into the persistent stain texture. */

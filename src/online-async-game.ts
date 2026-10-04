@@ -81,17 +81,38 @@ export interface AsyncIO {
   subscribe(id: string, onChange: () => void): () => void;
 }
 
+/** Upper bound for one backend call before it counts as failed. */
+export const IO_TIMEOUT_MS = 20_000;
+
+/** Resolve a call that hasn't settled within IO_TIMEOUT_MS to its failure value.
+ *  A request that never settles would otherwise keep evaluate() busy forever,
+ *  coalescing every later refresh behind it. Every AsyncIO caller already treats
+ *  the failure value as transient (and tolerates a write that landed anyway),
+ *  so the next poll/realtime refresh simply retries. */
+export function withTimeout<A extends unknown[], R>(
+  fn: (...args: A) => Promise<R>,
+  failure: R,
+): (...args: A) => Promise<R> {
+  return (...args) => new Promise<R>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(failure), IO_TIMEOUT_MS);
+    fn(...args).then(
+      value => { clearTimeout(timer); resolve(value); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 const realIO: AsyncIO = {
   // ensureAuth (not a passive session read) so a first-time visitor opening a
   // share link is signed in anonymously before start() gates on the user id.
-  getUserId: ensureAuth,
-  loadMatch,
-  joinMatch: joinAsyncMatch,
-  fetchTurns,
-  commit: commitTurn,
-  reveal: revealTurn,
-  persist: persistRoundResult,
-  finish: finishMatch,
+  getUserId: withTimeout(ensureAuth, null),
+  loadMatch: withTimeout(loadMatch, null),
+  joinMatch: withTimeout(joinAsyncMatch, null),
+  fetchTurns: withTimeout(fetchTurns, null),
+  commit: withTimeout(commitTurn, false),
+  reveal: withTimeout(revealTurn, false),
+  persist: withTimeout(persistRoundResult, false),
+  finish: withTimeout(finishMatch, false),
   subscribe: (id, onChange) =>
     subscribeMatch(id, { onTurnChange: () => onChange(), onMatchChange: () => onChange() }),
 };

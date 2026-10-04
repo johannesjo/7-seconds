@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { AsyncGameController, type AsyncIO, type PathStash, type AsyncGameHooks, type PlayRoundInput, type PollEnv } from './online-async-game';
+import { describe, it, expect, vi } from 'vitest';
+import { AsyncGameController, withTimeout, IO_TIMEOUT_MS, type AsyncIO, type PathStash, type AsyncGameHooks, type PlayRoundInput, type PollEnv } from './online-async-game';
 import { hashPaths, type PathList } from './online-async-core';
 import type { MatchRecord, MatchStatus, RoundTurn } from './online-async';
 import type { OnlineGameState } from './online-types';
@@ -992,5 +992,26 @@ describe('AsyncGameController', () => {
     await flush();
     expect(spy.forfeitable[spy.forfeitable.length - 1]).toBe(true);
     host.destroy();
+  });
+});
+
+// Regression: a request that never settled kept evaluate() busy forever, so every
+// later poll/realtime refresh was coalesced behind it and the match never moved.
+describe('withTimeout', () => {
+  it('treats a hung call as failed so the next refresh can retry', async () => {
+    vi.useFakeTimers();
+    try {
+      const hung = withTimeout(() => new Promise<boolean>(() => {}), false);
+      const result = hung();
+      vi.advanceTimersByTime(IO_TIMEOUT_MS);
+      await expect(result).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('passes through results and errors of calls that settle in time', async () => {
+    await expect(withTimeout(async (n: number) => n * 2, null)(21)).resolves.toBe(42);
+    await expect(withTimeout(async () => { throw new Error('boom'); }, null)()).rejects.toThrow('boom');
   });
 });

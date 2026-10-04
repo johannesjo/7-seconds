@@ -688,7 +688,8 @@ export class GameEngine {
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
 
     if (blueAlive === 0 || redAlive === 0) {
-      if (redAlive === 0 && this.hordeMode) {
+      // Wave cleared only if blue survived — a mutual wipe is a horde defeat
+      if (redAlive === 0 && blueAlive > 0 && this.hordeMode) {
         // Wave cleared — don't end the battle, emit wave-clear event
         this.running = false;
         this.renderer?.ticker.remove(this.tick, this);
