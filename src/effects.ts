@@ -1,4 +1,5 @@
-import { Graphics, Container, Text } from 'pixi.js';
+import { Graphics, Container, Text, RenderTexture, Sprite } from 'pixi.js';
+import type { Renderer as PixiRenderer } from 'pixi.js';
 import { Vec2, Team, ReplayEvent } from './types';
 import { Theme, NIGHT_THEME } from './theme';
 import { FLANK_DAMAGE_MULTIPLIER, MAP_WIDTH, MAP_HEIGHT } from './constants';
@@ -461,15 +462,25 @@ class BloodParticle implements Effect {
 
 export class EffectsManager {
   private container: Container;
+  /** Stains accumulate for a whole battle. Kept as vector Graphics, every frame
+   *  redrew (and on change re-tessellated) all of them, so long horde waves
+   *  slowed to a freeze. New stains land here (off-stage) and are baked into
+   *  stainTexture once per frame, so per-frame cost is independent of stain count. */
   private groundStains: Graphics;
+  private stainLayer: Container;
+  private stainTexture: RenderTexture | null = null;
+  private stainSprite: Sprite | null = null;
   private effects: Effect[] = [];
   private theme: Theme = NIGHT_THEME;
   private cueTime = 0;
   private flankCueTimes = new Map<string, number>();
 
-  constructor(stage: Container) {
+  /** Without a pixiRenderer (headless/tests) stains stay as plain Graphics. */
+  constructor(stage: Container, private pixiRenderer: PixiRenderer | null = null) {
+    this.stainLayer = new Container();
     this.groundStains = new Graphics();
-    stage.addChild(this.groundStains);
+    if (!pixiRenderer) this.stainLayer.addChild(this.groundStains);
+    stage.addChild(this.stainLayer);
     this.container = new Container();
     stage.addChild(this.container);
   }
@@ -585,11 +596,39 @@ export class EffectsManager {
   update(dt: number): void {
     this.cueTime += dt;
     this.effects = this.effects.filter(e => e.update(dt));
+    this.bakeStains();
+  }
+
+  /** Move pending stains into the persistent stain texture. */
+  private bakeStains(): void {
+    if (!this.pixiRenderer || this.groundStains.context.instructions.length === 0) return;
+    let tex = this.stainTexture;
+    // Map size can change between battles (online map adaptation)
+    if (!tex || tex.width !== MAP_WIDTH || tex.height !== MAP_HEIGHT) {
+      this.resetStainTexture();
+      // No MSAA: it would resolve the whole map-sized buffer on every bake,
+      // and soft low-alpha stains don't visibly need it.
+      tex = RenderTexture.create({ width: MAP_WIDTH, height: MAP_HEIGHT, resolution: this.pixiRenderer.resolution });
+      this.stainTexture = tex;
+      this.stainSprite = new Sprite(tex);
+      this.stainLayer.addChild(this.stainSprite);
+    }
+    this.pixiRenderer.render({ container: this.groundStains, target: tex, clear: false });
+    this.groundStains.clear();
+  }
+
+  private resetStainTexture(): void {
+    this.stainSprite?.destroy();
+    this.stainSprite = null;
+    this.stainTexture?.destroy(true);
+    this.stainTexture = null;
   }
 
   clear(): void {
-    this.container.removeChildren();
+    // Destroy, not just detach — detached Graphics keep their GPU buffers alive
+    for (const child of this.container.removeChildren()) child.destroy();
     this.groundStains.clear();
+    this.resetStainTexture();
     this.effects = [];
     this.cueTime = 0;
     this.flankCueTimes.clear();
@@ -598,6 +637,7 @@ export class EffectsManager {
   destroy(): void {
     this.clear();
     this.container.destroy();
+    this.stainLayer.destroy();
     this.groundStains.destroy();
   }
 

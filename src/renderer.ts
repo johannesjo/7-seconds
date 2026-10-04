@@ -48,7 +48,7 @@ export class Renderer {
     canvas.style.width = `${MAP_WIDTH * scale}px`;
     canvas.style.height = `${MAP_HEIGHT * scale}px`;
     this.drawBackground();
-    this._effects = new EffectsManager(this.app.stage);
+    this._effects = new EffectsManager(this.app.stage, this.app.renderer);
   }
 
   private drawBackground(): void {
