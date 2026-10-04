@@ -86,9 +86,10 @@ export const IO_TIMEOUT_MS = 20_000;
 
 /** Resolve a call that hasn't settled within IO_TIMEOUT_MS to its failure value.
  *  A request that never settles would otherwise keep evaluate() busy forever,
- *  coalescing every later refresh behind it. Every AsyncIO caller already treats
- *  the failure value as transient (and tolerates a write that landed anyway),
- *  so the next poll/realtime refresh simply retries. */
+ *  coalescing every later refresh behind it. Once a match is running, callers
+ *  treat the failure value as transient (and tolerate a write that landed
+ *  anyway), so the next poll/realtime refresh simply retries. start() can't
+ *  retry on its own: it reports the failure and the player reopens the match. */
 export function withTimeout<A extends unknown[], R>(
   fn: (...args: A) => Promise<R>,
   failure: R,
@@ -223,7 +224,8 @@ export class AsyncGameController {
     let match = await this.io.loadMatch(this.id);
     if (this.destroyed) return false;
     if (!match) {
-      this.showError('Match not found.');
+      // null is also a timeout or network failure, so don't claim it's missing
+      this.showError('Could not load this match. Check your connection and try again.');
       return false;
     }
     // Join as guest if there's an open seat and we're not the host.

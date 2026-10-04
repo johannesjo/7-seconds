@@ -610,7 +610,10 @@ export class EffectsManager {
     }
   }
 
-  /** Move pending stains into the persistent stain texture. */
+  /** Move pending stains into the persistent stain texture.
+   *  shortcut: the texture has no CPU copy, so a WebGL context loss (e.g. the
+   *  Android app backgrounded) blanks stains baked so far — keep a replayable
+   *  stain list and re-bake on context restore if that turns out to matter. */
   private bakeStains(): void {
     if (!this.pixiRenderer || this.groundStains.context.instructions.length === 0) return;
     let tex = this.stainTexture;

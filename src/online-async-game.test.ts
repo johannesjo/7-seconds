@@ -186,6 +186,19 @@ describe('AsyncGameController', () => {
     controller.destroy();
   });
 
+  // A timed-out load resolves to null like a missing match; claiming "not
+  // found" would send the player away from a match that exists.
+  it('does not call a match missing when it could not be loaded', async () => {
+    const be = new FakeBackend('slow', 'host');
+    const spy = makeHooks();
+    const io = { ...be.ioFor('host'), loadMatch: async () => null };
+    const controller = new AsyncGameController('slow', spy.hooks, { io, stash: memStash(), pollEnv: null });
+    expect(await controller.start()).toBe(false);
+    expect(spy.errors).toHaveLength(1);
+    expect(spy.errors[0]).not.toMatch(/not found/i);
+    expect(spy.errors[0]).toMatch(/try again/i);
+  });
+
   it.each(['auth', 'match', 'join', 'turns'])('does not reopen a match left while %s was loading', async (stage) => {
     const be = new FakeBackend('cancelled', 'host');
     const base = be.ioFor('guest');
