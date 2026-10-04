@@ -88,3 +88,29 @@ describe('EffectsManager ground stains', () => {
     expect(stains.context.instructions.length).toBeGreaterThan(0);
   });
 });
+
+describe('EffectsManager hit flash', () => {
+  it('does not throw when the flashed unit was destroyed before the flash ended', () => {
+    // A kill at the very end of a round leaves the flash pending through planning,
+    // while the renderer finishes the death fade and destroys the unit's container.
+    // Throwing here kills pixi's ticker for good — the battle freezes.
+    const unit = new Container();
+    unit.addChild(new Graphics(), new Graphics(), new Graphics());
+    const fx = new EffectsManager(new Container());
+    fx.addHitFlash(unit);
+    unit.destroy({ children: true });
+    expect(() => fx.update(0.1)).not.toThrow();
+  });
+
+  it('restores the original tint once the flash ends', () => {
+    const unit = new Container();
+    const shape = new Graphics();
+    shape.tint = 0x3366ff;
+    unit.addChild(shape);
+    const fx = new EffectsManager(new Container());
+    fx.addHitFlash(unit);
+    expect(shape.tint).toBe(0xffffff);
+    fx.update(0.1);
+    expect(shape.tint).toBe(0x3366ff);
+  });
+});

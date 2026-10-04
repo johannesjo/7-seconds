@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { GameEngine } from './game';
 import type { OnlineGameState } from './online-types';
 
@@ -109,4 +109,64 @@ it('records a shield break and the broken shield in the same replay frame', asyn
   expect(snapshotToUnit(frame).shieldHits).toBe(7);
   expect(replay.events.some(event => event.targetId === shield.id && event.type === 'hit')).toBe(false);
   engine.stop();
+});
+
+// Regression: the fixed-timestep loop kept simulating after a round/wave ended
+// within the same frame, re-firing end events (several 'wave-clear's, round
+// counter jumping) and moving units during the next planning phase.
+describe('tick stops simulating once a round ends mid-frame', () => {
+  it('ends a timed-out round only once per frame', () => {
+    const phases: string[] = [];
+    const eng = new GameEngine(null, (event, data) => {
+      if (event === 'phase-change' && data && 'phase' in data) phases.push(data.phase);
+    }, { aiMode: true, seed: 1 });
+    eng.startBattle();
+    eng.confirmPlan();
+    expect(eng.phase).toBe('playing');
+    (eng as unknown as { roundTimer: number }).roundTimer = 0.001;
+    phases.length = 0;
+    eng.externalTick(100); // ~6 fixed steps' worth of time
+
+    expect(phases).toEqual(['blue-planning']);
+  });
+
+  it('emits wave-clear only once in horde mode', () => {
+    let waveClears = 0;
+    const eng = new GameEngine(null, (event) => { if (event === 'wave-clear') waveClears++; }, {
+      aiMode: true, horde: true, seed: 1,
+      hordeBlueUnits: [],
+      hordeRedArmy: [{ type: 'zombie', count: 1 }],
+      hordeMap: { obstacles: [], elevationZones: [] },
+    });
+    eng.startBattle();
+    eng.loadOnlineGameState({ ...snapshot(), units: snapshot().units.map(u => ({ ...u, team: 'blue' as const })) });
+    eng.confirmPlan();
+    eng.externalTick(200);
+
+    expect(waveClears).toBe(1);
+  });
+});
+
+// Regression: leaving a hotseat game during the cover screen left its timer
+// running, so the dead engine later switched the UI into "Red Planning" over
+// whatever game was started next.
+describe('stop()', () => {
+  it('cancels the pending cover-screen timer', () => {
+    vi.useFakeTimers();
+    try {
+      const events: string[] = [];
+      const eng = new GameEngine(null, (event) => events.push(event), { seed: 1 });
+      eng.startBattle();
+      eng.confirmPlan();
+      expect(eng.phase).toBe('cover');
+      eng.stop();
+      events.length = 0;
+      vi.runAllTimers();
+
+      expect(eng.phase).toBe('cover');
+      expect(events).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

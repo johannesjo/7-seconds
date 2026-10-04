@@ -382,6 +382,9 @@ export class GameEngine {
     while (this.accumulator >= FIXED_DT) {
       this.simulationStep(FIXED_DT);
       this.accumulator -= FIXED_DT;
+      // A step can end the round, wave or battle — stop catching up so end
+      // events don't re-fire and units don't move during the next planning phase
+      if (!this.running || this._phase !== 'playing' || this.endingBattle) break;
     }
 
     // Render at display rate (after all simulation steps)
@@ -987,6 +990,10 @@ export class GameEngine {
 
   stop(): void {
     this.running = false;
+    if (this.coverTimeout) {
+      clearTimeout(this.coverTimeout);
+      this.coverTimeout = null;
+    }
     this.renderer?.ticker.remove(this.tick, this);
     this.pathDrawer?.destroy();
     this.pathDrawer = null;

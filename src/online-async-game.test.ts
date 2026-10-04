@@ -163,6 +163,29 @@ describe('AsyncGameController', () => {
     expect(be.listeners.size).toBe(0);
   });
 
+  // Regression: a failed commit left planningRound set, so every later refresh
+  // returned early and the player could never re-plan — the match was stuck.
+  it('offers planning again after a failed submission once the match refreshes', async () => {
+    const be = new FakeBackend('retry', 'host');
+    const spy = makeHooks();
+    const env = fakePollEnv();
+    let failCommit = true;
+    const base = be.ioFor('host');
+    const io = { ...base, commit: async (...args: Parameters<AsyncIO['commit']>) => failCommit ? false : base.commit(...args) };
+    const controller = new AsyncGameController('retry', spy.hooks, { io, stash: memStash(), pollEnv: env });
+    await controller.start();
+    expect(spy.planTurns).toEqual([1]);
+
+    await controller.submitPlan(bluePlan);
+    expect(spy.errors).toHaveLength(1);
+
+    failCommit = false;
+    env.tick();
+    await flush();
+    expect(spy.planTurns).toEqual([1, 1]);
+    controller.destroy();
+  });
+
   it.each(['auth', 'match', 'join', 'turns'])('does not reopen a match left while %s was loading', async (stage) => {
     const be = new FakeBackend('cancelled', 'host');
     const base = be.ioFor('guest');

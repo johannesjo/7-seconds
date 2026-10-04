@@ -82,6 +82,9 @@ class HitFlash implements Effect {
 
   update(dt: number): boolean {
     this.age += dt;
+    // A flash pending at round end outlives planning, during which the death
+    // fade destroys the unit's container; throwing here would kill pixi's ticker
+    if (this.target.destroyed) return false;
     if (this.age >= this.duration) {
       const shape = this.target.getChildAt(0) as Graphics;
       shape.tint = this.originalTint;
