@@ -888,7 +888,7 @@ function syncSettingsUi(settings: Readonly<Settings>): void {
     const key = btn.dataset.setting as keyof Settings;
     btn.setAttribute('aria-pressed', String(settings[key]));
   }
-  themeToggle.textContent = settings.dayMode ? 'Paper theme' : 'Night theme';
+  themeToggle.dataset.value = settings.dayMode ? 'Paper' : 'Night';
   document.body.classList.toggle('reduced-motion', settings.reducedMotion);
   audio.setSfxEnabled(settings.sound);
   audio.setMusicEnabled(settings.music);
@@ -912,6 +912,30 @@ themeToggle.addEventListener('click', () => {
 });
 onSettingsChange(syncSettingsUi);
 syncSettingsUi(getSettings());
+
+const settingsScreen = document.getElementById('settings-screen')!;
+const settingsBtn = document.getElementById('settings-btn')!;
+
+function openSettings(): void {
+  settingsScreen.style.display = 'block';
+  promptScreen.inert = true;
+  battleScreen.inert = true;
+  settingsScreen.scrollTop = 0;
+  document.getElementById('settings-title')!.focus();
+}
+
+function closeSettings(): void {
+  settingsScreen.style.display = 'none';
+  promptScreen.inert = false;
+  battleScreen.inert = false;
+  settingsBtn.focus();
+}
+
+settingsBtn.addEventListener('click', openSettings);
+document.getElementById('settings-back-btn')!.addEventListener('click', closeSettings);
+settingsScreen.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeSettings();
+});
 
 function setDifficulty(next: Difficulty): void {
   difficulty = next;
