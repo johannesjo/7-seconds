@@ -5,7 +5,7 @@ const ENABLED_KEY = '7s-local-turn-notifications';
 const available = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('LocalNotifications');
 const appIsVisible = () => document.visibilityState === 'visible';
 let actionListener: Promise<unknown> | null = null;
-let openMatch: ((id: string) => void) | null = null;
+let openMatch: ((id: string, ranked: boolean) => void) | null = null;
 const notifiedTurns = new Set<string>();
 
 function enabledOnDevice(): boolean {
@@ -13,13 +13,13 @@ function enabledOnDevice(): boolean {
 }
 
 /** Local notices can open the same match route as an invite. No push service. */
-export async function initializeLocalTurnNotifications(onOpen: (id: string) => void): Promise<void> {
+export async function initializeLocalTurnNotifications(onOpen: (id: string, ranked: boolean) => void): Promise<void> {
   openMatch = onOpen;
   if (!available()) return;
   if (!actionListener) {
     actionListener = LocalNotifications.addListener('localNotificationActionPerformed', ({ notification }) => {
       const id: unknown = notification.extra?.matchId;
-      if (typeof id === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(id)) openMatch?.(id);
+      if (typeof id === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(id)) openMatch?.(id, notification.extra?.ranked === true);
     }).catch(() => { actionListener = null; });
   }
   await actionListener;
@@ -52,7 +52,7 @@ export async function setLocalTurnNotifications(enabled: boolean): Promise<boole
 
 /** Best-effort alert when a running match detects a turn while backgrounded.
  * The foreground already shows a toast. This does not perform background fetch. */
-export async function notifyLocalTurn(matchId: string, round: number): Promise<void> {
+export async function notifyLocalTurn(matchId: string, round: number, ranked = false): Promise<void> {
   if (!available() || appIsVisible()) return;
   const status = await getLocalTurnNotificationStatus();
   const key = `${matchId}:${round}`;
@@ -67,7 +67,8 @@ export async function notifyLocalTurn(matchId: string, round: number): Promise<v
       notifications: [{
         id, title: '7 Seconds — your turn',
         body: `Continue round ${round} in match ${matchId.toUpperCase()}.`,
-        extra: { matchId },
+        // Ranked matches belong to the ranked session: the tap must open them there.
+        extra: { matchId, ranked },
       }],
     });
   } catch {

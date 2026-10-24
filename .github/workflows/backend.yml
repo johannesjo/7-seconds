@@ -1,0 +1,89 @@
+name: Deploy Supabase backend
+
+# Checks the game, the referee bundle and the database functions, then (on main
+# only) applies new SQL migrations and deploys the match-referee Edge Function.
+# The Pages deploy (deploy.yml) calls this first, so a web client never goes
+# live before the backend it talks to. Run it by hand from the Actions tab
+# (dry run: list pending migrations, change nothing). See DEPLOYMENT.md.
+on:
+  workflow_call:
+  # Pull requests get the checks; only main deploys (see the deploy job).
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list pending migrations; change nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # No secrets here: installs and tests run third-party code.
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        # A throwaway database for the tests: no password at all.
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run referee:check
+      - name: Unit and database tests
+        env:
+          SEVEN_PG_URL: postgresql://postgres@localhost:5432/postgres
+        run: npx vitest run
+
+  deploy:
+    needs: checks
+    # Production only ever receives main, including manual runs started from another branch.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: supabase-production
+    # Never run two deployments against the database at once, and never cancel one halfway.
+    concurrency:
+      group: supabase-production
+      cancel-in-progress: false
+    env:
+      SUPABASE_PROJECT_REF: puoxmqovckvfoqyihasl
+      DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      # The runner uses only Node built-ins, so no dependency install runs next to the secrets.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check deployment secrets
+        env:
+          HAS_DB_URL: ${{ secrets.SUPABASE_DB_URL != '' }}
+          HAS_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
+        run: |
+          missing=0
+          if [ "$HAS_DB_URL" != true ]; then echo "::error::Missing secret SUPABASE_DB_URL. See DEPLOYMENT.md, \"Supabase backend\"."; missing=1; fi
+          if [ "$HAS_ACCESS_TOKEN" != true ]; then echo "::error::Missing secret SUPABASE_ACCESS_TOKEN. See DEPLOYMENT.md, \"Supabase backend\"."; missing=1; fi
+          exit $missing
+      - name: Apply migrations
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: node scripts/apply-migrations.mjs $DRY_RUN
+      - uses: supabase/setup-cli@v1
+        if: ${{ !inputs.dry_run }}
+        with:
+          version: 2.54.11
+      - name: Deploy match-referee
+        if: ${{ !inputs.dry_run }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy match-referee --project-ref "$SUPABASE_PROJECT_REF" --use-api

@@ -9,12 +9,20 @@ permissions:
   pages: write
   id-token: write
 
+# Never cancel a run halfway: it may be applying migrations or deploying the referee.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  # The web client needs the backend it talks to: migrations and the match
+  # referee go out first, and the site only deploys if they succeeded.
+  backend:
+    uses: ./.github/workflows/backend.yml
+    secrets: inherit
+
   build:
+    needs: backend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +31,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run test:run
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

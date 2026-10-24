@@ -26,54 +26,64 @@
   <a href="javascript:history.back()" style="font-size:14px;color:#666;text-decoration:none">&larr; Back to game</a>
   <h1>Privacy Policy</h1>
 
-  <p><strong>7 Seconds</strong> is a multiplayer strategy game available on the web and on Android via Google Play. The game can be played locally (on a single device) or online against another player. This policy explains what data is involved in each mode.</p>
+  <p><strong>7 Seconds</strong> is a multiplayer strategy game available on the web and on Android via Google Play. The game can be played locally (on a single device) or online against other players or AI commanders. This policy explains what data is involved in each mode.</p>
 
   <h2>Local Play</h2>
   <p>When playing locally (Battle, vs AI, or Horde modes), the game runs entirely on your device. No data is collected, transmitted, or shared. No server communication occurs.</p>
 
   <h2>Online Play</h2>
-  <p>When you choose to play online, the game establishes a direct peer-to-peer (P2P) connection with the other player using WebRTC. This involves the following data processing:</p>
+  <p>Online matches (against a friend, a random opponent or an AI commander, and Ranked) are played through our game server, hosted on Supabase. Matches are asynchronous: each player submits their plan for a round, and the server plays the round once both plans are in. The following data is processed:</p>
 
   <h3>Data processed during online play</h3>
   <table>
-    <tr><th>Data</th><th>Purpose</th><th>Storage</th></tr>
-    <tr>
-      <td>IP address</td>
-      <td>Required by WebRTC to establish a direct connection between players</td>
-      <td>Not stored by us. Your IP address is typically visible to the other player as an inherent part of P2P networking. When a relay (TURN) server is used, your IP is visible to the relay provider instead. Supabase, Cloudflare, and TURN relay providers (Metered.ca, freestun.net) may log your IP address as part of standard infrastructure operations (see Third-Party Services below).</td>
-    </tr>
-    <tr>
-      <td>Signaling messages (SDP offers, ICE candidates)</td>
-      <td>Connection setup — exchanged via Supabase Realtime to establish the P2P link</td>
-      <td>Message content is ephemeral and not persisted. Connection metadata (including IP address) may be retained in Supabase infrastructure logs for up to 7 days depending on plan tier.</td>
-    </tr>
-    <tr>
-      <td>Game state (unit positions, events, results)</td>
-      <td>Gameplay synchronization between players</td>
-      <td>Transmitted between players via encrypted connection (DTLS), either directly (P2P) or through an encrypted relay (TURN) when direct connection is not possible. Game data is not stored on any server.</td>
-    </tr>
-    <tr>
-      <td>Player ID (random UUID)</td>
-      <td>Identifies you to your opponent for rematch requests and score tracking</td>
-      <td>Stored locally on your device (localStorage). Not linked to your identity.</td>
-    </tr>
-    <tr>
-      <td>Win/loss record</td>
-      <td>Tracks your results against each opponent</td>
-      <td>Stored locally on your device only (localStorage). Never transmitted to a server.</td>
-    </tr>
+    <thead>
+      <tr><th>Data</th><th>Purpose</th><th>Storage</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Anonymous account (random user ID and session token)</td>
+        <td>Identifies your device's player so you can only act in your own matches</td>
+        <td>Created the first time you go online. The session is kept in your browser or app storage; the ID is stored on the server with your matches. It is not linked to your name, email or device.</td>
+      </tr>
+      <tr>
+        <td>Match data: the board, each round's plans (unit paths), results, and the time of each move</td>
+        <td>Playing the match, letting you leave and come back, and showing the rounds you missed</td>
+        <td>Stored on the server. Plans stay hidden from your opponent until both plans for a round are in. Only the two players of a match can read it. Unfinished matches end after 3–7 days without moves.</td>
+      </tr>
+      <tr>
+        <td>Display name (optional)</td>
+        <td>Shown to your opponents</td>
+        <td>Whatever you type under "Your name". It is stored on the server with each match you play.</td>
+      </tr>
+      <tr>
+        <td>Ranked profile (Android, optional): your Google Play Games player ID, display name and profile picture, your rating, wins, losses and rated results</td>
+        <td>Ranked matchmaking, the Elo rating and the leaderboard</td>
+        <td>Created only when you sign in to Ranked with Google Play Games. Your Play Games name, picture, rating and record are shown to other players (the leaderboard and your opponents). Your Google account's email address is not stored in your profile and never shown. You can delete the profile in the Ranked screen: unfinished ranked matches then count as losses, and your profile, ranked matches and devices are deleted.</td>
+      </tr>
+      <tr>
+        <td>Turn notification details (optional): a browser push subscription, an email address if you entered one, or an Android device token (Firebase Cloud Messaging)</td>
+        <td>Telling you when a match needs your move</td>
+        <td>Stored on the server only after you turn turn alerts on. Turning them off removes the push subscription or device token. Device tokens unused for 60 days are deleted.</td>
+      </tr>
+      <tr>
+        <td>IP address</td>
+        <td>Delivering requests to and from the server</td>
+        <td>Not stored by us. Supabase and Cloudflare may log it as part of standard infrastructure operations (see below).</td>
+      </tr>
+      <tr>
+        <td>Win/loss record against casual opponents</td>
+        <td>Shown on the online screen</td>
+        <td>Stored locally on your device only (localStorage).</td>
+      </tr>
+    </tbody>
   </table>
 
-  <h3>IP address disclosure</h3>
-  <p><strong>Important:</strong> Online play uses peer-to-peer connections. Your public IP address may be visible to the other player during connection negotiation, and their IP address may be visible to you. This is an inherent property of WebRTC P2P connections. When a direct connection is not possible (e.g., on mobile networks), game traffic is routed through a TURN relay server, in which case the relay provider also processes your IP address. If you do not want your IP address exposed, do not use online play.</p>
-
   <h2>Third-Party Services</h2>
-  <p>The following third-party services are used <strong>only during online play</strong>:</p>
+  <p>The following third-party services are used only during online play:</p>
   <ul>
-    <li><strong>Supabase</strong> — Provides the signaling relay for WebRTC connection setup. Signaling messages are ephemeral, but Supabase's infrastructure (including Cloudflare edge servers) logs connection metadata such as IP addresses and approximate geolocation. These logs are retained for 1-7 days depending on plan tier. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase Privacy Policy</a>.</li>
-    <li><strong>Google and Cloudflare STUN servers</strong> — Used to determine your public IP address for NAT traversal during connection setup. These servers see your IP address but no game data.</li>
-    <li><strong>Metered.ca TURN relay servers</strong> — When a direct P2P connection cannot be established (common on mobile/cellular networks), game traffic is routed through Metered's relay servers. In this case, Metered's servers process your IP address and relay encrypted game data between players. Game data remains encrypted (DTLS) in transit. <a href="https://www.metered.ca/privacy" target="_blank" rel="noopener">Metered Privacy Policy</a>.</li>
-    <li><strong>freestun.net TURN relay</strong> — Used as a fallback relay server when direct connections fail. Functions the same as the Metered relay described above. <a href="https://freestun.net" target="_blank" rel="noopener">freestun.net</a>.</li>
+    <li><strong>Supabase</strong> — hosts the game server and database described above. Supabase's infrastructure (including Cloudflare edge servers) logs connection metadata such as IP addresses, retained for 1–7 days depending on plan tier. <a href="https://supabase.com/privacy">Supabase Privacy Policy</a>.</li>
+    <li><strong>Google Play Games Services and Google Sign-In</strong> (Android, Ranked only) — verify your Play Games profile when you sign in to Ranked. <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.</li>
+    <li><strong>Firebase Cloud Messaging</strong> (Android, only with turn alerts on) and your browser's push service (web, only with notifications on) — deliver turn notifications to your device.</li>
   </ul>
   <p>No analytics, advertising, tracking, or telemetry services are used.</p>
 
@@ -81,17 +91,18 @@
   <p>The game does not use cookies. It uses browser localStorage to store:</p>
   <ul>
     <li>Game settings (sound, display preferences)</li>
-    <li>Player ID (random UUID, online play only)</li>
-    <li>Win/loss records (online play only)</li>
+    <li>Your online session(s), your display name, and which online rounds you have already watched</li>
+    <li>Win/loss records against casual opponents</li>
+    <li>Your turn alert preference</li>
     <li>Age verification status (whether you confirmed you are 13 or older)</li>
   </ul>
-  <p>All localStorage data stays on your device and is never transmitted to any server. You can clear it at any time through your browser settings.</p>
+  <p>You can clear it at any time through your browser or app settings. Clearing it signs this device out of its online matches.</p>
 
   <h2>Data Collection</h2>
-  <p>This app does not intentionally collect personal data. No accounts, logins, or registrations are required. The only personal data processed is your IP address during online play, as described above.</p>
+  <p>No account or registration is needed: online play uses an anonymous account. Personal data is processed only as listed above, when you choose to play online, set a display name, sign in to Ranked, or turn on turn alerts.</p>
 
   <h2>Legal Basis (GDPR)</h2>
-  <p>For users in the European Economic Area: the processing of IP addresses during online play is based on <strong>Legitimate Interest</strong> (GDPR Art. 6(1)(f)). The IP address exchange is technically necessary for establishing a peer-to-peer connection and is initiated by the user choosing to play online. No IP addresses are logged or stored by this app. However, third-party infrastructure providers (Supabase, Cloudflare, Metered.ca, freestun.net) may retain connection metadata including IP addresses in their standard operational logs, as described in the Third-Party Services section above.</p>
+  <p>For users in the European Economic Area: processing for online matches is necessary to provide the online play you request (GDPR Art. 6(1)(b)). Your display name, Ranked profile and turn alerts are optional and processed on the basis of your choice to use them (Art. 6(1)(a)); you can withdraw it by clearing the name, deleting your Ranked profile or turning alerts off. Infrastructure logs kept by Supabase and Cloudflare are based on legitimate interest (Art. 6(1)(f)).</p>
 
   <h2>Your Rights (GDPR)</h2>
   <p>If you are in the EEA, you have the right to:</p>
@@ -101,10 +112,10 @@
     <li>Object to processing based on legitimate interest</li>
     <li>Lodge a complaint with your local data protection authority</li>
   </ul>
-  <p>Since no personal data is stored on any server, there is nothing to access or delete server-side. You can clear locally stored data (player ID, scores) through your browser or app settings at any time.</p>
+  <p>You can delete your Ranked profile in the app. For anything else, such as removing your casual match history, contact the developer (below) with your match links.</p>
 
   <h2>Permissions</h2>
-  <p>The Android app does not request any special permissions beyond what is required to run.</p>
+  <p>The Android app asks for permission to show notifications only if you turn turn alerts on.</p>
 
   <h2>Children's Privacy</h2>
   <p>This app is not directed at children under 13. Online features require users to be 13 or older. The app does not knowingly collect personal information from children under 13.</p>
@@ -115,6 +126,6 @@
   <h2>Contact</h2>
   <p>If you have questions about this privacy policy, you can reach the developer at <a href="https://github.com/johannesjo/7-seconds">github.com/johannesjo/7-seconds</a>.</p>
 
-  <p><em>Last updated: March 10, 2026</em></p>
+  <p><em>Last updated: October 24, 2026</em></p>
 </body>
 </html>

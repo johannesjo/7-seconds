@@ -13,7 +13,7 @@ import { findMortarTarget, fireMortar, rocketReady, launchRocket, updateOrdnance
 import type { PathDrawer } from './path-drawer';
 import type { Renderer } from './renderer';
 import type { PathList } from './online-async-core';
-import { scorePosition, generateCandidates } from './ai-scoring';
+import { planTeamOrders } from './ai-planner';
 import { createRng } from './rng';
 import { clampPathLength, validPoints } from './path-orders';
 
@@ -258,94 +258,19 @@ export class GameEngine {
     this.onPhaseChangeCallback?.(phase);
   }
 
-  /** Generate AI paths for red units using position-scoring system. */
+  /** Generate AI paths for red units using position-scoring system. Zombies,
+   *  shielders, and bombers are left to the real-time chase AI. */
   private generateAiPaths(): void {
-    const allBlockers = this.obstacles;
-    const redUnits = this.units.filter(u => u.alive && u.team === 'red');
-    const enemies = this.units.filter(u => u.alive && u.team === 'blue');
-
-    if (redUnits.length === 0) return;
-
-    const candidates = generateCandidates(
-      redUnits[0],
-      this.obstacles,
-      this.elevationZones,
-    );
-
-    for (const unit of redUnits) {
-      // Zombies, shielders, and bombers don't use AI planning — they chase in real-time
-      if (unit.type === 'zombie' || unit.type === 'shielder' || unit.type === 'bomber') continue;
-      const margin = 8;
-      const padding = unit.radius + margin;
-
-      // Score each candidate, then verify the full path is navigable
-      const scored: { pos: typeof unit.pos; score: number }[] = [];
-      for (const candidate of candidates) {
-        const s = scorePosition({
-          candidate,
-          unit,
-          enemies,
-          obstacles: this.obstacles,
-          elevationZones: this.elevationZones,
-          ctfState: this.ctfState ?? undefined,
-        });
-        scored.push({ pos: candidate, score: s });
-      }
-      scored.sort((a, b) => b.score - a.score);
-
-      // Pick the best candidate whose full waypoint chain is obstacle-free
-      let bestPos = unit.pos;
-      let bestWaypoints: typeof unit.waypoints = [];
-      for (const { pos: candidate, score } of scored) {
-        if (score === -Infinity) break;
-        const detours = detourWaypoints(unit.pos, candidate, allBlockers, padding);
-        const chain = [...detours, candidate];
-
-        // Validate every segment in the chain
-        let pathClear = true;
-        let prev = unit.pos;
-        for (const wp of chain) {
-          if (allBlockers.some(o => segmentHitsRect(prev, wp, o, padding))) {
-            pathClear = false;
-            break;
-          }
-          prev = wp;
-        }
-
-        if (pathClear) {
-          bestPos = candidate;
-          bestWaypoints = chain;
-          break;
-        }
-      }
-
-      unit.waypoints = bestWaypoints.length > 0 ? bestWaypoints : [bestPos];
-      if (unit.type === 'rocketeer') this.planAiRocket(unit, enemies);
-    }
-  }
-
-  /** AI rocket: from where the rocketeer will stop, around cover, at the
-   *  nearest enemy's current position. */
-  private planAiRocket(unit: Unit, enemies: Unit[]): void {
-    const launch = unit.waypoints[unit.waypoints.length - 1] ?? unit.pos;
-    const byDistance = [...enemies].sort((a, b) =>
-      Math.hypot(a.pos.x - launch.x, a.pos.y - launch.y) - Math.hypot(b.pos.x - launch.x, b.pos.y - launch.y));
-    unit.rocketFired = false;
-    unit.rocketPath = [];
-    // Nearest enemy whose detour route is within reach and clears cover.
-    for (const target of byDistance) {
-      const full = [...detourWaypoints(launch, target.pos, this.obstacles, unit.projectileRadius + 6), { ...target.pos }];
-      const route = clampPathLength(full, launch, ROCKET_MAX_PATH);
-      if (route.length !== full.length || route[route.length - 1] !== full[full.length - 1]) continue;
-      let prev = launch;
-      const clear = route.every(p => {
-        const ok = !this.obstacles.some(o => segmentHitsRect(prev, p, o, unit.projectileRadius));
-        prev = p;
-        return ok;
-      });
-      if (clear) {
-        unit.rocketPath = route;
-        return;
+    const plans = planTeamOrders(this.units, this.obstacles, this.elevationZones, 'red', {
+      ctfState: this.ctfState ?? undefined,
+    });
+    for (const unit of this.units) {
+      const plan = plans.get(unit.id);
+      if (!plan) continue;
+      unit.waypoints = plan.waypoints;
+      if (unit.type === 'rocketeer') {
+        unit.rocketFired = false;
+        unit.rocketPath = plan.rocketPath;
       }
     }
   }

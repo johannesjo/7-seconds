@@ -1,27 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it, vi } from 'vitest';
-import { isAuthorizedWebhook, shouldNotifyOpponent } from '../supabase/functions/notify-turn/turn';
 import workerSource from '../public/sw-notify.js?raw';
-
-describe('turn webhook decision', () => {
-  const match = {
-    host_player: 'host', guest_player: 'guest', status: 'active', current_round: 3,
-  };
-
-  it('notifies a missing opponent commit and a committed opponent awaiting reveal', () => {
-    expect(shouldNotifyOpponent(match, 'host', 3, null)).toBe(true);
-    expect(shouldNotifyOpponent(match, 'guest', 3, { paths: null })).toBe(true);
-    expect(shouldNotifyOpponent(match, 'guest', 3, { paths: [] })).toBe(false);
-  });
-
-  it('rejects stale, finished, and forged match events', () => {
-    expect(shouldNotifyOpponent(match, 'stranger', 3, null)).toBe(false);
-    expect(shouldNotifyOpponent(match, 'host', 2, null)).toBe(false);
-    expect(shouldNotifyOpponent({ ...match, status: 'host_won' }, 'host', 3, null)).toBe(false);
-    expect(isAuthorizedWebhook('Bearer anon-token', 'service-role-token')).toBe(false);
-    expect(isAuthorizedWebhook('Bearer service-role-token', 'service-role-token')).toBe(true);
-  });
-});
 
 describe('Web Push notification tap', () => {
   it('navigates an existing app tab to the match and focuses it', async () => {

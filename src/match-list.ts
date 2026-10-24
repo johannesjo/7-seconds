@@ -21,11 +21,19 @@ const ACTIONS: Record<MatchOutcome, MatchAction> = {
   'your-turn': { status: 'Your turn', detail: 'Open the match to continue your turn.', action: 'Play turn' },
   'their-turn': { status: 'Waiting for their move', detail: 'Your move is saved. You can come back later.', action: 'View match' },
   'waiting-for-guest': { status: 'Waiting for a friend', detail: 'Your first move is saved. Send your friend the invite link.', action: 'Share invite' },
-  'resolving': { status: 'Round ready', detail: 'Both moves are in. Open the match to play the round.', action: 'Play round' },
+  'searching': { status: 'Searching for an opponent', detail: 'Open it to keep searching, or play an AI commander.', action: 'Resume search' },
+  'resolving': { status: 'Round ready', detail: 'Both moves are in. Open the match to watch the round.', action: 'Watch round' },
   'you-won': { status: 'You won', detail: 'This match is finished.', action: 'View result' },
   'you-lost': { status: 'You lost', detail: 'This match is finished.', action: 'View result' },
   'abandoned': { status: 'Match ended', detail: 'This match is no longer active.', action: 'View result' },
 };
+
+/** Who the match is against, from this player's side. */
+export function opponentLabel(summary: MatchSummary): string | null {
+  const name = summary.iAmHost ? summary.match.guestName : summary.match.hostName;
+  if (summary.match.guestPlayer == null) return null;
+  return `vs ${name ?? (summary.match.guestBot && summary.iAmHost ? 'an AI commander' : 'your opponent')}`;
+}
 
 export function matchAction(summary: MatchSummary): MatchAction {
   if (summary.match.status === 'open' && summary.outcome === 'your-turn') {
@@ -49,7 +57,7 @@ export function groupMatches(summaries: MatchSummary[], lastId: string | null): 
   return [
     { title: resume?.match.id === lastId ? 'Last opened' : 'Latest unfinished match', matches: resume ? [resume] : [] },
     { title: 'Your turn', matches: remaining.filter(s => s.outcome === 'your-turn' && s.match.status === 'active') },
-    { title: 'Invites', matches: remaining.filter(s => s.match.status === 'open') },
+    { title: 'Invites & searches', matches: remaining.filter(s => s.match.status === 'open') },
     { title: 'Waiting & ready rounds', matches: remaining.filter(s => s.match.status === 'active' && s.outcome !== 'your-turn') },
     { title: 'Finished matches', matches: summaries.filter(s => !live.includes(s)), finished: true },
   ].filter(group => group.matches.length > 0);
@@ -72,7 +80,8 @@ export function renderMatches(container: HTMLElement, summaries: MatchSummary[],
       info.className = 'match-info';
       const label = document.createElement('span');
       label.className = 'match-label';
-      label.textContent = `Match ${summary.match.id.toUpperCase()} · Round ${summary.match.currentRound}`;
+      const vs = opponentLabel(summary);
+      label.textContent = [vs, `Match ${summary.match.id.toUpperCase()}`, `Round ${summary.match.currentRound}`].filter(Boolean).join(' · ');
       const status = document.createElement('strong');
       status.textContent = ui.status;
       const detail = document.createElement('span');

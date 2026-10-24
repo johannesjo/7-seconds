@@ -1,176 +1,62 @@
-import type { Vec2 } from './types';
-import type { OnlineGameState } from './online-types';
-import { validPoints } from './path-orders';
-
-/** A team's planned orders for one round: waypoints per unit, plus a
- *  rocketeer's drawn rocket flight. */
-export type PathList = { unitId: string; waypoints: Vec2[]; rocketPath?: Vec2[] }[];
+// Pure rules of an online match as a client sees it: who still has to plan
+// this round, and what the match list shows. The referee (src/server) holds
+// each plan until both are in and resolves the round; clients only submit
+// their plan and animate the published result.
+export type { PathList } from './online-plan';
+export { blueAlive } from './online-plan';
 
 export type AsyncTeam = 'blue' | 'red';
 
-/** One row of the `turns` table, as the client cares about it. */
+/** One row of the `turns` table, as the client cares about it: the team has
+ *  submitted its plan, which is published (non-null) once the round is played. */
 export interface TurnRecord {
   team: AsyncTeam;
-  commitHash: number;
-  /** null until the owning player reveals. */
-  paths: PathList | null;
+  paths: import('./online-plan').PathList | null;
 }
 
-// --- hashing -------------------------------------------------------------
-// FNV-1a, matching the style of online-sync.ts so the two stay recognisable.
+/** What the local player should do next for the current round.
+ *  - `plan`   — I have not submitted my plan yet.
+ *  - `await`  — I submitted; waiting for the opponent's plan.
+ *  - `resolve` — both plans are in; the referee is playing the round (it
+ *    normally does so the moment the second plan arrives). */
+export type RoundAction = 'plan' | 'await' | 'resolve';
 
-function fnv1a(hash: number, value: number): number {
-  hash ^= value & 0xff;
-  hash = Math.imul(hash, 0x01000193);
-  hash ^= (value >>> 8) & 0xff;
-  hash = Math.imul(hash, 0x01000193);
-  hash ^= (value >>> 16) & 0xff;
-  hash = Math.imul(hash, 0x01000193);
-  hash ^= (value >>> 24) & 0xff;
-  return Math.imul(hash, 0x01000193);
-}
-
-function fnv1aString(hash: number, s: string): number {
-  for (let i = 0; i < s.length; i++) hash = fnv1a(hash, s.charCodeAt(i));
-  return hash;
-}
-
-const ROCKET_TAG = 0x524f434b; // 'ROCK'
-
-/** Canonicalise a path list so hashing is order-independent across clients:
- *  units sorted by id, waypoints kept in drawn order (order is significant). */
-export function canonicalisePaths(paths: PathList): PathList {
-  return [...paths]
-    .map(p => ({
-      unitId: p.unitId,
-      waypoints: p.waypoints,
-      ...(p.rocketPath?.length ? { rocketPath: p.rocketPath } : {}),
-    }))
-    .sort((a, b) => (a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0));
-}
-
-/** Deterministic 32-bit hash of a path list — used as the commit value and to
- *  verify a reveal. Positions are rounded to 2 decimals to match the tolerance
- *  used by hashGameState (absorbs float noise without affecting gameplay). */
-export function hashPaths(paths: PathList): number {
-  let h = 0x811c9dc5; // FNV offset basis
-  for (const p of canonicalisePaths(paths)) {
-    h = fnv1aString(h, p.unitId);
-    h = fnv1a(h, p.waypoints.length);
-    for (const w of p.waypoints) {
-      h = fnv1a(h, Math.round(w.x * 100));
-      h = fnv1a(h, Math.round(w.y * 100));
-    }
-    // Only hashed when present, so plain paths hash exactly as before. The
-    // tag keeps rocket points from colliding with waypoint coordinates. Only
-    // the points the engine will accept are hashed, and junk can't throw.
-    const rocket = validPoints(p.rocketPath);
-    if (rocket.length > 0) {
-      h = fnv1a(h, ROCKET_TAG);
-      h = fnv1a(h, rocket.length);
-      for (const r of rocket) {
-        h = fnv1a(h, Math.round(r.x * 100));
-        h = fnv1a(h, Math.round(r.y * 100));
-      }
-    }
-  }
-  return h >>> 0; // unsigned 32-bit
-}
-
-/** True when blue still has a unit standing. Blue is the host, so this decides
- *  the winner. Single source of truth shared by the client controller and the
- *  server-side resolver (engine-entry → resolve-round) so the two can't drift. */
-export function blueAlive(state: OnlineGameState): boolean {
-  return state.units.some(u => u.team === 'blue' && u.hp > 0);
-}
-
-/** Derive the match seed from both round-1 commit hashes. Because both commits
- *  are blind, neither player can grind for a favourable RNG outcome. Returns a
- *  positive 31-bit int matching the engine's seed range (`x & 0x7fffffff`). */
-export function deriveMatchSeed(roomId: string, blueHash: number, redHash: number): number {
-  let h = 0x811c9dc5;
-  h = fnv1aString(h, roomId);
-  h = fnv1a(h, blueHash);
-  h = fnv1a(h, redHash);
-  return (h >>> 0) & 0x7fffffff;
-}
-
-// --- round state machine -------------------------------------------------
-
-/** What the local player should do next for a given round.
- *  - `commit`            — I have not committed my paths yet.
- *  - `await-commit`      — I committed; waiting for the opponent to commit.
- *  - `reveal`            — both committed; I should reveal my paths.
- *  - `await-reveal`      — I revealed; waiting for the opponent to reveal.
- *  - `resolve`           — both revealed; simulate the round and advance.
- */
-export type RoundAction = 'commit' | 'await-commit' | 'reveal' | 'await-reveal' | 'resolve';
-
-function byTeam(turns: TurnRecord[], team: AsyncTeam): TurnRecord | undefined {
-  return turns.find(t => t.team === team);
-}
-
-/** Decide the local player's next step for a round given the turn rows so far.
- *  `myTeam` is the team this client controls. */
 export function nextRoundAction(turns: TurnRecord[], myTeam: AsyncTeam): RoundAction {
-  const opponent: AsyncTeam = myTeam === 'blue' ? 'red' : 'blue';
-  const mine = byTeam(turns, myTeam);
-  const theirs = byTeam(turns, opponent);
-
-  if (!mine) return 'commit';
-  const bothCommitted = !!theirs;
-  if (!bothCommitted) return 'await-commit';
-
-  // Both have committed — reveal phase.
-  if (mine.paths == null) return 'reveal';
-  if (theirs!.paths == null) return 'await-reveal';
-  return 'resolve';
+  const mine = turns.some(t => t.team === myTeam);
+  const theirs = turns.some(t => t.team !== myTeam);
+  if (!mine) return 'plan';
+  return theirs ? 'resolve' : 'await';
 }
 
-/** True once both sides have revealed and the round can be simulated. */
-export function isRoundResolvable(turns: TurnRecord[]): boolean {
-  const blue = byTeam(turns, 'blue');
-  const red = byTeam(turns, 'red');
-  return !!blue?.paths && !!red?.paths;
-}
-
-/** Verify a revealed turn matches its commitment. A mismatch means the peer
- *  tried to change their paths after committing — reject the reveal. */
-export function verifyReveal(turn: TurnRecord): boolean {
-  if (turn.paths == null) return false;
-  return hashPaths(turn.paths) === turn.commitHash;
-}
-
-// --- match list summary --------------------------------------------------
-
-/** Match statuses as stored in the `matches` row. Mirrors MatchStatus in
- *  online-async.ts; duplicated here so this pure module stays free of the
- *  Supabase-coupled layer (and importable in tests without it). */
+/** Match statuses as stored in the `matches` row. */
 export type AsyncMatchStatus = 'open' | 'active' | 'host_won' | 'guest_won' | 'abandoned';
+
+/** Why a finished match ended (`matches.finish_reason`). */
+export type FinishReason = 'battle' | 'forfeit' | 'timeout' | 'cancelled' | 'abandoned' | 'version';
 
 /** A player-facing one-line state for a match in the "my matches" list. */
 export type MatchOutcome =
-  | 'your-turn'           // you need to plan/commit (incl. host's first move)
-  | 'their-turn'          // you've acted; waiting on the opponent
+  | 'your-turn'           // you need to plan (incl. the host's first move)
+  | 'their-turn'          // you've planned; waiting on the opponent
   | 'waiting-for-guest'   // your first move is in; nobody has joined yet
-  | 'resolving'           // both committed+revealed; the round is being played
+  | 'searching'           // a random-opponent search nobody has joined yet
+  | 'resolving'           // both plans are in; the round is being played
   | 'you-won'
   | 'you-lost'
   | 'abandoned';
 
-/** True for outcomes that want the player's attention (drives unread badges and
- *  the "needs you" filter). */
+/** True for outcomes that want the player's attention (drives unread badges). */
 export function outcomeNeedsYou(o: MatchOutcome): boolean {
   return o === 'your-turn';
 }
 
-/** Collapse a match (status + my role + the current round's turns) into a single
- *  player-facing outcome. Pure and side-effect free so it can be unit-tested and
- *  reused by both the list screen and any badge counter. */
+/** Collapse a match (status + my role + the current round's turns) into a
+ *  single player-facing outcome, for the list screen and the badge. */
 export function summariseMatch(
   status: AsyncMatchStatus,
   iAmHost: boolean,
   currentRoundTurns: TurnRecord[],
+  matchmaking = false,
 ): MatchOutcome {
   if (status === 'abandoned') return 'abandoned';
   if (status === 'host_won') return iAmHost ? 'you-won' : 'you-lost';
@@ -178,20 +64,13 @@ export function summariseMatch(
 
   // Only the host can be on an 'open' match (no guest has joined yet).
   if (status === 'open') {
-    const blueCommitted = currentRoundTurns.some(t => t.team === 'blue');
-    return blueCommitted ? 'waiting-for-guest' : 'your-turn';
+    if (matchmaking) return 'searching';
+    return currentRoundTurns.some(t => t.team === 'blue') ? 'waiting-for-guest' : 'your-turn';
   }
 
-  // 'active': map the round state machine to a list outcome.
-  const myTeam: AsyncTeam = iAmHost ? 'blue' : 'red';
-  switch (nextRoundAction(currentRoundTurns, myTeam)) {
-    case 'commit':
-    case 'reveal':
-      return 'your-turn';
-    case 'await-commit':
-    case 'await-reveal':
-      return 'their-turn';
-    case 'resolve':
-      return 'resolving';
+  switch (nextRoundAction(currentRoundTurns, iAmHost ? 'blue' : 'red')) {
+    case 'plan': return 'your-turn';
+    case 'await': return 'their-turn';
+    case 'resolve': return 'resolving';
   }
 }
