@@ -27,7 +27,7 @@ describe('bosses', () => {
     const units = spawnHordeWave(buildWavePlan(5, createRng(1)), [], []);
     const bosses = units.filter(u => u.boss);
     expect(bosses).toHaveLength(1);
-    expect(bosses[0].boss).toBe(BOSSES.brute.name);
+    expect(bosses[0].boss).toBe('brute');
     expect(bosses[0].maxHp).toBe(BOSSES.brute.hp);
     expect(bosses[0].radius).toBeGreaterThan(UNIT_STATS.zombie.radius);
     expect(bosses[0].team).toBe('red');
@@ -126,10 +126,24 @@ describe('spawnHordeWave', () => {
     }
   });
 
-  it('brings half the horde in close on an ambush', () => {
+  it('brings half the melee horde in close on an ambush, never a gunner', () => {
     const units = spawnHordeWave(plan(8, ['ambush']), [], []);
+    const melee = units.filter(u => ['zombie', 'blade', 'shielder', 'bomber'].includes(u.type));
     const close = units.filter(u => u.pos.y >= MAP_HEIGHT * 0.45);
-    expect(close.length).toBe(Math.floor(units.length / 2));
+    expect(close.length).toBe(Math.floor(melee.length / 2));
+    expect(close.every(u => melee.includes(u))).toBe(true);
+  });
+
+  it('keeps the nest out of range of the spawn line on a small map', () => {
+    setMapSize(360, 620);
+    try {
+      const units = spawnHordeWave(plan(6, ['sniper_nest']), [], [{ x: 100, y: 200, w: 150, h: 80 }]);
+      for (const u of units.filter(s => s.type === 'sniper')) {
+        expect(MAP_HEIGHT * 0.92 - u.pos.y).toBeGreaterThan(UNIT_STATS.sniper.range * 1.2);
+      }
+    } finally {
+      setMapSize(1000, 1000);
+    }
   });
 
   it('digs the nest snipers in on the furthest hill up the map', () => {
@@ -163,6 +177,13 @@ describe('pacts', () => {
   it('are not offered before wave 3', () => {
     for (let seed = 1; seed < 50; seed++) {
       expect(rollPact(plan(2), createRng(seed))).toBeNull();
+    }
+  });
+
+  it('never curse a wave with a modifier it is too early for', () => {
+    for (let seed = 1; seed < 200; seed++) {
+      const pact = rollPact(plan(3), createRng(seed));
+      if (pact) expect(WAVE_MODIFIERS[pact.curse].minWave).toBeLessThanOrEqual(3);
     }
   });
 

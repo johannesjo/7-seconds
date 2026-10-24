@@ -564,6 +564,7 @@
     }
     .pact-btn strong { color: var(--color-planning-red); letter-spacing: 1px; text-transform: uppercase; }
     .pact-btn[aria-pressed="true"] { background: var(--color-pact-sealed-bg); border-style: solid; }
+    .pact-btn[aria-pressed="true"] strong::after { content: " · sealed"; }
 
     /* Upgrade cards */
     .upgrade-card {

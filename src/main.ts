@@ -4,14 +4,14 @@ import { notifyLocalTurn } from './notify';
 import { GameEngine, type Difficulty } from './game';
 import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateBattlefield, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
-import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team } from './types';
+import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team, HordeUpgrade } from './types';
 import { HORDE_MAX_WAVES, ROUND_DURATION_S, MAP_HEIGHT, SHIELD_MAX_HITS } from './constants';
 import { pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import {
   buildWavePlan, rollPact, withCurse, spawnHordeWave, waveScore, describePlan, WAVE_MODIFIERS, BOSSES,
   type HordeWavePlan, type Pact,
 } from './horde-waves';
-import { getHordeRecord, recordHordeRunStart, recordHordeProgress, recordHordeClear, type HordeRecord } from './horde-stats';
+import { getHordeRecord, recordHordeProgress, recordHordeClear, type HordeRecord } from './horde-stats';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 import { AsyncGameController, sessionIO, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
@@ -179,11 +179,11 @@ function showUnitInfo(unit: Unit | null): void {
   unitInfo.classList.remove('faded');
   if (!unit) return;
   unitInfoFadeTimer = window.setTimeout(() => unitInfo.classList.add('faded'), UNIT_INFO_FADE_MS);
-  unitInfoTitle.textContent = unit.boss ?? `${unit.type[0].toUpperCase()}${unit.type.slice(1)}`;
+  unitInfoTitle.textContent = unit.boss ? BOSSES[unit.boss].name : `${unit.type[0].toUpperCase()}${unit.type.slice(1)}`;
   unitInfoTitle.style.color = unit.team === 'blue' ? 'var(--color-planning-blue)' : 'var(--color-planning-red)';
   let description = UNIT_ROLES[unit.type];
   if (unit.boss) {
-    description = Object.values(BOSSES).find(b => b.name === unit.boss)?.description ?? description;
+    description = BOSSES[unit.boss].description;
   } else if (unit.type === 'shielder') {
     const remaining = Math.max(0, SHIELD_MAX_HITS - (unit.shieldHits ?? 0));
     description = remaining > 0
@@ -267,6 +267,8 @@ let hordePactAccepted = false;
 /** Extra upgrade picks owed for surviving a pact wave, and picks made this break. */
 let hordeBonusPicks = 0;
 let hordePicksMade = 0;
+/** The cards on the upgrade screen, kept so a replay round trip can't re-deal them. */
+let hordeDealt: HordeUpgrade[] | null = null;
 let hordeScore = 0;
 /** The record as it stood when the run began, to spot a new personal best. */
 let hordeRecordAtStart: HordeRecord | null = null;
@@ -389,15 +391,20 @@ function showRoundBanner(round: number, before: { blue: number; red: number }, a
   const parts: string[] = [];
   if (blueLost > 0) parts.push(`${vsComputer ? 'You' : 'Blue'} lost ${blueLost}`);
   if (redLost > 0) parts.push(`${vsComputer ? 'Enemy' : 'Red'} lost ${redLost}`);
-  roundBannerTitle.textContent = `Round ${round - 1} over`;
-  roundBannerDetail.textContent = parts.length > 0 ? parts.join(' · ') : 'No casualties';
+  flashBanner(`Round ${round - 1} over`, parts.length > 0 ? parts.join(' · ') : 'No casualties');
+  audio.play('round-end');
+}
+
+/** Show the between-rounds card briefly. */
+function flashBanner(title: string, detail: string): void {
+  roundBannerTitle.textContent = title;
+  roundBannerDetail.textContent = detail;
   roundBanner.classList.remove('show');
   void roundBanner.offsetWidth; // restart the animation
   roundBanner.classList.add('show');
   // Timed here too: with reduced motion the card has no fade-out animation.
   window.clearTimeout(roundBannerTimer);
   roundBannerTimer = window.setTimeout(hideRoundBanner, ROUND_BANNER_MS);
-  audio.play('round-end');
 }
 
 function hideRoundBanner(): void {
@@ -824,10 +831,10 @@ function startHorde(): void {
   hordePactAccepted = false;
   hordeBonusPicks = 0;
   hordePicksMade = 0;
+  hordeDealt = null;
   hordeScore = 0;
   canContinueEndless = false;
   hordeRecordAtStart = getHordeRecord();
-  recordHordeRunStart();
   lastReplayData = null;
 
   // Generate map once for the whole run (before spawning so units avoid blocks)
@@ -859,14 +866,7 @@ function describeWaveDetail(plan: HordeWavePlan): string {
 /** Announce a boss or modified wave as it starts. */
 function showWaveBanner(plan: HordeWavePlan): void {
   const detail = describePlan(plan);
-  if (!detail) return;
-  roundBannerTitle.textContent = plan.boss ? `Wave ${plan.wave} · Boss` : `Wave ${plan.wave}`;
-  roundBannerDetail.textContent = detail;
-  roundBanner.classList.remove('show');
-  void roundBanner.offsetWidth; // restart the animation
-  roundBanner.classList.add('show');
-  window.clearTimeout(roundBannerTimer);
-  roundBannerTimer = window.setTimeout(hideRoundBanner, ROUND_BANNER_MS);
+  if (detail) flashBanner(plan.boss ? `Wave ${plan.wave} · Boss` : `Wave ${plan.wave}`, detail);
 }
 
 function startNextHordeWave(plan: HordeWavePlan): void {
@@ -915,9 +915,8 @@ function renderUpcomingWave(): void {
   if (!hordePact) return;
   const curse = WAVE_MODIFIERS[hordePact.curse];
   pactBtn.setAttribute('aria-pressed', String(hordePactAccepted));
-  pactBtn.innerHTML = hordePactAccepted
-    ? `<strong>☠ Pact sealed</strong><br>Survive ${curse.label} next wave to pick 2 upgrades. Tap to back out.`
-    : `<strong>☠ Blood pact</strong><br>Curse the next wave with ${curse.label} (${curse.description.toLowerCase()}). Survive it to pick 2 upgrades.`;
+  pactBtn.innerHTML = `<strong><span aria-hidden="true">☠ </span>Blood pact</strong><br>`
+    + `Curse the next wave with ${curse.label} (${curse.description.toLowerCase()}). Survive it to pick 2 upgrades.`;
 }
 
 pactBtn.addEventListener('click', () => {
@@ -942,7 +941,8 @@ function showUpgradeSelection(): void {
     : 'Choose an upgrade';
   renderUpcomingWave();
 
-  const upgrades = pickUpgrades(hordeUnits, hordeWave, hordeAppliedUpgrades);
+  hordeDealt ??= pickUpgrades(hordeUnits, hordeWave, hordeAppliedUpgrades);
+  const upgrades = hordeDealt;
   upgradeCardsEl.innerHTML = '';
   // A bonus pick deals new cards where the old ones were: ignore a double tap
   // so it can't spend the next pick (and start the wave) unseen.
@@ -962,6 +962,7 @@ function showUpgradeSelection(): void {
     `;
     card.addEventListener('click', () => {
       if (performance.now() - shownAt < UPGRADE_TAP_GUARD_MS) return;
+      hordeDealt = null;
       const allBlocks = hordeMap!.obstacles;
       hordeAppliedUpgrades.set(upgrade.id, (hordeAppliedUpgrades.get(upgrade.id) ?? 0) + 1);
       const prevCount = hordeUnits.length;
@@ -1289,6 +1290,7 @@ newBattleBtn.addEventListener('click', () => {
   hordePactAccepted = false;
   hordeBonusPicks = 0;
   hordePicksMade = 0;
+  hordeDealt = null;
   hordeScore = 0;
   hordeRecordAtStart = null;
   canContinueEndless = false;

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getHordeRecord, recordHordeRunStart, recordHordeProgress, recordHordeClear } from './horde-stats';
+import { getHordeRecord, recordHordeProgress, recordHordeClear } from './horde-stats';
 
 beforeEach(() => {
   const storage = new Map<string, string>();
@@ -11,12 +11,10 @@ beforeEach(() => {
 
 describe('horde record', () => {
   it('keeps the best wave and score across runs', () => {
-    recordHordeRunStart();
     recordHordeProgress(1, 100);
     recordHordeProgress(2, 250);
-    recordHordeRunStart();
     recordHordeProgress(1, 150);
-    expect(getHordeRecord()).toEqual({ bestWave: 2, bestScore: 250, runs: 2, clears: 0 });
+    expect(getHordeRecord()).toEqual({ bestWave: 2, bestScore: 250, clears: 0 });
   });
 
   it('counts full clears', () => {
@@ -28,5 +26,10 @@ describe('horde record', () => {
     localStorage.setItem('7s-horde-stats', '{not json');
     expect(getHordeRecord().bestWave).toBe(0);
     expect(recordHordeProgress(3, 300).bestWave).toBe(3);
+  });
+
+  it('ignores stored fields that are not counts', () => {
+    localStorage.setItem('7s-horde-stats', JSON.stringify({ bestWave: 'x', bestScore: null, clears: -2 }));
+    expect(recordHordeProgress(2, 200)).toEqual({ bestWave: 2, bestScore: 200, clears: 0 });
   });
 });

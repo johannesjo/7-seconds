@@ -1,7 +1,7 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
 import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ROCKET_MAX_PATH } from './constants';
 import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELEVATION_ZONES } from './online-types';
-import { createArmy, generateRandomComposition, createMissionArmy, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
+import { createArmy, generateRandomComposition, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateBattlefield, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 import { findMortarTarget, fireMortar, rocketReady, launchRocket, updateOrdnance, type Explosion } from './ordnance';
@@ -55,7 +55,6 @@ export class GameEngine {
   private hordeMode = false;
   private hordeStartDelay = 0;
   private hordeBlueUnits: Unit[] | null = null;
-  private hordeRedArmy: { type: UnitType; count: number }[] | null = null;
   private hordeRedUnits: Unit[] | null = null;
   private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
   private ctfMode = false;
@@ -85,8 +84,7 @@ export class GameEngine {
     aiMode?: boolean;
     horde?: boolean;
     hordeBlueUnits?: Unit[];
-    hordeRedArmy?: { type: UnitType; count: number }[];
-    /** Pre-built wave enemies (bosses, modifiers); takes precedence over hordeRedArmy. */
+    /** The wave's enemies, built by spawnHordeWave (bosses and modifiers applied). */
     hordeRedUnits?: Unit[];
     hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[] };
     ctfMode?: boolean;
@@ -111,7 +109,6 @@ export class GameEngine {
     this.seed = opts?.seed ?? (Math.random() * 0x7fffffff) | 0;
     this.hordeMode = opts?.horde ?? false;
     this.hordeBlueUnits = opts?.hordeBlueUnits ?? null;
-    this.hordeRedArmy = opts?.hordeRedArmy ?? null;
     this.hordeRedUnits = opts?.hordeRedUnits ?? null;
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
@@ -168,9 +165,9 @@ export class GameEngine {
     const allBlocks = this.obstacles;
 
     if (!this.ctfMode && !this.practice && !this.initialState) {
-      if (this.hordeMode && this.hordeBlueUnits && (this.hordeRedUnits || this.hordeRedArmy)) {
-        // Horde mode: use pre-created blue units + spawn wave enemies
-        const redUnits = this.hordeRedUnits ?? createMissionArmy('red', this.hordeRedArmy!, allBlocks);
+      if (this.hordeMode && this.hordeBlueUnits && this.hordeRedUnits) {
+        // Horde mode: carried-over blue units + the wave's enemies
+        const redUnits = this.hordeRedUnits;
         // Prefix red IDs with wave index to avoid renderer collisions
         const waveTag = `w${Date.now() % 10000}`;
         for (const u of redUnits) {

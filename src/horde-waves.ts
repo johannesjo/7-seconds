@@ -1,6 +1,6 @@
 /** Horde wave building: wave modifiers, boss waves, endless waves and pacts. */
-import type { ElevationZone, Obstacle, Unit, UnitType } from './types';
-import { HORDE_MAX_WAVES, MAP_HEIGHT, MAP_WIDTH } from './constants';
+import type { BossId, ElevationZone, Obstacle, Unit, UnitType } from './types';
+import { ELEVATION_RANGE_BONUS, HORDE_MAX_WAVES, MAP_HEIGHT, MAP_WIDTH, UNIT_STATS } from './constants';
 import { HORDE_WAVES } from './horde';
 import { createMissionArmy, createUnit, nudgeOutOfBlocks } from './units';
 
@@ -25,12 +25,10 @@ export const WAVE_MODIFIERS: Record<WaveModifierId, WaveModifier> = {
   flank: { id: 'flank', label: 'Flank Attack', description: 'Enemies come in from the sides', minWave: 4, spawn: true },
   bomber_rush: { id: 'bomber_rush', label: 'Bomber Rush', description: 'A quarter of the zombies are bombers', minWave: 5 },
   sniper_nest: { id: 'sniper_nest', label: 'Sniper Nest', description: 'Extra enemy snipers dug in on high ground', minWave: 6 },
-  ambush: { id: 'ambush', label: 'Ambush', description: 'Half the horde spawns close on your flanks', minWave: 7, spawn: true },
+  ambush: { id: 'ambush', label: 'Ambush', description: 'Half the melee horde springs up close on your flanks', minWave: 7, spawn: true },
 };
 
 const MODIFIER_IDS = Object.keys(WAVE_MODIFIERS) as WaveModifierId[];
-
-export type BossId = 'brute' | 'juggernaut' | 'abomination';
 
 interface BossDef {
   name: string;
@@ -78,7 +76,8 @@ export interface Pact {
   curse: WaveModifierId;
 }
 
-/** Share of upgrade screens (from wave 3 on) that offer a pact. */
+/** Chance an upgrade screen offers a pact on the wave after it (wave 3 onwards,
+ *  so the first can come after wave 2). */
 const PACT_CHANCE = 0.5;
 
 export function bossForWave(wave: number): BossId | undefined {
@@ -147,7 +146,7 @@ export function buildWavePlan(wave: number, random: () => number = Math.random):
 /** Maybe offer a pact for the upcoming wave: accept a curse, earn a bonus pick. */
 export function rollPact(plan: HordeWavePlan, random: () => number = Math.random): Pact | null {
   if (plan.curse || plan.wave < 3 || random() >= PACT_CHANCE) return null;
-  const pool = MODIFIER_IDS.filter(id => compatible(id, plan.modifiers));
+  const pool = MODIFIER_IDS.filter(id => WAVE_MODIFIERS[id].minWave <= plan.wave && compatible(id, plan.modifiers));
   return pool.length > 0 ? { curse: pickOne(pool, random) } : null;
 }
 
@@ -192,6 +191,8 @@ function sniperNestSize(wave: number): number {
   return wave >= 12 ? 3 : 2;
 }
 
+const MELEE_TYPES = new Set<UnitType>(['zombie', 'blade', 'shielder', 'bomber']);
+
 const FLANK_MARGIN = 24;
 const FLANK_COLUMN_GAP = 28;
 const FLANK_MAX_ROWS = 12;
@@ -219,10 +220,17 @@ function placeOnFlanks(units: Unit[], yMinFrac: number, yMaxFrac: number, blocks
   });
 }
 
-/** Put snipers on the hill furthest from the player's spawn, if there is one up the map. */
+/** Blue's spawn line (see repositionBlueUnits). */
+const BLUE_SPAWN_Y = 0.92;
+/** How far a nest must sit from blue's spawn line so its snipers can't open fire
+ *  before blue has moved: a hill-boosted sniper shot plus some slack. */
+const NEST_SAFE_DISTANCE = UNIT_STATS.sniper.range * (1 + ELEVATION_RANGE_BONUS) + 40;
+
+/** Put snipers on the highest hill that is out of range of blue's spawn; on a
+ *  map too small for one, they stay with the rest of the horde up top. */
 function placeSniperNest(snipers: Unit[], zones: ElevationZone[], blocks: Obstacle[]): void {
   const hill = zones
-    .filter(z => z.y + z.h / 2 < MAP_HEIGHT * 0.7)
+    .filter(z => MAP_HEIGHT * BLUE_SPAWN_Y - z.y - z.h >= NEST_SAFE_DISTANCE)
     .sort((a, b) => a.y - b.y)[0];
   if (!hill) return;
   snipers.forEach((u, i) => {
@@ -237,7 +245,7 @@ function createBoss(id: BossId, wave: number, blocks: Obstacle[]): Unit {
   const cycle = Math.floor((wave / BOSS_INTERVAL - 1) / BOSS_ORDER.length);
   const pos = nudgeOutOfBlocks({ x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.1 }, blocks);
   const boss = createUnit(`red_boss_${wave}`, def.base, 'red', pos);
-  boss.boss = def.name;
+  boss.boss = id;
   boss.maxHp = Math.round(def.hp * (1 + 0.5 * cycle));
   boss.hp = boss.maxHp;
   boss.radius = def.radius;
@@ -273,8 +281,8 @@ export function spawnHordeWave(plan: HordeWavePlan, blocks: Obstacle[], elevatio
   placeSniperNest(nest, elevationZones, blocks);
   const movable = units.filter(u => !nest.includes(u));
   if (mods.has('flank')) placeOnFlanks(movable, 0.2, 0.65, blocks);
-  // Close, but out of gun range of the spawn line on round 1.
-  if (mods.has('ambush')) placeOnFlanks(movable.filter((_, i) => i % 2 === 1), 0.45, 0.65, blocks);
+  // Only melee units ambush, so nobody can shoot blue before it has moved.
+  if (mods.has('ambush')) placeOnFlanks(movable.filter(u => MELEE_TYPES.has(u.type)).filter((_, i) => i % 2 === 1), 0.45, 0.65, blocks);
 
   if (plan.boss) units.push(createBoss(plan.boss, plan.wave, blocks));
   applyEnemyStats(units, plan);

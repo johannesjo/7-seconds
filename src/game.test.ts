@@ -137,7 +137,7 @@ describe('tick stops simulating once a round ends mid-frame', () => {
     const eng = new GameEngine(null, (event) => { if (event === 'wave-clear') waveClears++; }, {
       aiMode: true, horde: true, seed: 1,
       hordeBlueUnits: [],
-      hordeRedArmy: [{ type: 'zombie', count: 1 }],
+      hordeRedUnits: [createUnit('red_zombie_0', 'zombie', 'red', { x: 300, y: 100 })],
       hordeMap: { obstacles: [], elevationZones: [] },
     });
     eng.startBattle();
@@ -152,7 +152,7 @@ describe('tick stops simulating once a round ends mid-frame', () => {
 describe('horde pre-built enemies', () => {
   it('fields the given wave units, boss included', () => {
     const boss = createUnit('red_boss_5', 'zombie', 'red', { x: 300, y: 100 });
-    boss.boss = 'The Brute';
+    boss.boss = 'brute';
     const eng = new GameEngine(null, () => {}, {
       aiMode: true, horde: true, seed: 1,
       hordeBlueUnits: [createUnit('blue_soldier_0', 'soldier', 'blue', { x: 300, y: 900 })],
@@ -162,7 +162,7 @@ describe('horde pre-built enemies', () => {
     eng.startBattle();
     const red = eng.getUnits().filter(u => u.team === 'red');
     expect(red).toHaveLength(1);
-    expect(red[0].boss).toBe('The Brute');
+    expect(red[0].boss).toBe('brute');
   });
 });
 
@@ -198,7 +198,7 @@ describe('horde mutual wipe', () => {
     const eng = new GameEngine(null, (event, data) => events.push({ event, data }), {
       aiMode: true, horde: true, seed: 1,
       hordeBlueUnits: [],
-      hordeRedArmy: [{ type: 'zombie', count: 1 }],
+      hordeRedUnits: [createUnit('red_zombie_0', 'zombie', 'red', { x: 300, y: 100 })],
       hordeMap: { obstacles: [], elevationZones: [] },
     });
     eng.startBattle();

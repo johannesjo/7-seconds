@@ -1,3 +1,4 @@
+export type BossId = 'brute' | 'juggernaut' | 'abomination';
 export type UnitType = 'soldier' | 'blade' | 'sniper' | 'zombie' | 'shielder' | 'bomber' | 'mortar' | 'rocketeer';
 export type Team = 'blue' | 'red';
 export type TurnPhase = 'blue-planning' | 'cover' | 'red-planning' | 'playing';
@@ -53,8 +54,8 @@ export interface Unit {
   momentum?: number;
   /** Shielder only: number of frontal hits absorbed by shield. Shield breaks at SHIELD_MAX_HITS. */
   shieldHits?: number;
-  /** Horde boss: its display name. Bosses are oversized versions of a base type. */
-  boss?: string;
+  /** Horde boss: an oversized, renamed version of its base type. */
+  boss?: BossId;
 }
 
 export interface Projectile {
@@ -141,7 +142,7 @@ export interface ReplayUnitSnapshot {
   radius: number;
   shieldHits?: number;
   rocketFired?: boolean;
-  boss?: string;
+  boss?: BossId;
 }
 
 export interface ReplayProjectileSnapshot {
