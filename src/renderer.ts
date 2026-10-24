@@ -579,6 +579,12 @@ export class Renderer {
       shape.fill(color);
     }
 
+    if (unit.boss) {
+      // A halo so a boss reads as more than an oversized grunt.
+      shape.circle(0, 0, unit.radius * 1.6);
+      shape.stroke({ width: 2, color, alpha: 0.6 });
+    }
+
     const nose = new Graphics();
     if (unit.type !== 'zombie' && unit.type !== 'blade' && unit.type !== 'shielder' && unit.type !== 'bomber') {
       if (unit.type === 'sniper') {

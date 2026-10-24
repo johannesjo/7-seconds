@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { GameEngine, adjustForDifficulty, type Difficulty } from './game';
 import type { OnlineGameState } from './online-types';
 import type { Renderer } from './renderer';
+import { createUnit } from './units';
 
 // Regression: shielders (and other chase-type red units) must follow the paths a
 // HUMAN player drew. The chase AI is for AI opponents only — when it ran in online
@@ -136,7 +137,7 @@ describe('tick stops simulating once a round ends mid-frame', () => {
     const eng = new GameEngine(null, (event) => { if (event === 'wave-clear') waveClears++; }, {
       aiMode: true, horde: true, seed: 1,
       hordeBlueUnits: [],
-      hordeRedArmy: [{ type: 'zombie', count: 1 }],
+      hordeRedUnits: [createUnit('red_zombie_0', 'zombie', 'red', { x: 300, y: 100 })],
       hordeMap: { obstacles: [], elevationZones: [] },
     });
     eng.startBattle();
@@ -145,6 +146,23 @@ describe('tick stops simulating once a round ends mid-frame', () => {
     eng.externalTick(200);
 
     expect(waveClears).toBe(1);
+  });
+});
+
+describe('horde pre-built enemies', () => {
+  it('fields the given wave units, boss included', () => {
+    const boss = createUnit('red_boss_5', 'zombie', 'red', { x: 300, y: 100 });
+    boss.boss = 'brute';
+    const eng = new GameEngine(null, () => {}, {
+      aiMode: true, horde: true, seed: 1,
+      hordeBlueUnits: [createUnit('blue_soldier_0', 'soldier', 'blue', { x: 300, y: 900 })],
+      hordeRedUnits: [boss],
+      hordeMap: { obstacles: [], elevationZones: [] },
+    });
+    eng.startBattle();
+    const red = eng.getUnits().filter(u => u.team === 'red');
+    expect(red).toHaveLength(1);
+    expect(red[0].boss).toBe('brute');
   });
 });
 
@@ -180,7 +198,7 @@ describe('horde mutual wipe', () => {
     const eng = new GameEngine(null, (event, data) => events.push({ event, data }), {
       aiMode: true, horde: true, seed: 1,
       hordeBlueUnits: [],
-      hordeRedArmy: [{ type: 'zombie', count: 1 }],
+      hordeRedUnits: [createUnit('red_zombie_0', 'zombie', 'red', { x: 300, y: 100 })],
       hordeMap: { obstacles: [], elevationZones: [] },
     });
     eng.startBattle();

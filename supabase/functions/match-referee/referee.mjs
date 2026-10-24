@@ -296,55 +296,6 @@ function createCtfArmy(team, blocks) {
   }
   return units;
 }
-function createMissionArmy(team, composition, blocks) {
-  const units = [];
-  const isBlue = team === "blue";
-  const totalUnits = composition.reduce((sum, c) => sum + c.count, 0);
-  const spacing = 60;
-  if (isBlue) {
-    const baseY = MAP_HEIGHT * 0.92;
-    const groupWidth = spacing * (totalUnits - 1);
-    const startX = (MAP_WIDTH - groupWidth) / 2;
-    let index = 0;
-    for (const { type, count } of composition) {
-      for (let i = 0; i < count; i++) {
-        const x = startX + spacing * index;
-        units.push(createUnit(`${team}_${type}_${i}`, type, team, { x, y: baseY }));
-        index++;
-      }
-    }
-  } else {
-    const margin = 80;
-    const xRange = MAP_WIDTH - margin * 2;
-    const yMin = MAP_HEIGHT * 0.02;
-    const yMax = MAP_HEIGHT * 0.25;
-    const cols = Math.min(totalUnits, Math.ceil(Math.sqrt(totalUnits * 2)));
-    const rows = Math.ceil(totalUnits / cols);
-    const xStep = xRange / Math.max(cols, 1);
-    const yStep = (yMax - yMin) / Math.max(rows, 1);
-    let index = 0;
-    for (const { type, count } of composition) {
-      for (let i = 0; i < count; i++) {
-        const row = Math.floor(index / cols);
-        const col = index % cols;
-        const stagger = row % 2 === 1 ? xStep * 0.5 : 0;
-        const x = margin + xStep * 0.5 + col * xStep + stagger;
-        const y = yMin + yStep * 0.5 + row * yStep;
-        units.push(createUnit(`${team}_${type}_${i}`, type, team, {
-          x: Math.min(x, MAP_WIDTH - margin),
-          y
-        }));
-        index++;
-      }
-    }
-  }
-  if (blocks) {
-    for (const u of units) {
-      u.pos = nudgeOutOfBlocks(u.pos, blocks);
-    }
-  }
-  return units;
-}
 function updateGunAngle(unit, desiredAngle, dt) {
   let diff = desiredAngle - unit.gunAngle;
   diff = (diff + Math.PI) % (2 * Math.PI) - Math.PI;
@@ -1408,7 +1359,7 @@ var GameEngine = class _GameEngine {
   hordeMode = false;
   hordeStartDelay = 0;
   hordeBlueUnits = null;
-  hordeRedArmy = null;
+  hordeRedUnits = null;
   hordeMap = null;
   ctfMode = false;
   ctfState = null;
@@ -1439,7 +1390,7 @@ var GameEngine = class _GameEngine {
     this.seed = opts?.seed ?? Math.random() * 2147483647 | 0;
     this.hordeMode = opts?.horde ?? false;
     this.hordeBlueUnits = opts?.hordeBlueUnits ?? null;
-    this.hordeRedArmy = opts?.hordeRedArmy ?? null;
+    this.hordeRedUnits = opts?.hordeRedUnits ?? null;
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.onlineHostMode = opts?.onlineHost ?? false;
@@ -1486,8 +1437,8 @@ var GameEngine = class _GameEngine {
     }
     const allBlocks = this.obstacles;
     if (!this.ctfMode && !this.practice && !this.initialState) {
-      if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
-        const redUnits = createMissionArmy("red", this.hordeRedArmy, allBlocks);
+      if (this.hordeMode && this.hordeBlueUnits && this.hordeRedUnits) {
+        const redUnits = this.hordeRedUnits;
         const waveTag = `w${Date.now() % 1e4}`;
         for (const u of redUnits) {
           u.id = u.id.replace("red_", `red_${waveTag}_`);
@@ -1971,7 +1922,8 @@ var GameEngine = class _GameEngine {
         alive: u.alive,
         radius: u.radius,
         shieldHits: u.shieldHits,
-        ...u.rocketFired ? { rocketFired: true } : {}
+        ...u.rocketFired ? { rocketFired: true } : {},
+        ...u.boss ? { boss: u.boss } : {}
       })),
       projectiles: this.projectiles.map((p) => ({
         x: p.pos.x,

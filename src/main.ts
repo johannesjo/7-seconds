@@ -4,9 +4,14 @@ import { notifyLocalTurn } from './notify';
 import { GameEngine, type Difficulty } from './game';
 import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateBattlefield, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
-import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team } from './types';
+import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team, HordeUpgrade } from './types';
 import { HORDE_MAX_WAVES, ROUND_DURATION_S, MAP_HEIGHT, SHIELD_MAX_HITS } from './constants';
-import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
+import { pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
+import {
+  buildWavePlan, rollPact, withCurse, spawnHordeWave, waveScore, describePlan, WAVE_MODIFIERS, BOSSES,
+  type HordeWavePlan, type Pact,
+} from './horde-waves';
+import { getHordeRecord, recordHordeProgress, recordHordeClear, type HordeRecord } from './horde-stats';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 import { AsyncGameController, sessionIO, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
@@ -82,6 +87,12 @@ const waveCounterEl = document.getElementById('wave-counter')!;
 const upgradeScreen = document.getElementById('upgrade-screen')!;
 const upgradeCardsEl = document.getElementById('upgrade-cards')!;
 const upgradeReplayBtn = document.getElementById('upgrade-replay-btn') as HTMLButtonElement;
+const upgradeTitleEl = document.getElementById('upgrade-title')!;
+const upgradeSubEl = document.getElementById('upgrade-sub')!;
+const upgradeNextEl = document.getElementById('upgrade-next')!;
+const pactBtn = document.getElementById('pact-btn') as HTMLButtonElement;
+const endlessBtn = document.getElementById('endless-btn')!;
+const hordeBadge = document.getElementById('horde-badge')!;
 
 const dailyBtn = document.getElementById('daily-btn')!;
 const dailyBadge = document.getElementById('daily-badge')!;
@@ -169,10 +180,12 @@ function showUnitInfo(unit: Unit | null): void {
   unitInfo.classList.remove('faded');
   if (!unit) return;
   unitInfoFadeTimer = window.setTimeout(() => unitInfo.classList.add('faded'), UNIT_INFO_FADE_MS);
-  unitInfoTitle.textContent = `${unit.type[0].toUpperCase()}${unit.type.slice(1)}`;
+  unitInfoTitle.textContent = unit.boss ? BOSSES[unit.boss].name : `${unit.type[0].toUpperCase()}${unit.type.slice(1)}`;
   unitInfoTitle.style.color = unit.team === 'blue' ? 'var(--color-planning-blue)' : 'var(--color-planning-red)';
   let description = UNIT_ROLES[unit.type];
-  if (unit.type === 'shielder') {
+  if (unit.boss) {
+    description = BOSSES[unit.boss].description;
+  } else if (unit.type === 'shielder') {
     const remaining = Math.max(0, SHIELD_MAX_HITS - (unit.shieldHits ?? 0));
     description = remaining > 0
       ? `Blocks ${remaining} more frontal hit${remaining === 1 ? '' : 's'}. Its sides and rear are exposed.`
@@ -265,6 +278,21 @@ let hordeWave = 0;
 let hordeUnits: Unit[] = [];
 let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
 let hordeAppliedUpgrades = new Map<string, number>();
+/** The wave being fought, and the next one — rolled when its upgrade screen opens. */
+let hordePlan: HordeWavePlan | null = null;
+let hordeNextPlan: HordeWavePlan | null = null;
+let hordePact: Pact | null = null;
+let hordePactAccepted = false;
+/** Extra upgrade picks owed for surviving a pact wave, and picks made this break. */
+let hordeBonusPicks = 0;
+let hordePicksMade = 0;
+/** The cards on the upgrade screen, kept so a replay round trip can't re-deal them. */
+let hordeDealt: HordeUpgrade[] | null = null;
+let hordeScore = 0;
+/** The record as it stood when the run began, to spot a new personal best. */
+let hordeRecordAtStart: HordeRecord | null = null;
+/** True on the "Horde cleared" screen, until the player goes on or leaves. */
+let canContinueEndless = false;
 
 // Online state. `onlineActive` flags an online flow in progress (a search or
 // an online match), so the search can be cancelled. The playback* state is the
@@ -317,6 +345,9 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
   resultScreen.classList.toggle('active', screen === 'result');
   upgradeScreen.style.display = screen === 'horde-upgrade' ? 'flex' : 'none';
   retryEncounterBtn.style.display = screen === 'result' && canRetryEncounter ? '' : 'none';
+  const endless = screen === 'result' && canContinueEndless;
+  endlessBtn.style.display = endless ? '' : 'none';
+  rematchBtn.classList.toggle('result-primary', !endless);
 }
 
 /** Fill the result card's heading and clear extras from a previous result. */
@@ -380,15 +411,20 @@ function showRoundBanner(round: number, before: { blue: number; red: number }, a
   const parts: string[] = [];
   if (blueLost > 0) parts.push(`${vsComputer ? 'You' : 'Blue'} lost ${blueLost}`);
   if (redLost > 0) parts.push(`${vsComputer ? 'Enemy' : 'Red'} lost ${redLost}`);
-  roundBannerTitle.textContent = `Round ${round - 1} over`;
-  roundBannerDetail.textContent = parts.length > 0 ? parts.join(' · ') : 'No casualties';
+  flashBanner(`Round ${round - 1} over`, parts.length > 0 ? parts.join(' · ') : 'No casualties');
+  audio.play('round-end');
+}
+
+/** Show the between-rounds card briefly. */
+function flashBanner(title: string, detail: string): void {
+  roundBannerTitle.textContent = title;
+  roundBannerDetail.textContent = detail;
   roundBanner.classList.remove('show');
   void roundBanner.offsetWidth; // restart the animation
   roundBanner.classList.add('show');
   // Timed here too: with reduced motion the card has no fade-out animation.
   window.clearTimeout(roundBannerTimer);
   roundBannerTimer = window.setTimeout(hideRoundBanner, ROUND_BANNER_MS);
-  audio.play('round-end');
 }
 
 function hideRoundBanner(): void {
@@ -410,6 +446,10 @@ function onPhaseChange(phase: TurnPhase): void {
       : 'var(--color-planning-red)';
     planningLabel.textContent = `${team} Planning`;
     if (tutorialLesson !== null) planningLabel.textContent = TUTORIAL_LESSONS[tutorialLesson].title;
+    if (hordeActive && hordePlan) {
+      const detail = describePlan(hordePlan);
+      planningLabel.textContent = `Wave ${hordePlan.wave}${detail ? ` · ${detail}` : ''}`;
+    }
     planningLabel.style.color = color;
     planningOverlay.classList.add('active');
     confirmBtn.classList.add('active');
@@ -484,7 +524,7 @@ function onGameEvent(
 
     // Update wave HUD with live enemy count during horde
     if (hordeActive) {
-      waveCounterEl.textContent = `Wave ${hordeWave}/${HORDE_MAX_WAVES}`;
+      waveCounterEl.textContent = hordeWaveLabel();
     }
 
     if (ctfActive && engine) {
@@ -522,7 +562,14 @@ function onGameEvent(
     hordeUnits = engine!.getUnits().filter(u => u.team === 'blue' && u.alive);
     healAllBlue(hordeUnits);
 
-    if (hordeWave >= HORDE_MAX_WAVES) {
+    const cleared = hordePlan!;
+    hordeScore += waveScore(cleared);
+    recordHordeProgress(hordeWave, hordeScore);
+    hordePicksMade = 0;
+    hordeBonusPicks = cleared.curse ? 1 : 0;
+
+    if (hordeWave === HORDE_MAX_WAVES) {
+      recordHordeClear();
       showHordeResult(true);
     } else {
       showUpgradeSelection();
@@ -799,6 +846,16 @@ function startHorde(): void {
   hordeActive = true;
   hordeWave = 0;
   hordeAppliedUpgrades = new Map();
+  hordePlan = null;
+  hordeNextPlan = null;
+  hordePact = null;
+  hordePactAccepted = false;
+  hordeBonusPicks = 0;
+  hordePicksMade = 0;
+  hordeDealt = null;
+  hordeScore = 0;
+  canContinueEndless = false;
+  hordeRecordAtStart = getHordeRecord();
   lastReplayData = null;
 
   // Generate map once for the whole run (before spawning so units avoid blocks)
@@ -810,13 +867,33 @@ function startHorde(): void {
   hordeUnits = createMissionArmy('blue', randomHordeStartingArmy(), allBlocks);
 
   waveCounterEl.style.display = '';
-  startNextHordeWave();
+  startNextHordeWave(buildWavePlan(1));
 }
 
-function startNextHordeWave(): void {
-  hordeWave++;
-  const waveDef = HORDE_WAVES[hordeWave - 1];
-  if (!waveDef) return;
+function hordeWaveLabel(): string {
+  return hordeWave > HORDE_MAX_WAVES ? `Wave ${hordeWave} · Endless` : `Wave ${hordeWave}/${HORDE_MAX_WAVES}`;
+}
+
+/** "Frenzy (enemies move 30% faster)", or the boss's name. */
+function describeWaveDetail(plan: HordeWavePlan): string {
+  const parts = plan.modifiers.map(id => {
+    const mod = WAVE_MODIFIERS[id];
+    return `${mod.label} (${mod.description.toLowerCase()})`;
+  });
+  if (plan.boss) parts.unshift(`Boss: ${BOSSES[plan.boss].name}`);
+  return parts.join(' · ');
+}
+
+/** Announce a boss or modified wave as it starts. */
+function showWaveBanner(plan: HordeWavePlan): void {
+  const detail = describePlan(plan);
+  if (detail) flashBanner(plan.boss ? `Wave ${plan.wave} · Boss` : `Wave ${plan.wave}`, detail);
+}
+
+function startNextHordeWave(plan: HordeWavePlan): void {
+  hordeWave = plan.wave;
+  hordePlan = plan;
+  hordeNextPlan = null;
 
   engine?.stop();
   applyTheme();
@@ -825,7 +902,7 @@ function startNextHordeWave(): void {
     horde: true,
     cinematic: !getSettings().reducedMotion,
     hordeBlueUnits: hordeUnits,
-    hordeRedArmy: waveDef.enemies,
+    hordeRedUnits: spawnHordeWave(plan, hordeMap!.obstacles, hordeMap!.elevationZones),
     hordeMap: hordeMap!,
     onInspectUnit: showUnitInfo,
   });
@@ -836,13 +913,61 @@ function startNextHordeWave(): void {
   speedToggle.dataset.speed = '1';
   speedToggle.textContent = '3x';
   roundCounterEl.textContent = 'Round 1';
-  waveCounterEl.textContent = `Wave ${hordeWave}/${HORDE_MAX_WAVES}`;
+  waveCounterEl.textContent = hordeWaveLabel();
   engine.startBattle();
+  showWaveBanner(plan);
 }
 
+const UPGRADE_TAP_GUARD_MS = 350;
+
+/** The next wave as it will play, including the pact's curse once accepted. */
+function upcomingHordePlan(): HordeWavePlan {
+  return hordePactAccepted && hordePact ? withCurse(hordeNextPlan!, hordePact.curse) : hordeNextPlan!;
+}
+
+function renderUpcomingWave(): void {
+  const plan = upcomingHordePlan();
+  const detail = describeWaveDetail(plan);
+  const endless = plan.wave > HORDE_MAX_WAVES ? ' (endless)' : '';
+  upgradeNextEl.textContent = `Next: wave ${plan.wave}${endless}${detail ? ` · ${detail}` : ''}`;
+
+  // Offer the pact only on the break's last pick, right before the wave starts.
+  pactBtn.hidden = !hordePact || hordeBonusPicks > 0;
+  if (!hordePact) return;
+  const curse = WAVE_MODIFIERS[hordePact.curse];
+  pactBtn.setAttribute('aria-pressed', String(hordePactAccepted));
+  pactBtn.innerHTML = `<strong><span aria-hidden="true">☠ </span>Blood pact</strong><br>`
+    + `Curse the next wave with ${curse.label} (${curse.description.toLowerCase()}). Survive it to pick 2 upgrades.`;
+}
+
+pactBtn.addEventListener('click', () => {
+  if (!hordePact) return;
+  hordePactAccepted = !hordePactAccepted;
+  audio.play('ui');
+  pulse('light');
+  renderUpcomingWave();
+});
+
 function showUpgradeSelection(): void {
-  const upgrades = pickUpgrades(hordeUnits, hordeWave, hordeAppliedUpgrades);
+  if (!hordeNextPlan) {
+    hordeNextPlan = buildWavePlan(hordeWave + 1);
+    hordePact = rollPact(hordeNextPlan);
+    hordePactAccepted = false;
+  }
+
+  const totalPicks = hordePicksMade + 1 + hordeBonusPicks;
+  upgradeTitleEl.textContent = hordePlan?.curse && hordePicksMade === 0 ? 'Pact fulfilled!' : `Wave ${hordeWave} clear!`;
+  upgradeSubEl.textContent = totalPicks > 1
+    ? `Choose an upgrade (${hordePicksMade + 1} of ${totalPicks})`
+    : 'Choose an upgrade';
+  renderUpcomingWave();
+
+  hordeDealt ??= pickUpgrades(hordeUnits, hordeWave, hordeAppliedUpgrades);
+  const upgrades = hordeDealt;
   upgradeCardsEl.innerHTML = '';
+  // A bonus pick deals new cards where the old ones were: ignore a double tap
+  // so it can't spend the next pick (and start the wave) unseen.
+  const shownAt = performance.now();
 
   for (const upgrade of upgrades) {
     const card = document.createElement('div');
@@ -857,6 +982,8 @@ function showUpgradeSelection(): void {
       ${unitTag}
     `;
     card.addEventListener('click', () => {
+      if (performance.now() - shownAt < UPGRADE_TAP_GUARD_MS) return;
+      hordeDealt = null;
       const allBlocks = hordeMap!.obstacles;
       hordeAppliedUpgrades.set(upgrade.id, (hordeAppliedUpgrades.get(upgrade.id) ?? 0) + 1);
       const prevCount = hordeUnits.length;
@@ -865,8 +992,17 @@ function showUpgradeSelection(): void {
         applyUpgradesToUnit(hordeUnits[hordeUnits.length - 1], hordeAppliedUpgrades);
       }
       repositionBlueUnits(hordeUnits, allBlocks);
+      if (hordeBonusPicks > 0) {
+        hordeBonusPicks--;
+        hordePicksMade++;
+        showUpgradeSelection();
+        return;
+      }
+      const plan = upcomingHordePlan();
+      hordePact = null;
+      hordePactAccepted = false;
       showScreen('battle');
-      startNextHordeWave();
+      startNextHordeWave(plan);
     });
     upgradeCardsEl.appendChild(card);
   }
@@ -880,20 +1016,30 @@ function showUpgradeSelection(): void {
 function showHordeResult(victory: boolean): void {
   engine?.stop();
 
+  const cleared = victory ? hordeWave : hordeWave - 1;
+  const endless = hordeWave > HORDE_MAX_WAVES;
   if (victory) {
     setResultHeading('Horde cleared', `All ${HORDE_MAX_WAVES} waves survived`, 'var(--color-result-horde-win)');
   } else {
-    setResultHeading('Defeated', `Fallen on wave ${hordeWave}`, 'var(--color-result-red)');
+    setResultHeading('Defeated', `Fallen on ${endless ? 'endless ' : ''}wave ${hordeWave}`, 'var(--color-result-red)');
   }
   audio.play(victory ? 'victory' : 'defeat');
   pulse('heavy');
 
-  const survivors = hordeUnits.filter(u => u.alive).length;
-  resultStatsEl.innerHTML = [
-    `Waves completed: ${victory ? HORDE_MAX_WAVES : hordeWave - 1}/${HORDE_MAX_WAVES}`,
-    `Survivors: ${survivors}`,
-  ].join('<br>');
+  const lines = [
+    `Waves cleared: ${cleared}${endless ? '' : `/${HORDE_MAX_WAVES}`}`,
+    `Score: ${hordeScore.toLocaleString()}`,
+  ];
+  if (victory) lines.push(`Survivors: ${hordeUnits.filter(u => u.alive).length}`);
+  resultStatsEl.innerHTML = lines.join('<br>');
 
+  const before = hordeRecordAtStart ?? getHordeRecord();
+  const record = getHordeRecord();
+  resultRecordEl.textContent = hordeScore > before.bestScore || cleared > before.bestWave
+    ? '🏆 New personal best!'
+    : record.bestWave > 0 ? `Best: ${record.bestWave} waves · ${record.bestScore.toLocaleString()} pts` : '';
+
+  canContinueEndless = victory;
   rematchBtn.textContent = 'Try Again';
   newBattleBtn.textContent = 'Back';
   replayBtn.style.display = lastReplayData ? '' : 'none';
@@ -901,6 +1047,12 @@ function showHordeResult(victory: boolean): void {
 
   showScreen('result');
 }
+
+endlessBtn.addEventListener('click', () => {
+  if (!hordeActive || !canContinueEndless) return;
+  canContinueEndless = false;
+  showUpgradeSelection();
+});
 
 // --- Menu: settings, difficulty, daily challenge ---
 
@@ -1008,6 +1160,9 @@ function refreshMenuMeta(): void {
         + (record.bestStreak > 1 ? ` · best ${record.bestStreak}` : '')
       : '';
   }
+  const horde = getHordeRecord();
+  hordeBadge.hidden = horde.bestWave === 0;
+  hordeBadge.textContent = `best wave ${horde.bestWave}`;
   const today = getDailyChallenge();
   const result = getDailyResult(today.date);
   const streak = getDailyStreak(today.date);
@@ -1186,6 +1341,16 @@ newBattleBtn.addEventListener('click', () => {
   hordeUnits = [];
   hordeMap = null;
   hordeAppliedUpgrades = new Map();
+  hordePlan = null;
+  hordeNextPlan = null;
+  hordePact = null;
+  hordePactAccepted = false;
+  hordeBonusPicks = 0;
+  hordePicksMade = 0;
+  hordeDealt = null;
+  hordeScore = 0;
+  hordeRecordAtStart = null;
+  canContinueEndless = false;
   waveCounterEl.style.display = 'none';
 
   ctfActive = false;

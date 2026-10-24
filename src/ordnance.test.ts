@@ -144,7 +144,7 @@ describe('rocketeer', () => {
     veteran.rocketFired = true;
     veteran.rocketPath = [{ x: 500, y: 100 }];
     const e = new GameEngine(null, () => {}, {
-      horde: true, hordeBlueUnits: [veteran], hordeRedArmy: [{ type: 'zombie', count: 1 }],
+      horde: true, hordeBlueUnits: [veteran], hordeRedUnits: [createUnit('red_zombie_0', 'zombie', 'red', { x: 500, y: 100 })],
       hordeMap: { obstacles: [], elevationZones: [] },
     });
     e.startBattle();
