@@ -10,3 +10,5 @@ dist
 /.desloppify/
 /output/
 deno.lock
+/.aws
+/supabase/.temp/
