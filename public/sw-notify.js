@@ -2,15 +2,18 @@
 // Android Chrome requires ServiceWorkerRegistration.showNotification()
 // instead of new Notification().
 
-// Web Push: "your turn" nudges for async matches (payload from notify-turn fn).
+// Web Push: turn alerts for online matches (payload from the match-referee function).
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) { /* non-JSON */ }
   const title = data.title || '7 Seconds';
   const body = data.body || "It's your turn to plan!";
   const url = data.url || '/';
+  // One alert per match: a newer one replaces the older.
+  const options = { body, data: { url } };
+  if (typeof data.tag === 'string') { options.tag = data.tag; options.renotify = true; }
   event.waitUntil(
-    self.registration.showNotification(title, { body, data: { url } })
+    self.registration.showNotification(title, options)
   );
 });
 

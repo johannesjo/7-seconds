@@ -9,3 +9,4 @@ dist
 !store-assets/*.png
 /.desloppify/
 /output/
+deno.lock

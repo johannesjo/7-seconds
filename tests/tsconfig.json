@@ -1,0 +1,9 @@
+{
+  // Integration tests that run Node tools (psql). Kept out of the app's
+  // compilation so Node's globals never leak into browser code.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["vitest/globals", "node"]
+  },
+  "include": ["."]
+}

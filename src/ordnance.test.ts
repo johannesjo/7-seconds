@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { GameEngine } from './game';
+import { planRocket } from './ai-planner';
 import { hashPaths } from './online-async-core';
 import type { PathList } from './online-async-core';
 import type { OnlineGameState } from './online-types';
@@ -168,12 +169,9 @@ describe('rocketeer', () => {
     e.startBattle();
     // Plan from a fixed launch point where the boxed-in b1 is the nearest enemy.
     const k = e.getUnits().find(u => u.id === 'k') as Unit;
-    k.waypoints = [];
-    (e as unknown as { planAiRocket(u: Unit, enemies: Unit[]): void })
-      .planAiRocket(k, e.getUnits().filter(u => u.team === 'blue'));
-    const path = k.rocketPath ?? [];
+    const path = planRocket(k, [], e.getUnits().filter(u => u.team === 'blue'), box);
     expect(path.length).toBeGreaterThan(0);
-    let prev = k.waypoints[k.waypoints.length - 1] ?? k.pos;
+    let prev = k.pos;
     for (const p of path) {
       expect(box.some(o => segmentHitsRect(prev, p, o, k.projectileRadius))).toBe(false);
       prev = p;
@@ -190,10 +188,7 @@ describe('rocketeer', () => {
     const e = new GameEngine(null, () => {}, { aiMode: true, initialState: s, seed: 3 });
     e.startBattle();
     const k = e.getUnits().find(u => u.id === 'k') as Unit;
-    k.waypoints = [];
-    (e as unknown as { planAiRocket(u: Unit, enemies: Unit[]): void })
-      .planAiRocket(k, e.getUnits().filter(u => u.team === 'blue'));
-    expect(k.rocketPath).toEqual([]);
+    expect(planRocket(k, [], e.getUnits().filter(u => u.team === 'blue'), [])).toEqual([]);
     e.stop();
   });
 
