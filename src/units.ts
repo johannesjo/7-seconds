@@ -223,7 +223,7 @@ export function flankScore(attackerPos: Vec2, targetPos: Vec2, targetGunAngle: n
 }
 
 /** Pick a random army composition with weighted unit selection. */
-export function generateRandomComposition(): { type: UnitType; count: number }[] {
+export function generateRandomComposition(random: () => number = Math.random): { type: UnitType; count: number }[] {
   const pool: { type: UnitType; weight: number }[] = [
     { type: 'soldier', weight: 2.5 },
     { type: 'sniper', weight: 1 },
@@ -233,11 +233,11 @@ export function generateRandomComposition(): { type: UnitType; count: number }[]
   ];
   const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
 
-  const unitCount = 3 + Math.floor(Math.random() * 3); // 3, 4, or 5
+  const unitCount = 3 + Math.floor(random() * 3); // 3, 4, or 5
 
   const counts = new Map<UnitType, number>();
   for (let i = 0; i < unitCount; i++) {
-    let roll = Math.random() * totalWeight;
+    let roll = random() * totalWeight;
     for (const { type, weight } of pool) {
       roll -= weight;
       if (roll <= 0) {

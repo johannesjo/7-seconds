@@ -4,6 +4,19 @@ import { Vec2, Team, ReplayEvent } from './types';
 import { Theme, NIGHT_THEME } from './theme';
 import { FLANK_DAMAGE_MULTIPLIER, MAP_WIDTH, MAP_HEIGHT } from './constants';
 
+/** Gameplay moments the UI layer turns into sound, vibration and camera shake.
+ *  Emitted for live battles and replays alike, since both draw through here. */
+export type FeedbackCue =
+  | { type: 'shot'; heavy: boolean }
+  | { type: 'launch'; weapon: 'shell' | 'rocket' }
+  | { type: 'hit'; damage: number }
+  | { type: 'kill'; pos: Vec2 }
+  | { type: 'explosion'; pos: Vec2; radius: number }
+  | { type: 'shield-break' };
+
+/** Damage at or above which a bullet reads as a heavy (sniper) shot. */
+const HEAVY_SHOT_DAMAGE = 25;
+
 interface Effect {
   update(dt: number): boolean; // false = expired
 }
@@ -477,6 +490,7 @@ export class EffectsManager {
   private theme: Theme = NIGHT_THEME;
   private cueTime = 0;
   private flankCueTimes = new Map<string, number>();
+  onCue: ((cue: FeedbackCue) => void) | null = null;
 
   /** Without a pixiRenderer (headless/tests) stains stay as plain Graphics. */
   constructor(stage: Container, private pixiRenderer: PixiRenderer | null = null) {
@@ -509,6 +523,7 @@ export class EffectsManager {
   addKillText(pos: Vec2, team: Team): void {
     const color = team === 'blue' ? this.theme.blueKill : this.theme.redKill;
     this.effects.push(new KillText(this.container, pos, color));
+    this.onCue?.({ type: 'kill', pos });
   }
 
   addFlankCue(pos: Vec2, projectileAngle: number, targetId?: string): void {
@@ -524,12 +539,14 @@ export class EffectsManager {
   addShieldBreakCue(pos: Vec2, facingAngle: number): void {
     this.effects.push(new CombatCue(this.container, pos, facingAngle, 'shield-break',
       this.theme.shieldBreakCue, this.theme.shieldBreakText, this.theme.bg));
+    this.onCue?.({ type: 'shield-break' });
   }
 
-  addMuzzleFlash(pos: Vec2, angle: number, radius: number): void {
+  addMuzzleFlash(pos: Vec2, angle: number, radius: number, damage = 0, weapon?: 'shell' | 'rocket'): void {
     const tipX = pos.x + Math.cos(angle) * (radius + 4);
     const tipY = pos.y + Math.sin(angle) * (radius + 4);
     this.effects.push(new MuzzleFlash(this.container, { x: tipX, y: tipY }, this.theme.muzzleFlash, this.theme.muzzleCore));
+    this.onCue?.(weapon ? { type: 'launch', weapon } : { type: 'shot', heavy: damage >= HEAVY_SHOT_DAMAGE });
   }
 
   addRoundStartFlash(width: number, height: number): void {
@@ -542,9 +559,11 @@ export class EffectsManager {
       this.theme.bomber,
       this.theme.muzzleCore,
     ));
+    this.onCue?.({ type: 'explosion', pos, radius });
   }
 
   addBloodSpray(pos: Vec2, angle: number, team: Team, damage: number): void {
+    this.onCue?.({ type: 'hit', damage });
     const bloodColors = team === 'blue' ? this.theme.blueBlood : this.theme.redBlood;
     const stainColor = team === 'blue' ? this.theme.blueStain : this.theme.redStain;
     const aMul = this.theme.bloodAlpha;
@@ -659,7 +678,7 @@ export class EffectsManager {
   dispatchEvents(events: ReplayEvent[], highlightDecisiveHits = false): void {
     for (const event of events) {
       if (event.type === 'fire') {
-        this.addMuzzleFlash(event.pos, event.angle, 6);
+        this.addMuzzleFlash(event.pos, event.angle, 6, event.damage, event.weapon);
       } else if (event.type === 'hit') {
         const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
         const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;

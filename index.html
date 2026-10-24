@@ -78,6 +78,10 @@
       --color-upgrade-heading: #ff8844;
       --color-upgrade-card-hover-border: #ff8844;
 
+      /* Cards (result, round banner) */
+      --color-card-bg: #1b1b2e;
+      --color-card-shadow: rgba(0,0,0,0.5);
+
       /* Result */
       --color-result-blue: #4a9eff;
       --color-result-red: #ff4a4a;
@@ -104,7 +108,7 @@
       justify-content: safe center;
       gap: 24px;
       padding: calc(32px + var(--sat)) 32px calc(32px + var(--sab));
-      background: var(--color-overlay);
+      background: var(--color-overlay-heavy);
       z-index: 15;
       overflow-y: auto;
     }
@@ -120,28 +124,76 @@
       text-align: center;
       line-height: 1.5;
     }
-    #battle-btn, #ai-btn {
-      padding: 12px 36px;
-      font-size: 16px;
+    /* Main menu */
+    .menu { display: flex; flex-direction: column; gap: 18px; width: min(300px, 100%); }
+    .menu-group { display: flex; flex-direction: column; gap: 8px; }
+    .menu-heading {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      opacity: 0.55;
+      text-align: center;
+    }
+    .menu-btn {
+      position: relative;
+      width: 100%;
+      min-height: 46px;
+      padding: 10px 20px;
+      font: inherit;
+      font-size: 15px;
       font-weight: bold;
       text-transform: uppercase;
-      letter-spacing: 3px;
+      letter-spacing: 2px;
       background: var(--color-btn-bg);
       color: var(--color-text);
       border: 2px solid var(--color-btn-border);
-      border-radius: 4px;
+      border-radius: 6px;
       cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
     }
-    #battle-btn:hover, #ai-btn:hover, #online-async-btn:hover, #online-random-btn:hover, #horde-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
-    #tutorial-btn {
-      padding: 10px 24px;
+    .menu-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); }
+    .menu-btn:active { transform: scale(0.98); }
+    .menu-btn--primary { min-height: 54px; font-size: 18px; letter-spacing: 4px; }
+    .menu-btn--horde { background: var(--color-btn-horde-bg); color: var(--color-btn-horde-text); border-color: var(--color-btn-horde-border); }
+    .menu-btn--daily { border-style: dashed; }
+    .menu-btn--online { background: var(--color-btn-green-bg); color: var(--color-btn-green-text); border-color: var(--color-btn-green-border); }
+    .menu-btn--quiet { font-weight: normal; text-transform: none; letter-spacing: 0.5px; border-width: 1px; min-height: 40px; }
+    .menu-badge { font-size: 11px; letter-spacing: 0; text-transform: none; font-weight: normal; opacity: 0.8; margin-left: 4px; }
+    #prompt-screen .menu-meta { font-size: 12px; margin-top: -2px; }
+    #prompt-screen .menu-meta:empty { display: none; }
+    .segmented { display: flex; border: 1px solid var(--color-btn-border); border-radius: 6px; overflow: hidden; }
+    .segmented button {
+      flex: 1;
+      min-height: 34px;
       font: inherit;
+      font-size: 13px;
+      background: transparent;
       color: var(--color-text);
-      background: var(--color-btn-bg);
-      border: 1px solid var(--color-btn-border);
-      border-radius: 4px;
+      border: 0;
       cursor: pointer;
+      opacity: 0.65;
     }
+    .segmented button + button { border-left: 1px solid var(--color-btn-border); }
+    .segmented button[aria-checked="true"] { background: var(--color-btn-active-bg); opacity: 1; font-weight: bold; }
+    .settings-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 360px; }
+    .setting-toggle {
+      min-height: 32px;
+      padding: 4px 12px;
+      font: inherit;
+      font-size: 12px;
+      color: var(--color-text);
+      background: transparent;
+      border: 1px solid var(--color-btn-border);
+      border-radius: 16px;
+      cursor: pointer;
+      opacity: 0.55;
+    }
+    .setting-toggle[aria-pressed="true"], #theme-toggle { opacity: 0.9; background: var(--color-btn-bg); }
+    .setting-toggle[aria-pressed="true"]::before { content: '✓ '; }
+    .legal-links { font-size: 12px; opacity: 0.6; display: flex; gap: 12px; }
+    .legal-links a { color: inherit; text-decoration: underline; }
+    button:focus-visible { outline: 3px solid var(--color-control-active-border); outline-offset: 2px; }
     .beta-tag { font-size: 10px; vertical-align: super; opacity: 0.6; letter-spacing: 1px; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -330,6 +382,9 @@
     #unit-info[data-placement="top"] { top: calc(52px + var(--sat)); bottom: auto; }
     #planning-overlay.tutorial ~ #unit-info[data-placement="top"] { top: auto; bottom: calc(48px + var(--sab)); }
     #unit-info-title { display: block; font-size: 13px; margin-bottom: 2px; }
+    /* Fades out after a moment so it never hides the enemies being planned against */
+    #unit-info { transition: opacity 0.4s ease; }
+    #unit-info.faded { opacity: 0.18; }
     @media (max-width: 600px), (max-height: 500px) {
       #unit-info { padding: 7px 10px; text-align: left; line-height: 1.4; }
       #unit-info-title { display: inline; font-size: inherit; margin: 0 4px 0 0; }
@@ -377,27 +432,85 @@
     #result-screen {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 16px;
-      padding-top: var(--sat);
+      padding: calc(16px + var(--sat)) 16px calc(16px + var(--sab));
       background: var(--color-overlay-medium);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
       z-index: 20;
+      overflow-y: auto;
     }
-    #result-screen h2 { font-size: 64px; letter-spacing: 4px; }
-    #result-screen .stats { font-size: 18px; opacity: 0.8; }
-    #result-screen .buttons { display: flex; gap: 16px; margin-top: 16px; }
+    .result-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      width: min(440px, 100%);
+      padding: 28px 24px 22px;
+      text-align: center;
+      background: var(--color-card-bg);
+      border: 1px solid var(--color-btn-border);
+      border-radius: 10px;
+      box-shadow: 0 12px 40px var(--color-card-shadow);
+    }
+    #result-screen h2 { font-size: 52px; letter-spacing: 4px; line-height: 1.1; text-transform: uppercase; }
+    #winner-sub { font-size: 15px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.7; }
+    #winner-sub:empty, #result-record:empty { display: none; }
+    #result-screen .stats { font-size: 16px; opacity: 0.85; }
+    #result-record { font-size: 13px; opacity: 0.75; }
+    #result-screen .buttons { display: flex; flex-direction: column; align-items: stretch; gap: 10px; margin-top: 8px; width: min(280px, 100%); }
     #result-screen button {
-      padding: 12px 32px;
-      font-size: 16px;
+      min-height: 44px;
+      padding: 10px 24px;
+      font: inherit;
+      font-size: 15px;
       background: var(--color-btn-bg);
       color: var(--color-text);
       border: 1px solid var(--color-btn-border);
-      border-radius: 4px;
+      border-radius: 6px;
       cursor: pointer;
     }
     #result-screen button:hover { background: var(--color-btn-hover-bg); }
+    #result-screen .result-primary { font-weight: bold; letter-spacing: 2px; text-transform: uppercase; border-width: 2px; }
+    .result-secondary { display: flex; justify-content: center; gap: 4px; }
+    #result-screen .result-link { min-height: 36px; padding: 6px 12px; font-size: 13px; background: transparent; border-color: transparent; text-decoration: underline; opacity: 0.75; }
+
+    /* Between-round banner */
+    #round-banner {
+      display: none;
+      position: absolute;
+      top: 38%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 12px 28px;
+      background: var(--color-card-bg);
+      border: 1px solid var(--color-btn-border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px var(--color-card-shadow);
+      pointer-events: none;
+      z-index: 13;
+      text-align: center;
+    }
+    #round-banner.show { display: flex; animation: bannerInOut 1.6s ease forwards; }
+    #round-banner-title { font-size: 22px; letter-spacing: 3px; text-transform: uppercase; }
+    #round-banner-detail { font-size: 13px; opacity: 0.8; }
+    @keyframes bannerInOut {
+      0% { opacity: 0; transform: translate(-50%, -40%) scale(0.92); }
+      12% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      80% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* Screen transitions */
+    #prompt-screen.active, #result-screen.active { animation: screenFade 0.22s ease-out; }
+    #prompt-screen.active > *, .result-card { animation: screenRise 0.28s ease-out; }
+    @keyframes screenFade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes screenRise { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+    body.screen-prompt #battle-hud { visibility: hidden; }
 
     /* Upgrade screen */
     #upgrade-screen {
@@ -490,12 +603,7 @@
       #prompt-screen { padding: calc(24px + var(--sat)) 16px calc(24px + var(--sab)); gap: 16px; }
       #prompt-screen h1 { font-size: 28px; letter-spacing: 2px; }
       #prompt-screen p { font-size: 13px; padding: 0 8px; }
-      #prompt-screen .btn-row { flex-wrap: wrap; justify-content: center; }
-      #prompt-screen .btn-row button {
-        padding: 12px 24px !important;
-        font-size: 16px !important;
-        letter-spacing: 2px !important;
-      }
+      .menu { gap: 14px; }
       #battle-hud { font-size: 11px; padding: calc(6px + var(--sat)) 8px 6px; gap: 4px; }
       #battle-hud > div { gap: 6px; }
       #round-timer { font-size: 22px; }
@@ -503,15 +611,21 @@
       #planning-label { font-size: 16px; letter-spacing: 1px; }
       #planning-instructions { display: none; }
       #cover-screen { font-size: 24px; letter-spacing: 2px; padding: 0 16px; text-align: center; }
-      #result-screen { padding: 0 16px; }
-      #result-screen h2 { font-size: 32px; letter-spacing: 2px; }
+      #result-screen h2 { font-size: 34px; letter-spacing: 2px; }
+      .result-card { padding: 22px 16px 16px; gap: 10px; }
       #result-screen .stats { font-size: 15px; }
-      #result-screen .buttons { flex-wrap: wrap; justify-content: center; }
-      #result-screen button { min-height: 48px; padding: 10px 20px; font-size: 14px; }
+      #result-screen button { min-height: 46px; font-size: 14px; }
       .speed-controls button { min-height: 36px; padding: 6px 10px; font-size: 11px; }
       .upgrade-card { width: 160px; padding: 14px 16px; }
       .upgrade-card .card-label { font-size: 15px; }
     }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+      #round-banner.show { animation: none; opacity: 1; }
+    }
+    body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    body.reduced-motion #round-banner.show { animation: none; opacity: 1; }
 
     .replay-btn-upgrade { background: transparent; color: inherit; border: 1px solid var(--color-btn-border); opacity: 0.6; }
 
@@ -568,6 +682,9 @@
 
       --color-upgrade-heading: #886633;
       --color-upgrade-card-hover-border: #886633;
+
+      --color-card-bg: #fbf7ec;
+      --color-card-shadow: rgba(68,51,34,0.18);
     }
     body.day-mode .replay-btn-upgrade { background: var(--color-btn-bg); color: var(--color-text-muted); border-color: var(--color-btn-border); opacity: 0.8; }
     body.day-mode #online-status { font-weight: bold; font-size: 18px; }
@@ -588,9 +705,10 @@
   </div>
   <script>
     (function() {
-      // Apply day-mode early so age gate renders with correct theme
-      var cb = document.getElementById('day-mode-cb');
-      if (cb && cb.checked) document.body.classList.add('day-mode');
+      // Apply day-mode early so the age gate renders with the saved theme
+      var dayMode = true;
+      try { dayMode = JSON.parse(localStorage.getItem('7s-settings') || '{}').dayMode !== false; } catch (e) {}
+      if (dayMode) document.body.classList.add('day-mode');
       if (!localStorage.getItem('7s-age-verified')) {
         var gate = document.getElementById('age-gate');
         gate.style.display = 'flex';
@@ -613,31 +731,46 @@
 
   <div id="prompt-screen" class="screen active">
     <h1>7 Seconds</h1>
-    <p>Draw paths for your units, then watch them fight. Blue plans first, then Red.</p>
-    <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
-      <button id="ai-btn">vs AI</button>
-      <button id="tutorial-btn">Learn to play</button>
-      <button id="horde-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-horde-bg);color:var(--color-btn-horde-text);border:2px solid var(--color-btn-horde-border);border-radius:4px;cursor:pointer">Horde</button>
-      <button id="online-async-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Friend <span id="my-matches-badge" style="display:none;font-size:12px;letter-spacing:0">0 turns</span></button>
-      <button id="online-random-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-green-bg);color:var(--color-btn-green-text);border:2px solid var(--color-btn-green-border);border-radius:4px;cursor:pointer">Play a Stranger <span class="beta-tag">BETA</span></button>
-      <button id="battle-btn">Local PvP</button>
+    <p class="tagline">Draw paths for your units, then watch them fight.</p>
+    <div class="menu">
+      <section class="menu-group" aria-labelledby="menu-solo-heading">
+        <h2 class="menu-heading" id="menu-solo-heading">Single player</h2>
+        <button id="ai-btn" class="menu-btn menu-btn--primary">vs AI</button>
+        <div id="difficulty-picker" class="segmented" role="radiogroup" aria-label="AI difficulty">
+          <button type="button" role="radio" data-difficulty="easy" aria-checked="false">Easy</button>
+          <button type="button" role="radio" data-difficulty="normal" aria-checked="true">Normal</button>
+          <button type="button" role="radio" data-difficulty="hard" aria-checked="false">Hard</button>
+        </div>
+        <p id="ai-record" class="menu-meta"></p>
+        <button id="daily-btn" class="menu-btn menu-btn--daily">Daily challenge <span id="daily-badge" class="menu-badge" hidden></span></button>
+        <button id="horde-btn" class="menu-btn menu-btn--horde">Horde</button>
+        <button id="tutorial-btn" class="menu-btn menu-btn--quiet">Learn to play</button>
+      </section>
+      <section class="menu-group" aria-labelledby="menu-online-heading">
+        <h2 class="menu-heading" id="menu-online-heading">Online</h2>
+        <button id="online-async-btn" class="menu-btn menu-btn--online">Play a Friend <span id="my-matches-badge" class="menu-badge" style="display:none">0 turns</span></button>
+        <button id="online-random-btn" class="menu-btn menu-btn--online">Play a Stranger <span class="beta-tag">BETA</span></button>
+      </section>
+      <section class="menu-group" aria-labelledby="menu-local-heading">
+        <h2 class="menu-heading" id="menu-local-heading">Same device</h2>
+        <button id="battle-btn" class="menu-btn">Local PvP</button>
+      </section>
+      <!-- CTF buttons hidden for now -->
+      <div hidden>
+        <button id="ctf-ai-btn" class="menu-btn">CTF vs AI</button>
+        <button id="ctf-pvp-btn" class="menu-btn">CTF vs Player</button>
+      </div>
     </div>
-    <!-- CTF buttons hidden for now -->
-    <div class="btn-row" style="display:none;flex-direction:column;align-items:center;gap:12px">
-      <button id="ctf-ai-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-bg);color:var(--color-text);border:2px solid var(--color-btn-border);border-radius:4px;cursor:pointer">CTF vs AI</button>
-      <button id="ctf-pvp-btn" style="padding:12px 36px;font-size:16px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;background:var(--color-btn-bg);color:var(--color-text);border:2px solid var(--color-btn-border);border-radius:4px;cursor:pointer">CTF vs Player</button>
+    <div class="settings-row" role="group" aria-label="Settings">
+      <button type="button" class="setting-toggle" data-setting="sound" aria-pressed="true">Sound</button>
+      <button type="button" class="setting-toggle" data-setting="music" aria-pressed="true">Music</button>
+      <button type="button" class="setting-toggle" data-setting="haptics" aria-pressed="true">Vibration</button>
+      <button type="button" class="setting-toggle" data-setting="reducedMotion" aria-pressed="false" title="Turn off screen shake, slow motion and zoom">Reduce motion</button>
+      <button type="button" id="theme-toggle" class="setting-toggle" aria-label="Switch theme">Paper</button>
     </div>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
-      <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
-        <input type="checkbox" id="day-mode-cb" style="cursor:pointer" checked />
-        Paper day mode
-      </label>
-    </div>
-    <div style="font-size:12px;opacity:0.6;margin-top:12px;display:flex;gap:12px">
-      <a href="privacy-policy.html" rel="noopener"
-         style="color:inherit;text-decoration:underline">Privacy Policy</a>
-      <a href="terms.html" rel="noopener"
-         style="color:inherit;text-decoration:underline">Terms of Service</a>
+    <div class="legal-links">
+      <a href="privacy-policy.html" rel="noopener">Privacy Policy</a>
+      <a href="terms.html" rel="noopener">Terms of Service</a>
     </div>
   </div>
 
@@ -659,6 +792,7 @@
     <div id="pixi-container"></div>
 
     <div id="count-in" aria-hidden="true"></div>
+    <div id="round-banner" role="status" aria-live="polite"><strong id="round-banner-title"></strong><span id="round-banner-detail"></span></div>
 
     <div id="planning-overlay">
       <span id="planning-label">Blue Planning</span>
@@ -736,13 +870,21 @@
   </div>
 
   <div id="result-screen" class="screen">
-    <h2 id="winner-text">Blue Wins!</h2>
-    <div class="stats" id="result-stats"></div>
-    <div class="buttons" style="flex-direction:column;align-items:center">
-      <button id="retry-encounter-btn" style="display:none" title="Retry the same map and armies from round 1">Try another plan</button>
-      <button id="rematch-btn" style="font-weight:bold;letter-spacing:2px;text-transform:uppercase">Rematch</button>
-      <button id="new-battle-btn" style="opacity:0.7">Back</button>
-      <button id="replay-btn" style="display:none;background:transparent;border:1px solid var(--color-btn-border);color:inherit;padding:6px 20px;font-size:13px;border-radius:4px;cursor:pointer;opacity:0.5">Watch Replay</button>
+    <div class="result-card">
+      <h2 id="winner-text">Victory</h2>
+      <p id="winner-sub"></p>
+      <div class="stats" id="result-stats"></div>
+      <p id="result-record"></p>
+      <div class="buttons">
+        <button id="rematch-btn" class="result-primary">Rematch</button>
+        <button id="retry-encounter-btn" style="display:none" title="Retry the same map and armies from round 1">Try another plan</button>
+        <button id="share-result-btn" style="display:none">Share result</button>
+        <button id="new-battle-btn">Back</button>
+        <div class="result-secondary">
+          <button id="replay-btn" class="result-link" style="display:none">Watch replay</button>
+          <button id="clip-btn" class="result-link" style="display:none" title="Record the replay as a video to share">Share clip</button>
+        </div>
+      </div>
     </div>
   </div>
 

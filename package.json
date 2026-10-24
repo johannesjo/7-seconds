@@ -12,6 +12,7 @@
     "build:edge": "node scripts/build-edge-engine.mjs",
     "test": "vitest",
     "test:run": "vitest run",
+    "screenshots": "node scripts/screenshots.mjs",
     "video:capture": "bash scripts/capture-action-videos.sh",
     "video:verify": "bash scripts/verify-action-videos.sh",
     "cap:sync": "npx cap sync",
@@ -27,6 +28,7 @@
   "dependencies": {
     "@capacitor/android": "^8.1.0",
     "@capacitor/core": "^8.1.0",
+    "@capacitor/haptics": "^8.0.2",
     "@capacitor/local-notifications": "^8.0.2",
     "@mlc-ai/web-llm": "^0.2.81",
     "@supabase/supabase-js": "^2.98.0",

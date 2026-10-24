@@ -111,6 +111,9 @@ export interface BattleResult {
   redAlive: number;
   blueKilled: number;
   redKilled: number;
+  /** Army sizes at the start of the battle. */
+  blueTotal: number;
+  redTotal: number;
   duration: number;
 }
 
@@ -169,6 +172,8 @@ export interface ReplayEvent {
   facingAngle?: number;
   /** Explosion blast radius. */
   radius?: number;
+  /** Lobbed or steered ordnance, for fire events (absent for bullets). */
+  weapon?: 'shell' | 'rocket';
 }
 
 export interface ReplayFlagSnapshot {

@@ -19,6 +19,15 @@ import { clampPathLength, validPoints } from './path-orders';
 
 const FIXED_DT = 1 / 60;
 
+export type Difficulty = 'easy' | 'normal' | 'hard';
+
+/** Simulation speed and duration of the brief freeze when a unit dies. */
+const HIT_STOP = { scale: 0.15, seconds: 0.06 };
+/** The final kill plays out in slow motion with the camera pushed in. */
+const FINAL_KILL = { scale: 0.35, delay: 1.5, zoom: 1.3 };
+/** Plain end-of-battle pause when there's no final-kill moment. */
+const END_DELAY_S = 0.6;
+
 type GameEventCallback = (
   event: 'update' | 'end' | 'phase-change' | 'wave-clear',
   data?: BattleResult | { phase: TurnPhase; timeLeft?: number; round?: number },
@@ -62,6 +71,14 @@ export class GameEngine {
   private practice?: { units: Unit[]; elevationZones: ElevationZone[]; obstacles?: Obstacle[] };
   private initialState?: OnlineGameState;
   private onInspectUnit?: (unit: Unit | null) => void;
+  private cinematic = false;
+  private difficulty: Difficulty = 'normal';
+  private layoutIndex?: number;
+  private composition?: { type: UnitType; count: number }[];
+  private slowMoTimer = 0;
+  private slowMoScale = 1;
+  private finalSlowMo = false;
+  private lastKillPos: Vec2 | null = null;
 
   constructor(renderer: Renderer | null, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
@@ -77,6 +94,13 @@ export class GameEngine {
     practice?: { units: Unit[]; elevationZones: ElevationZone[]; obstacles?: Obstacle[] };
     initialState?: OnlineGameState;
     onInspectUnit?: (unit: Unit | null) => void;
+    /** Hit-stop on kills and a slow-motion, zoomed-in final kill. */
+    cinematic?: boolean;
+    /** vs AI only: easy removes a red unit and loosens AI planning; hard adds one. */
+    difficulty?: Difficulty;
+    /** Fixed battlefield layout and armies (e.g. the daily challenge). */
+    layoutIndex?: number;
+    composition?: { type: UnitType; count: number }[];
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -91,6 +115,10 @@ export class GameEngine {
     this.practice = opts?.practice;
     this.initialState = opts?.initialState;
     this.onInspectUnit = opts?.onInspectUnit;
+    this.cinematic = opts?.cinematic ?? false;
+    this.difficulty = opts?.difficulty ?? 'normal';
+    this.layoutIndex = opts?.layoutIndex;
+    this.composition = opts?.composition;
 
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
@@ -128,7 +156,7 @@ export class GameEngine {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
     } else {
-      const battlefield = generateBattlefield();
+      const battlefield = generateBattlefield(this.layoutIndex);
       this.obstacles = battlefield.obstacles;
       this.elevationZones = battlefield.elevationZones;
     }
@@ -146,8 +174,9 @@ export class GameEngine {
         }
         this.units = [...this.hordeBlueUnits, ...redUnits];
       } else {
-        const composition = generateRandomComposition();
-        this.units = [...createArmy('blue', composition), ...createArmy('red', composition)];
+        const composition = this.composition ?? generateRandomComposition();
+        const redComposition = this.aiMode ? adjustForDifficulty(composition, this.difficulty) : composition;
+        this.units = [...createArmy('blue', composition), ...createArmy('red', redComposition)];
       }
     }
     this.projectiles = [];
@@ -210,6 +239,7 @@ export class GameEngine {
     this._phase = phase;
 
     if (phase === 'blue-planning') {
+      this.renderer?.resetCamera();
       // Reload every rocketeer and drop blue's old rocket orders here rather
       // than relying on the drawer: Horde carries units into a fresh engine
       // whose drawer doesn't know them yet.
@@ -265,6 +295,7 @@ export class GameEngine {
     const enemies = this.units.filter(u => u.alive && u.team === 'blue');
 
     if (redUnits.length === 0) return;
+    const aiRng = createRng(this.seed * 31 + this.roundNumber);
 
     const candidates = generateCandidates(
       redUnits[0],
@@ -292,11 +323,14 @@ export class GameEngine {
         scored.push({ pos: candidate, score: s });
       }
       scored.sort((a, b) => b.score - a.score);
+      // Easy AI settles for one of its better spots rather than the best one.
+      const skip = this.difficulty === 'easy' && this.aiMode && !this.hordeMode
+        ? Math.floor(aiRng() * Math.min(6, scored.length)) : 0;
 
       // Pick the best candidate whose full waypoint chain is obstacle-free
       let bestPos = unit.pos;
       let bestWaypoints: typeof unit.waypoints = [];
-      for (const { pos: candidate, score } of scored) {
+      for (const { pos: candidate, score } of scored.slice(skip)) {
         if (score === -Infinity) break;
         const detours = detourWaypoints(unit.pos, candidate, allBlockers, padding);
         const chain = [...detours, candidate];
@@ -354,9 +388,13 @@ export class GameEngine {
     if (!this.running) return;
 
     const rawDt = ticker.deltaMS / 1000;
+    // Cosmetic time scale: it paces the fixed-step simulation against real
+    // time, so results stay identical — only how fast they play out changes.
+    const timeScale = this.consumeSlowMo(rawDt);
+    const animDt = rawDt * (this.endingBattle && this.finalSlowMo ? FINAL_KILL.scale : 1);
 
     // Always render units (even during planning, need rawDt for death fade)
-    this.renderer?.renderUnits(this.units, rawDt, this.ctfState ?? undefined, this._phase === 'playing');
+    this.renderer?.renderUnits(this.units, animDt, this.ctfState ?? undefined, this._phase === 'playing');
 
     if (this.ctfState) {
       this.renderer?.renderFlags(this.ctfState);
@@ -370,7 +408,7 @@ export class GameEngine {
     // During end delay, only animate effects and dying units (no combat/movement)
     if (this.endingBattle) {
       this.endDelayTimer -= rawDt;
-      this.renderer?.effects?.update(rawDt);
+      this.renderer?.effects?.update(animDt);
       if (this.endDelayTimer <= 0) {
         this.endBattle(this.pendingWinner!);
       }
@@ -378,7 +416,7 @@ export class GameEngine {
     }
 
     // Fixed timestep accumulator: simulation runs at exactly FIXED_DT
-    this.accumulator += rawDt * this.speedMultiplier;
+    this.accumulator += rawDt * this.speedMultiplier * timeScale;
     while (this.accumulator >= FIXED_DT) {
       this.simulationStep(FIXED_DT);
       this.accumulator -= FIXED_DT;
@@ -389,7 +427,7 @@ export class GameEngine {
 
     // Render at display rate (after all simulation steps)
     this.renderer?.renderProjectiles(this.projectiles);
-    this.renderer?.effects?.update(rawDt);
+    this.renderer?.effects?.update(rawDt * timeScale);
     this.onEvent('update', { phase: 'playing', timeLeft: Math.max(0, this.roundTimer) });
   };
 
@@ -473,7 +511,17 @@ export class GameEngine {
           updateGunAngle(unit, desired, dt);
         }
         const aoeHits = bladeAoeAttack(unit, this.units, dt);
+        const fx = this.renderer?.effects ?? null;
         for (const hit of aoeHits) {
+          const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
+          const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
+          if (unitGfx) fx?.addHitFlash(unitGfx);
+          fx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+          if (hit.killed) {
+            fx?.addKillText(hit.pos, hit.team);
+            fx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+            this.noteKill(hit.pos);
+          }
           this.replayEvents.push({
             frame: this.replayFrames.length,
             type: hit.killed ? 'kill' : 'hit',
@@ -497,7 +545,7 @@ export class GameEngine {
         const projectiles = tryFireProjectile(unit, target, dt, this.elevationZones);
         if (projectiles.length > 0) {
           this.projectiles.push(...projectiles);
-          this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
+          this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, projectiles[0].damage);
           this.replayEvents.push({
             frame: this.replayFrames.length,
             type: 'fire',
@@ -539,8 +587,8 @@ export class GameEngine {
     const shells = fireMortar(unit, target, dt);
     if (shells.length === 0) return;
     this.projectiles.push(...shells);
-    this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
-    this.recordFire(unit, shells[0].damage);
+    this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, shells[0].damage, 'shell');
+    this.recordFire(unit, shells[0].damage, 'shell');
   }
 
   /** Rocketeer: face the nearest enemy; launch its drawn rocket on arrival. */
@@ -549,15 +597,15 @@ export class GameEngine {
       const rocket = launchRocket(unit);
       if (!rocket) return;
       this.projectiles.push(rocket);
-      this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
-      this.recordFire(unit, rocket.damage);
+      this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, rocket.damage, 'rocket');
+      this.recordFire(unit, rocket.damage, 'rocket');
       return;
     }
     const target = findTarget(unit, this.units, null, this.obstacles);
     if (target) updateGunAngle(unit, Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x), dt);
   }
 
-  private recordFire(unit: Unit, damage: number): void {
+  private recordFire(unit: Unit, damage: number, weapon: 'shell' | 'rocket'): void {
     this.replayEvents.push({
       frame: this.replayFrames.length,
       type: 'fire',
@@ -566,6 +614,7 @@ export class GameEngine {
       damage,
       flanked: false,
       team: unit.team,
+      weapon,
     });
   }
 
@@ -629,6 +678,7 @@ export class GameEngine {
       if (hit.killed) {
         fx?.addKillText(hit.pos, hit.team);
         fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
+        this.noteKill(hit.pos);
       }
     }
   }
@@ -642,6 +692,7 @@ export class GameEngine {
           this.recordExplosion({ pos: { ...deadUnit.pos }, radius: 80, team: deadUnit.team });
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
+            if (eh.killed) this.noteKill(eh.pos);
             this.replayEvents.push({
               frame: this.replayFrames.length,
               type: eh.killed ? 'kill' : 'hit',
@@ -673,7 +724,7 @@ export class GameEngine {
     if (capturer) {
       this.ctfState.winner = capturer;
       this.endingBattle = true;
-      this.endDelayTimer = 0.6;
+      this.endDelayTimer = END_DELAY_S;
       this.pendingWinner = capturer;
       this.projectiles = [];
       this.renderer?.renderProjectiles([]);
@@ -701,10 +752,11 @@ export class GameEngine {
         return true;
       }
       this.endingBattle = true;
-      this.endDelayTimer = 0.6;
+      this.endDelayTimer = END_DELAY_S;
       this.pendingWinner = blueAlive === 0 ? 'red' : 'blue';
       this.projectiles = [];
       this.renderer?.renderProjectiles([]);
+      this.startFinalKillMoment();
       return true;
     }
     return false;
@@ -816,6 +868,7 @@ export class GameEngine {
     this.pathDrawer?.disable();
     this.pathDrawer?.clearGraphics();
     this.renderer?.effects?.clear();
+    this.renderer?.resetCamera();
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
@@ -828,6 +881,8 @@ export class GameEngine {
       redAlive,
       blueKilled: redTotal - redAlive,
       redKilled: blueTotal - blueAlive,
+      blueTotal,
+      redTotal,
       duration: this.elapsedTime,
     });
   }
@@ -1000,5 +1055,48 @@ export class GameEngine {
     this.pathDrawer = null;
     this.renderer?.effects?.clear();
     this.renderer?.clearCtfGraphics();
+    this.renderer?.resetCamera();
   }
+
+  /** Remember where the latest kill happened and briefly freeze the action. */
+  private noteKill(pos: Vec2): void {
+    this.lastKillPos = { x: pos.x, y: pos.y };
+    if (!this.cinematic || !this.renderer || this.lockstepMode) return;
+    this.slowMoScale = HIT_STOP.scale;
+    this.slowMoTimer = HIT_STOP.seconds;
+  }
+
+  /** Slow the battle's last moment down and push the camera in on it. */
+  private startFinalKillMoment(): void {
+    if (!this.cinematic || !this.renderer || this.lockstepMode || !this.lastKillPos) return;
+    this.finalSlowMo = true;
+    this.endDelayTimer = FINAL_KILL.delay;
+    this.renderer.focusCamera(this.lastKillPos, FINAL_KILL.zoom);
+  }
+
+  private consumeSlowMo(rawDt: number): number {
+    if (this.slowMoTimer <= 0) return 1;
+    this.slowMoTimer -= rawDt;
+    return this.slowMoScale;
+  }
+}
+
+/** Shift the AI's army by one unit for easy (fewer) or hard (an extra soldier). */
+export function adjustForDifficulty(
+  composition: { type: UnitType; count: number }[],
+  difficulty: Difficulty,
+): { type: UnitType; count: number }[] {
+  const adjusted = composition.map(c => ({ ...c }));
+  const total = adjusted.reduce((sum, c) => sum + c.count, 0);
+  if (difficulty === 'easy' && total > 2) {
+    const largest = adjusted.reduce((a, b) => (b.count > a.count ? b : a));
+    largest.count--;
+    return adjusted.filter(c => c.count > 0);
+  }
+  if (difficulty === 'hard') {
+    const soldiers = adjusted.find(c => c.type === 'soldier');
+    if (soldiers) soldiers.count++;
+    else adjusted.push({ type: 'soldier', count: 1 });
+  }
+  return adjusted;
 }

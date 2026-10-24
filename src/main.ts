@@ -1,11 +1,11 @@
 import { Renderer } from './renderer';
 import { Capacitor } from '@capacitor/core';
 import { notifyLocalTurn } from './notify';
-import { GameEngine } from './game';
+import { GameEngine, type Difficulty } from './game';
 import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateBattlefield, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
 import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team } from './types';
-import { ARMY_COMPOSITION, HORDE_MAX_WAVES, ROUND_DURATION_S, MAP_HEIGHT, SHIELD_MAX_HITS } from './constants';
+import { HORDE_MAX_WAVES, ROUND_DURATION_S, MAP_HEIGHT, SHIELD_MAX_HITS } from './constants';
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
@@ -22,6 +22,13 @@ import { OnlineGameState } from './online-types';
 import { PathDrawer } from './path-drawer';
 import { recordMatchResultOnce, getOverallScore } from './online-score';
 import { createTutorialEncounter, TUTORIAL_LESSONS, tutorialObjectiveMet } from './tutorial';
+import { audio } from './audio';
+import { pulse, setHapticsEnabled } from './haptics';
+import { getSettings, updateSettings, onSettingsChange, type Settings } from './settings';
+import { getDailyChallenge, getDailyResult, recordDailyResult, getDailyStreak, formatDailyShare, type DailyChallenge } from './daily';
+import { getAiRecord, recordAiResult } from './stats';
+import { canRecordClips, startClipRecording, deliverClip, type ClipRecording } from './clip';
+import type { FeedbackCue } from './effects';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -52,7 +59,14 @@ const countInEl = document.getElementById('count-in')!;
 const roundCounterEl = document.getElementById('round-counter')!;
 
 const winnerTextEl = document.getElementById('winner-text')!;
+const winnerSubEl = document.getElementById('winner-sub')!;
 const resultStatsEl = document.getElementById('result-stats')!;
+const resultRecordEl = document.getElementById('result-record')!;
+const shareResultBtn = document.getElementById('share-result-btn')!;
+const clipBtn = document.getElementById('clip-btn') as HTMLButtonElement;
+const roundBanner = document.getElementById('round-banner')!;
+const roundBannerTitle = document.getElementById('round-banner-title')!;
+const roundBannerDetail = document.getElementById('round-banner-detail')!;
 const rematchBtn = document.getElementById('rematch-btn')!;
 const retryEncounterBtn = document.getElementById('retry-encounter-btn')!;
 const newBattleBtn = document.getElementById('new-battle-btn')!;
@@ -63,7 +77,12 @@ const upgradeScreen = document.getElementById('upgrade-screen')!;
 const upgradeCardsEl = document.getElementById('upgrade-cards')!;
 const upgradeReplayBtn = document.getElementById('upgrade-replay-btn') as HTMLButtonElement;
 
-const dayModeCb = document.getElementById('day-mode-cb') as HTMLInputElement;
+const dailyBtn = document.getElementById('daily-btn')!;
+const dailyBadge = document.getElementById('daily-badge')!;
+const aiRecordEl = document.getElementById('ai-record')!;
+const difficultyButtons = [...document.querySelectorAll<HTMLButtonElement>('#difficulty-picker [data-difficulty]')];
+const settingToggles = [...document.querySelectorAll<HTMLButtonElement>('.setting-toggle[data-setting]')];
+const themeToggle = document.getElementById('theme-toggle')!;
 const pixiContainer = document.getElementById('pixi-container')!;
 
 const ctfAiBtn = document.getElementById('ctf-ai-btn')!;
@@ -133,9 +152,16 @@ const UNIT_ROLES: Record<Unit['type'], string> = {
   rocketeer: 'No gun: drag from its orange rocket icon to draw the rocket’s flight. It launches when the rocketeer reaches the end of its path.',
 };
 
+/** How long a unit tip stays fully opaque before fading so it can't hide the board. */
+const UNIT_INFO_FADE_MS = 1800;
+let unitInfoFadeTimer: number | undefined;
+
 function showUnitInfo(unit: Unit | null): void {
   unitInfo.hidden = !unit;
+  window.clearTimeout(unitInfoFadeTimer);
+  unitInfo.classList.remove('faded');
   if (!unit) return;
+  unitInfoFadeTimer = window.setTimeout(() => unitInfo.classList.add('faded'), UNIT_INFO_FADE_MS);
   unitInfoTitle.textContent = `${unit.type[0].toUpperCase()}${unit.type.slice(1)}`;
   unitInfoTitle.style.color = unit.team === 'blue' ? 'var(--color-planning-blue)' : 'var(--color-planning-red)';
   let description = UNIT_ROLES[unit.type];
@@ -173,6 +199,24 @@ let tutorialPassed = false;
 let tutorialFinished = false;
 let retryEncounter: { state: OnlineGameState; seed: number } | null = null;
 let canRetryEncounter = false;
+/** The current vs-AI battle is a retry of an earlier one: practice, not stats. */
+let playingRetry = false;
+/** Set while the day's challenge is being played. */
+let dailyChallenge: DailyChallenge | null = null;
+let currentRound = 1;
+let roundStartCounts: { blue: number; red: number } | null = null;
+let lastTickSecond: number | null = null;
+let clipRecording: ClipRecording | null = null;
+
+const DIFFICULTY_KEY = '7s-difficulty';
+const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
+let difficulty: Difficulty = (() => {
+  try {
+    const saved = localStorage.getItem(DIFFICULTY_KEY);
+    if (saved === 'easy' || saved === 'normal' || saved === 'hard') return saved;
+  } catch { /* unavailable */ }
+  return 'normal';
+})();
 
 // Horde state
 let hordeActive = false;
@@ -221,11 +265,92 @@ if (new URLSearchParams(location.search).has('record')) {
 }
 
 function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
+  document.body.classList.toggle('screen-prompt', screen === 'prompt');
+  if (screen !== 'battle') audio.setMood('calm');
+  if (screen === 'prompt') refreshMenuMeta();
+  if (screen === 'result') clipBtn.style.display = lastReplayData && canRecordClips() ? '' : 'none';
   promptScreen.classList.toggle('active', screen === 'prompt');
   battleScreen.classList.add('active'); // always visible once initialized
   resultScreen.classList.toggle('active', screen === 'result');
   upgradeScreen.style.display = screen === 'horde-upgrade' ? 'flex' : 'none';
   retryEncounterBtn.style.display = screen === 'result' && canRetryEncounter ? '' : 'none';
+}
+
+/** Fill the result card's heading and clear extras from a previous result. */
+function setResultHeading(title: string, subtitle: string, color: string): void {
+  winnerTextEl.textContent = title;
+  winnerSubEl.textContent = subtitle;
+  winnerTextEl.style.color = color;
+  resultRecordEl.textContent = '';
+  shareResultBtn.style.display = 'none';
+}
+
+function teamColor(team: Team): string {
+  return team === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
+}
+
+function applyTheme(): void {
+  const day = getSettings().dayMode;
+  document.body.classList.toggle('day-mode', day);
+  renderer?.setTheme(day ? DAY_THEME : NIGHT_THEME);
+}
+
+/** Sound, vibration and camera shake for gameplay moments (live and replays). */
+function handleFeedbackCue(cue: FeedbackCue): void {
+  const shake = !getSettings().reducedMotion;
+  switch (cue.type) {
+    case 'shot':
+      audio.play(cue.heavy ? 'heavy-shot' : 'shot');
+      break;
+    case 'launch':
+      audio.play(cue.weapon === 'shell' ? 'mortar' : 'rocket');
+      break;
+    case 'hit':
+      audio.play('hit', cue.damage / 15);
+      break;
+    case 'kill':
+      audio.play('kill');
+      pulse('medium');
+      if (shake) renderer?.shake(3);
+      break;
+    case 'explosion':
+      audio.play('explosion', cue.radius / 60);
+      pulse('heavy');
+      if (shake) renderer?.shake(Math.min(10, cue.radius / 8));
+      break;
+    case 'shield-break':
+      audio.play('shield-break');
+      pulse('light');
+      break;
+  }
+}
+
+/** How long the between-round card stays up (matches its CSS animation). */
+const ROUND_BANNER_MS = 1600;
+let roundBannerTimer: number | undefined;
+
+/** Brief "Round N" card between rounds summing up who fell. */
+function showRoundBanner(round: number, before: { blue: number; red: number }, after: { blue: number; red: number }): void {
+  const vsComputer = aiMode || hordeActive;
+  const blueLost = before.blue - after.blue;
+  const redLost = before.red - after.red;
+  const parts: string[] = [];
+  if (blueLost > 0) parts.push(`${vsComputer ? 'You' : 'Blue'} lost ${blueLost}`);
+  if (redLost > 0) parts.push(`${vsComputer ? 'Enemy' : 'Red'} lost ${redLost}`);
+  roundBannerTitle.textContent = `Round ${round}`;
+  roundBannerDetail.textContent = parts.length > 0 ? parts.join(' · ') : 'No casualties';
+  roundBanner.classList.remove('show');
+  void roundBanner.offsetWidth; // restart the animation
+  roundBanner.classList.add('show');
+  // Timed here too: with reduced motion the card has no fade-out animation.
+  window.clearTimeout(roundBannerTimer);
+  roundBannerTimer = window.setTimeout(hideRoundBanner, ROUND_BANNER_MS);
+  audio.play('round-end');
+}
+
+function hideRoundBanner(): void {
+  window.clearTimeout(roundBannerTimer);
+  roundBanner.classList.remove('show');
 }
 
 function onPhaseChange(phase: TurnPhase): void {
@@ -263,8 +388,8 @@ function finishTutorialRound(): void {
   engine!.stop();
   onPhaseChange('playing');
   const lesson = TUTORIAL_LESSONS[tutorialLesson];
-  winnerTextEl.textContent = tutorialPassed ? 'Nicely done!' : 'Try again';
-  winnerTextEl.style.color = 'var(--color-result-blue)';
+  setResultHeading(tutorialPassed ? 'Nicely done!' : 'Try again', '', 'var(--color-result-blue)');
+  audio.play(tutorialPassed ? 'victory' : 'defeat');
   resultStatsEl.textContent = tutorialPassed ? lesson.success : lesson.retry;
   rematchBtn.textContent = !tutorialPassed ? 'Retry lesson'
     : tutorialLesson === TUTORIAL_LESSONS.length - 1 ? 'Play vs AI' : 'Next lesson';
@@ -291,6 +416,20 @@ function onGameEvent(
     if (data.round !== undefined) {
       roundCounterEl.textContent = `Round ${data.round}`;
     }
+    if (data.phase === 'playing') {
+      roundStartCounts = engine?.getAliveCount() ?? null;
+      lastTickSecond = null;
+      hideRoundBanner();
+      audio.play('round-start');
+      audio.setMood('tense');
+    } else if (data.phase === 'blue-planning') {
+      audio.setMood('calm');
+      const round = data.round ?? 1;
+      if (round > currentRound && roundStartCounts && engine) {
+        showRoundBanner(round, roundStartCounts, engine.getAliveCount());
+      }
+      currentRound = round;
+    }
     return;
   }
 
@@ -315,7 +454,12 @@ function onGameEvent(
 
     if (data && 'timeLeft' in data && data.timeLeft !== undefined) {
       const timeLeft = data.timeLeft;
-      roundTimerEl.textContent = `${Math.ceil(timeLeft)}s`;
+      const seconds = Math.ceil(timeLeft);
+      roundTimerEl.textContent = `${seconds}s`;
+      if (seconds >= 1 && seconds <= 3 && seconds !== lastTickSecond) {
+        lastTickSecond = seconds;
+        audio.play('tick');
+      }
 
       if (timeLeft <= 3) {
         roundTimerEl.style.color = 'var(--color-timer-critical)';
@@ -357,9 +501,8 @@ function onGameEvent(
       const ctf = engine?.getCtfState();
       const isCaptureWin = ctf?.winner !== null;
       const winType = isCaptureWin ? 'Flag Captured!' : 'Elimination!';
-      const color = result.winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
-      winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">${winType}</span>`;
-      winnerTextEl.style.color = color;
+      setResultHeading(`${result.winner === 'blue' ? 'Blue' : 'Red'} wins`, winType, teamColor(result.winner));
+      audio.play('victory');
 
       resultStatsEl.innerHTML = [
         `Duration: ${result.duration.toFixed(1)}s`,
@@ -375,22 +518,41 @@ function onGameEvent(
       return;
     }
 
-    const color = result.winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
-    winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
     canRetryEncounter = aiMode && result.winner === 'red' && retryEncounter !== null;
-    winnerTextEl.style.color = color;
+    const won = result.winner === 'blue';
+    if (aiMode) {
+      setResultHeading(won ? 'Victory' : 'Defeat', won ? 'Enemy eliminated' : 'Your army was wiped out', teamColor(result.winner));
+    } else {
+      setResultHeading(`${won ? 'Blue' : 'Red'} wins`, 'Elimination', teamColor(result.winner));
+    }
+    audio.play(won || !aiMode ? 'victory' : 'defeat');
+    pulse('heavy');
 
-    const blueTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
-    const redTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
-
+    const rounds = currentRound;
     const statsLines = [
-      `Duration: ${result.duration.toFixed(1)}s`,
-      `Blue survivors: ${result.blueAlive}/${blueTotal}`,
-      `Red survivors: ${result.redAlive}/${redTotal}`,
+      `${rounds} round${rounds === 1 ? '' : 's'} · ${result.duration.toFixed(1)}s of combat`,
+      `${aiMode ? 'Your' : 'Blue'} survivors: ${result.blueAlive}/${result.blueTotal}`,
+      `${aiMode ? 'Enemy' : 'Red'} survivors: ${result.redAlive}/${result.redTotal}`,
     ];
     resultStatsEl.innerHTML = statsLines.join('<br>');
 
-    rematchBtn.textContent = aiMode ? 'New encounter' : 'Rematch';
+    if (dailyChallenge) {
+      const counts = recordDailyResult({
+        date: dailyChallenge.date, won, rounds, survivors: result.blueAlive, total: result.blueTotal,
+      });
+      const practice = !counts;
+      const streak = getDailyStreak(dailyChallenge.date);
+      resultRecordEl.textContent = `Daily #${dailyChallenge.number}${practice ? ' · practice run' : ''}`
+        + (streak > 0 ? ` · ${streak}-day win streak` : '');
+      shareResultBtn.style.display = '';
+    } else if (aiMode && !playingRetry) {
+      const record = recordAiResult(difficulty, won);
+      const best = won && record.streak === record.bestStreak && record.streak > 1 ? ' (best!)' : '';
+      resultRecordEl.textContent = `${DIFFICULTY_LABELS[difficulty]} · ${record.wins}W – ${record.losses}L`
+        + (record.streak > 0 ? ` · streak ${record.streak}${best}` : '');
+    }
+
+    rematchBtn.textContent = dailyChallenge ? 'Play again' : aiMode ? 'New encounter' : 'Rematch';
     rematchBtn.style.opacity = '1';
     rematchBtn.style.display = '';
     newBattleBtn.textContent = 'Back';
@@ -406,6 +568,8 @@ async function initRenderer(): Promise<void> {
   battleScreen.classList.add('active'); // visible before init so container has dimensions
   renderer = new Renderer();
   await renderer.init(pixiContainer);
+  renderer.effects!.onCue = handleFeedbackCue;
+  renderer.onPathDrawn = () => audio.play('draw');
 }
 
 function showPreview(): void {
@@ -420,17 +584,23 @@ function showPreview(): void {
 function startGame(retry = false): void {
   const encounter = retry ? retryEncounter : null;
   canRetryEncounter = false;
+  playingRetry = encounter !== null;
   lastReplayData = null;
   engine?.stop();
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
-  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+  applyTheme();
+  const daily = tutorialLesson === null && aiMode ? dailyChallenge : null;
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: tutorialLesson === null && aiMode,
     practice: tutorialLesson === null ? undefined : createTutorialEncounter(tutorialLesson),
     initialState: encounter?.state,
-    seed: encounter?.seed,
+    seed: encounter?.seed ?? daily?.seed,
+    layoutIndex: daily?.layoutIndex,
+    composition: daily?.composition,
+    difficulty: daily ? 'normal' : difficulty,
+    cinematic: !getSettings().reducedMotion,
     onInspectUnit: showUnitInfo,
   });
+  resetRoundTracking();
   tutorialFinished = false;
   planningOverlay.classList.toggle('tutorial', tutorialLesson !== null);
   planningInstructions.textContent = tutorialLesson === null
@@ -448,17 +618,25 @@ function startGame(retry = false): void {
     ? { state: structuredClone(engine.getOnlineGameState()), seed: engine.getSeed() } : null;
 }
 
+function resetRoundTracking(): void {
+  currentRound = 1;
+  roundStartCounts = null;
+  lastTickSecond = null;
+  hideRoundBanner();
+}
+
 function startCtfGame(): void {
   lastReplayData = null;
   engine?.stop();
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
-  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+  applyTheme();
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: !ctfHotseat,
     ctfMode: true,
     ctfHotseat,
+    cinematic: !getSettings().reducedMotion,
     onInspectUnit: showUnitInfo,
   });
+  resetRoundTracking();
   showScreen('battle');
   speedToggle.classList.remove('active');
   speedToggle.dataset.speed = '1';
@@ -491,12 +669,42 @@ function startReplay(data: ReplayData): void {
     }
     if (event === 'end') {
       replayPauseBtn.textContent = '\u25B6';
+      if (clipRecording) void finishClip();
     }
   });
   replayPlayer.start();
 }
 
+/** Play the last battle's replay while recording it, then share the video. */
+function recordClip(): void {
+  if (!lastReplayData || !renderer || clipRecording) return;
+  audio.unlock();
+  startReplay(lastReplayData);
+  clipRecording = startClipRecording(renderer.canvas, audio.stream, () => { void finishClip(); });
+  if (!clipRecording) {
+    showToast('Recording is not supported in this browser');
+    return;
+  }
+  showToast('Recording clip… it will be ready when the replay ends');
+}
+
+async function finishClip(): Promise<void> {
+  const recording = clipRecording;
+  clipRecording = null;
+  if (!recording) return;
+  const blob = await recording.finish();
+  stopReplay();
+  if (!blob) {
+    showToast('Could not record the clip');
+    return;
+  }
+  const outcome = await deliverClip(blob);
+  if (outcome === 'downloaded') showToast('Clip saved to your downloads');
+}
+
 function stopReplay(): void {
+  clipRecording?.cancel();
+  clipRecording = null;
   recorderMod?.stopIfRecording();
   replayPlayer?.stop();
   replayPlayer = null;
@@ -535,17 +743,18 @@ function startNextHordeWave(): void {
   if (!waveDef) return;
 
   engine?.stop();
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
-  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+  applyTheme();
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: true,
     horde: true,
+    cinematic: !getSettings().reducedMotion,
     hordeBlueUnits: hordeUnits,
     hordeRedArmy: waveDef.enemies,
     hordeMap: hordeMap!,
     onInspectUnit: showUnitInfo,
   });
 
+  resetRoundTracking();
   showScreen('battle');
   speedToggle.classList.remove('active');
   speedToggle.dataset.speed = '1';
@@ -588,6 +797,7 @@ function showUpgradeSelection(): void {
 
   upgradeReplayBtn.style.display = lastReplayData ? 'block' : 'none';
 
+  audio.play('upgrade');
   showScreen('horde-upgrade');
 }
 
@@ -595,12 +805,12 @@ function showHordeResult(victory: boolean): void {
   engine?.stop();
 
   if (victory) {
-    winnerTextEl.innerHTML = 'Horde Mode Complete!<br><span style="font-size:0.5em;opacity:0.7">All 10 waves cleared!</span>';
-    winnerTextEl.style.color = 'var(--color-result-horde-win)';
+    setResultHeading('Horde cleared', `All ${HORDE_MAX_WAVES} waves survived`, 'var(--color-result-horde-win)');
   } else {
-    winnerTextEl.innerHTML = `Defeated!<br><span style="font-size:0.5em;opacity:0.7">Fallen on Wave ${hordeWave}</span>`;
-    winnerTextEl.style.color = 'var(--color-result-red)';
+    setResultHeading('Defeated', `Fallen on wave ${hordeWave}`, 'var(--color-result-red)');
   }
+  audio.play(victory ? 'victory' : 'defeat');
+  pulse('heavy');
 
   const survivors = hordeUnits.filter(u => u.alive).length;
   resultStatsEl.innerHTML = [
@@ -616,23 +826,111 @@ function showHordeResult(victory: boolean): void {
   showScreen('result');
 }
 
-dayModeCb.addEventListener('change', () => {
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
-  if (renderer) renderer.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+// --- Menu: settings, difficulty, daily challenge ---
+
+function syncSettingsUi(settings: Readonly<Settings>): void {
+  for (const btn of settingToggles) {
+    const key = btn.dataset.setting as keyof Settings;
+    btn.setAttribute('aria-pressed', String(settings[key]));
+  }
+  themeToggle.textContent = settings.dayMode ? 'Paper theme' : 'Night theme';
+  document.body.classList.toggle('reduced-motion', settings.reducedMotion);
+  audio.setSfxEnabled(settings.sound);
+  audio.setMusicEnabled(settings.music);
+  setHapticsEnabled(settings.haptics);
+}
+
+for (const btn of settingToggles) {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.setting as keyof Settings;
+    updateSettings({ [key]: !getSettings()[key] });
+  });
+}
+// Vibration only means something on phones and tablets.
+const settingsHaptics = settingToggles.find(btn => btn.dataset.setting === 'haptics');
+if (settingsHaptics && !Capacitor.isNativePlatform() && !matchMedia('(pointer: coarse)').matches) {
+  settingsHaptics.hidden = true;
+}
+themeToggle.addEventListener('click', () => {
+  updateSettings({ dayMode: !getSettings().dayMode });
+  applyTheme();
 });
+onSettingsChange(syncSettingsUi);
+syncSettingsUi(getSettings());
+
+function setDifficulty(next: Difficulty): void {
+  difficulty = next;
+  try { localStorage.setItem(DIFFICULTY_KEY, next); } catch { /* unavailable */ }
+  refreshMenuMeta();
+}
+for (const btn of difficultyButtons) {
+  btn.addEventListener('click', () => setDifficulty(btn.dataset.difficulty as Difficulty));
+}
+
+/** Refresh the menu's record line, difficulty picker and daily badge. */
+function refreshMenuMeta(): void {
+  for (const btn of difficultyButtons) {
+    btn.setAttribute('aria-checked', String(btn.dataset.difficulty === difficulty));
+  }
+  const record = getAiRecord(difficulty);
+  aiRecordEl.textContent = record.wins + record.losses > 0
+    ? `${record.wins}W – ${record.losses}L${record.streak > 1 ? ` · streak ${record.streak}` : ''}`
+      + (record.bestStreak > 1 ? ` · best ${record.bestStreak}` : '')
+    : '';
+  const today = getDailyChallenge();
+  const result = getDailyResult(today.date);
+  const streak = getDailyStreak(today.date);
+  dailyBadge.hidden = false;
+  dailyBadge.textContent = result
+    ? `${result.won ? '✓ won' : '✗ lost'}${streak > 1 ? ` · ${streak}🔥` : ''}`
+    : `#${today.number}`;
+}
+
+async function shareDailyResult(): Promise<void> {
+  const challenge = dailyChallenge ?? getDailyChallenge();
+  const result = getDailyResult(challenge.date);
+  if (!result) return;
+  const text = formatDailyShare(challenge, result, `${location.origin}${location.pathname}`);
+  if (navigator.share) {
+    try {
+      await navigator.share({ text });
+      return;
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Result copied — paste it anywhere');
+  } catch {
+    showToast('Could not copy the result');
+  }
+}
 
 // --- Event listeners ---
 battleBtn.addEventListener('click', async () => {
   aiMode = false;
+  dailyChallenge = null;
   await initRenderer();
   startGame();
 });
 
 aiBtn.addEventListener('click', async () => {
   aiMode = true;
+  dailyChallenge = null;
   await initRenderer();
   startGame();
 });
+
+dailyBtn.addEventListener('click', async () => {
+  aiMode = true;
+  dailyChallenge = getDailyChallenge();
+  await initRenderer();
+  startGame();
+});
+
+shareResultBtn.addEventListener('click', () => { void shareDailyResult(); });
+clipBtn.addEventListener('click', recordClip);
 
 tutorialBtn.addEventListener('click', async () => {
   await initRenderer();
@@ -675,8 +973,10 @@ confirmBtn.addEventListener('click', () => {
     planningOverlay.classList.remove('active');
     planningLabel.textContent = 'Waiting for opponent...';
     void asyncController.submitPlan(paths);
+    audio.play('confirm');
     return;
   }
+  audio.play('confirm');
   engine?.confirmPlan();
 });
 
@@ -700,6 +1000,7 @@ rematchBtn.addEventListener('click', async () => {
     if (tutorialLesson === TUTORIAL_LESSONS.length) {
       tutorialLesson = null;
       aiMode = true;
+      dailyChallenge = null;
     }
     startGame();
     return;
@@ -731,6 +1032,9 @@ newBattleBtn.addEventListener('click', () => {
   tutorialLesson = null;
   retryEncounter = null;
   canRetryEncounter = false;
+  playingRetry = false;
+  dailyChallenge = null;
+  resetRoundTracking();
   planningOverlay.classList.remove('tutorial');
   planningInstructions.textContent = 'Click a unit, drag to draw a path. Repeat for each unit.';
   confirmBtn.textContent = 'Done';
@@ -973,6 +1277,8 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
   runCountIn(() => {
     if (!playbackEngine) return; // left the match during the count-in
     playbackEffectIndex = 0;
+    audio.play('round-start');
+    audio.setMood('tense');
     playbackEngine.startPlaying();
     renderer!.ticker.add(asyncTickCallback);
   });
@@ -986,8 +1292,7 @@ function asyncHooks(): AsyncGameHooks {
       asyncMyTeam = myTeam;
       stopPlaybackEngine();
 
-      document.body.classList.toggle('day-mode', dayModeCb.checked);
-      renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+      applyTheme();
       renderer!.adaptToRemoteMap(startState.mapWidth, startState.mapHeight);
       renderer!.effects?.clear();
       renderer!.clearDyingUnits();
@@ -1001,6 +1306,7 @@ function asyncHooks(): AsyncGameHooks {
       playbackPathDrawer?.destroy();
       playbackPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
       playbackPathDrawer.onInspectUnit = showUnitInfo;
+      playbackPathDrawer.onPathDrawn = () => audio.play('draw');
       playbackPathDrawer.enable(myTeam, playbackUnits, playbackElevationZones);
 
       planningLabel.textContent = 'Your Planning';
@@ -1099,19 +1405,20 @@ function asyncHooks(): AsyncGameHooks {
       // box nested inside it.
       onlineLobby.style.display = 'none';
       if (status === 'abandoned') {
-        winnerTextEl.innerHTML = `Match Abandoned<br><span style="font-size:0.5em;opacity:0.7">Your opponent left</span>`;
-        winnerTextEl.style.color = ''; // neutral, not a win/loss color
+        // Neutral, not a win/loss color
+        setResultHeading('Match abandoned', 'Your opponent left', '');
       } else {
         const winner: Team = status === 'guest_won' ? 'red' : 'blue';
         const iWon = (myTeam === winner);
         if (opponentId && matchId) recordMatchResultOnce(matchId, opponentId, iWon);
-        const color = winner === 'blue' ? 'var(--color-result-blue)' : 'var(--color-result-red)';
-        winnerTextEl.innerHTML = `${iWon ? 'You Win!' : 'You Lose'}<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
-        winnerTextEl.style.color = color;
+        setResultHeading(iWon ? 'Victory' : 'Defeat', 'Elimination', teamColor(winner));
+        audio.play(iWon ? 'victory' : 'defeat');
       }
-      const blueAlive = finalState.units.filter(u => u.team === 'blue' && u.hp > 0).length;
-      const redAlive = finalState.units.filter(u => u.team === 'red' && u.hp > 0).length;
-      resultStatsEl.innerHTML = [`Blue survivors: ${blueAlive}`, `Red survivors: ${redAlive}`].join('<br>');
+      const survivors = (team: Team) => {
+        const army = finalState.units.filter(u => u.team === team);
+        return `${army.filter(u => u.hp > 0).length}/${army.length}`;
+      };
+      resultStatsEl.innerHTML = [`Blue survivors: ${survivors('blue')}`, `Red survivors: ${survivors('red')}`].join('<br>');
       rematchBtn.style.display = 'none';
       replayBtn.style.display = lastReplayData ? '' : 'none';
       newBattleBtn.textContent = 'Back';
@@ -1407,11 +1714,18 @@ window.addEventListener('beforeunload', () => {
 // A local notification tap uses the same entry route and age gate as an invite.
 void initializeTurnNotifications(id => { window.location.assign(getAsyncShareUrl(id)); });
 
+// Browsers only allow audio after a user gesture; every button also clicks.
+document.addEventListener('pointerdown', () => audio.unlock(), { capture: true });
+document.addEventListener('keydown', () => audio.unlock(), { capture: true });
+document.addEventListener('click', event => {
+  const button = (event.target as Element | null)?.closest?.('button, .upgrade-card');
+  if (button && button !== confirmBtn) audio.play('ui');
+}, { capture: true });
+
 // Initialize renderer and show battlefield preview behind start screen
 (async () => {
   await initRenderer();
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
-  if (dayModeCb.checked) renderer!.setTheme(DAY_THEME);
+  applyTheme();
   showPreview();
   showScreen('prompt');
 
