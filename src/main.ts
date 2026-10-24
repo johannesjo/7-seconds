@@ -1037,6 +1037,7 @@ function resultText(status: string, reason: FinishReason | null, iWon: boolean):
     switch (reason) {
       case 'version': return { title: 'Match Ended', detail: 'It was made with another version of the game' };
       case 'cancelled': return { title: 'Match Withdrawn', detail: 'Nobody had joined yet' };
+      case 'battle': return { title: 'Draw', detail: 'Both armies fell together' };
       default: return { title: 'Match Abandoned', detail: 'Nobody played for too long' };
     }
   }

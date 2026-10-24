@@ -28,7 +28,11 @@ it trivial to feed one account wins, so friends play casual matches instead.
   planned the current round wins on time (rated).
 - **Delete.** "Delete ranked profile" counts unfinished ranked matches as
   forfeits, deletes the profile, its ranked matches and its turn alert
-  devices, and keeps only the opponents' side of past results.
+  devices, and keeps only the opponents' side of past results. Signing in
+  again starts a fresh profile at 1200: nothing about a deleted profile is
+  kept, so deleting is also a way to reset a rating. This favours deletion
+  over ladder integrity, as in Imperial Battleground; a tombstone (the Play
+  Games id with its last rating) would close it at the cost of keeping data.
 
 ## Ratings
 

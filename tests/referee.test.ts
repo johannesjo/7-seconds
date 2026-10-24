@@ -1,6 +1,6 @@
 // The match referee end to end: requests in, the real database functions and
 // engine underneath (tests/pg.ts). Skipped without SEVEN_PG_URL.
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { PG_URL, createTestDatabase, type TestDatabase } from './pg';
 import { PsqlStore } from './psql-store';
 import { handleReferee, cleanName, ROUND_TICKS, type MatchRow, type RefereeDeps, type User } from '../src/server/referee';
@@ -14,6 +14,9 @@ const ANN: User = { id: '00000000-0000-4000-8000-0000000000a1', google: false };
 const BEA: User = { id: '00000000-0000-4000-8000-0000000000b2', google: false };
 const CY: User = { id: '00000000-0000-4000-8000-0000000000c3', google: true };
 const DEE: User = { id: '00000000-0000-4000-8000-0000000000d4', google: true };
+
+// Each step spawns psql against a real database, and CI runs both files at once.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let db: TestDatabase;
 let store: PsqlStore;
@@ -70,6 +73,12 @@ describe('referee request checks', () => {
   it('cleans display names', () => {
     expect(cleanName('  Ann \u0000 <b>Smith</b>  ')).toBe('Ann bSmith/b');
     expect(cleanName('Major Flint (AI)')).toBe('Major Flint');
+    // No rebuilding the tag by nesting, other brackets or look-alike letters.
+    expect(cleanName('Major Flint ((AI)AI)')).toBe('Major Flint');
+    expect(cleanName('Major Flint (A(ai)I)')).toBe('Major Flint');
+    expect(cleanName('Major Flint \uFF08\uFF21\uFF29\uFF09')).toBe('Major Flint');
+    expect(cleanName('Major Flint [ ai ]')).toBe('Major Flint');
+    expect(cleanName('x'.repeat(50), 40)).toHaveLength(40);
     expect(cleanName('x'.repeat(50))).toHaveLength(24);
     expect(cleanName('   ')).toBeNull();
     expect(cleanName(42)).toBeNull();
@@ -141,7 +150,10 @@ describeDb('referee with the database', () => {
     await ok(BEA, { action: 'join', id: created.id, name: 'Bea' });
     alerts = [];
     await ok(ANN, { action: 'submit', id: created.id, round: 1, paths: [], name: 'Annie' });
+    // A retried submit is the same move: no second alert.
+    await ok(ANN, { action: 'submit', id: created.id, round: 1, paths: [], name: 'Annie' });
     expect(alerts).toMatchObject([{ player: BEA.id, kind: 'turn', round: 1, opponent: 'Annie' }]);
+    expect(alerts).toHaveLength(1);
     alerts = [];
     const ended = await ok(ANN, { action: 'forfeit', id: created.id });
     expect(ended).toMatchObject({ status: 'guest_won', finish_reason: 'forfeit' });
@@ -157,7 +169,7 @@ describeDb('referee with the database', () => {
     expect(turns(match.id)).toEqual([{ round: 1, team: 'red', paths: null }]);
 
     // Every submit resolves the round straight away; the commander is ready for the next.
-    for (let round = 1; match.status === 'active' && round <= 40; round++) {
+    for (let round = 1; match.status === 'active' && round <= 12; round++) {
       match = await ok(ANN, { action: 'submit', id: match.id, round, paths: plan(match, 'blue', round) });
       if (match.status === 'active') expect(match.current_round).toBe(round + 1);
     }
@@ -206,6 +218,9 @@ describeDb('referee with the database', () => {
   it('runs ranked play: verified profiles, a rated match, the ladder', async () => {
     expect((await call(CY, { action: 'matchmake', ranked: true })).status).toBe(409); // no profile yet
     expect((await call(CY, { action: 'profile', serverAuthCode: 'bad-code-0000' })).status).toBe(400);
+    // Play Games names may be long or look like an AI's: cleaned and clamped to fit match seats.
+    const long = (await call(DEE, { action: 'profile', serverAuthCode: `${'Z'.repeat(60)}(AI)-code` })).body as { profile: { display_name: string } };
+    expect(long.profile.display_name).toBe('Z'.repeat(40));
     const res = await call(CY, { action: 'profile', serverAuthCode: 'Cy-code-123' });
     expect(res.body).toEqual({ profile: { display_name: 'Cy', avatar_url: null, rating: 1200, games: 0, wins: 0, losses: 0, peak_rating: 1200 } });
     await call(DEE, { action: 'profile', serverAuthCode: 'Dee-code-456' });

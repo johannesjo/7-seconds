@@ -35,8 +35,10 @@ seeing the other's, and the round is played once both plans are in.
    it shows exactly what happened. A device remembers the last round it showed
    (`7s-watched-<id>`); coming back after the opponent finished a round plays
    that round first.
-6. **End.** A match ends by elimination, by `forfeit` (the opponent wins; an
-   invite nobody joined is withdrawn), or by the idle limit (below).
+6. **End.** A match ends by elimination (when both armies fall in the same
+   round, it's a draw: no winner, no rating change), by `forfeit` (the
+   opponent wins; an invite nobody joined is withdrawn), or by the idle limit
+   (below).
 
 Compared with the old protocol, there is no commit–reveal step: the referee
 holds the plans, so a player never has to come back just to reveal, a lost
@@ -70,7 +72,10 @@ AI.
 `last_move_at` is touched on every plan and round. Invites expire after 7
 days, searches and ranked matches after 3. An expired invite or search is
 abandoned. An expired match in play is won by the side that submitted the
-current round, if exactly one did (`timeout`); otherwise nobody wins. The
+current round, if exactly one did (`timeout`); otherwise nobody wins. An AI
+commander plans only while a referee request runs, so a match waiting on a
+commander's plan (one seated by the background job while its player was
+away) is abandoned rather than won. The
 `seven-expire-matches` job runs hourly, and any referee request on an expired
 match settles it at once.
 
@@ -90,6 +95,14 @@ So a player cannot:
 
 A `matches_guard` trigger keeps identity columns immutable and finished
 matches finished, even for the service role.
+
+Known and accepted: the two players of a match can read each other's
+Supabase user ids (`host_player`, `guest_player`, `turns.player`). They are
+random, anonymous for casual play, and grant nothing; the ranked read models
+never include them. A retried request is safe: a repeated `submit` (also one
+arriving after its round was played) returns the match without a second
+alert, and `matchmake` alerts the waiting player only for the call that
+paired them.
 
 The referee checks each request: the session (anonymous for casual play, a
 Google identity for ranked), that the caller holds a seat, the round, the

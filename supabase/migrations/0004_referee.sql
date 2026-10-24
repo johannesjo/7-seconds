@@ -116,6 +116,9 @@ create table if not exists public.ranked_results (
   finished_at  timestamptz not null default now()
 );
 create index if not exists ranked_results_host on public.ranked_results (host_player, finished_at desc);
+-- 17. Seat lookups (live counts, a player's matches) use these.
+create index if not exists matches_host_idx on public.matches (host_player);
+create index if not exists matches_guest_idx on public.matches (guest_player);
 create index if not exists ranked_results_guest on public.ranked_results (guest_player, finished_at desc);
 
 -- Turn alert devices (Firebase Cloud Messaging tokens) per Supabase user.
@@ -139,6 +142,23 @@ begin
     end if;
   end loop;
 end $$;
+
+-- A new match must not take the id of a rated match that was deleted (with a
+-- ranked profile): it would inherit that result and never be rated itself.
+-- unique_violation makes the referee draw another id.
+create or replace function seven_private.fresh_match_id()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.ranked_results where match_id = new.id) then
+    raise exception 'Match id already used' using errcode = 'unique_violation';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function seven_private.fresh_match_id() from public;
+drop trigger if exists matches_fresh_id on public.matches;
+create trigger matches_fresh_id before insert on public.matches
+  for each row execute function seven_private.fresh_match_id();
 
 -- ---------------------------------------------------------------------------
 -- Clients read, the referee writes
@@ -234,9 +254,10 @@ returns integer language sql immutable set search_path = public as $$
   select round((case when games < 10 then 40 else 32 end) * (score - 1 / (1 + power(10::numeric, (opponent - rating)::numeric / 400))))::integer
 $$;
 
--- End a match in play. `winner` is 'blue', 'red' or null (nobody wins). A
--- ranked match with a winner is rated exactly once; AI commanders keep their
--- fixed rating (their side records 0), so nobody can pump or sink one.
+-- End a match in play. `winner` is 'blue', 'red' or null (nobody wins: a
+-- draw when reason is 'battle', both armies fell together). A ranked match
+-- with a winner is rated exactly once; AI commanders keep their fixed rating
+-- (their side records 0), so nobody can pump or sink one.
 create or replace function public.seven_finish(m_id text, winner text, reason text)
 returns public.matches language plpgsql set search_path = public as $$
 declare m public.matches; h public.ranked_profiles; g public.ranked_profiles; hd integer; gd integer;
@@ -247,6 +268,8 @@ begin
     status = case winner when 'blue' then 'host_won' when 'red' then 'guest_won' else 'abandoned' end,
     finish_reason = reason, finished_at = now()
   where id = m_id returning * into m;
+  -- Plans of a round that will never be played.
+  delete from public.match_plans where match_id = m_id;
   if m.ranked and winner is not null and m.guest_player is not null then
     -- Stable locking order: two matches between the same players may finish together.
     perform 1 from public.ranked_profiles where player in (m.host_player, m.guest_player) order by player for update;
@@ -272,7 +295,9 @@ $$;
 
 -- A match past its idle limit: an invite nobody joined is abandoned; a match
 -- waiting on one side's plan is won by the side that submitted; a match
--- nobody played on is abandoned.
+-- nobody played on is abandoned. An AI commander plans only during a referee
+-- request, so a commander seated by the background job may never have had
+-- the chance: a match waiting on its plan is abandoned, never a free win.
 create or replace function public.seven_expire_match(m_id text)
 returns public.matches language plpgsql set search_path = public as $$
 declare m public.matches; blue_in boolean; red_in boolean;
@@ -282,7 +307,7 @@ begin
   if m.status = 'open' then return public.seven_finish(m_id, null, 'abandoned'); end if;
   blue_in := exists (select 1 from public.match_plans p where p.match_id = m_id and p.round = m.current_round and p.team = 'blue');
   red_in := exists (select 1 from public.match_plans p where p.match_id = m_id and p.round = m.current_round and p.team = 'red');
-  if blue_in and not red_in then return public.seven_finish(m_id, 'blue', 'timeout'); end if;
+  if blue_in and not red_in and not m.guest_bot then return public.seven_finish(m_id, 'blue', 'timeout'); end if;
   if red_in and not blue_in then return public.seven_finish(m_id, 'red', 'timeout'); end if;
   return public.seven_finish(m_id, null, 'abandoned');
 end;
@@ -335,10 +360,8 @@ begin
   if actor in (m.host_player, m.guest_player) then return m; end if;
   if m.ranked or m.matchmaking then raise exception 'Match not found'; end if;
   if m.status <> 'open' or m.guest_player is not null then raise exception 'This match already has two players'; end if;
-  if m.last_move_at < now() - m.abandon_after then
-    perform public.seven_expire_match(m_id);
-    raise exception 'This invite has expired';
-  end if;
+  -- Expired: settle it and return it as it now stands (the referee reports it).
+  if m.last_move_at < now() - m.abandon_after then return public.seven_expire_match(m_id); end if;
   if public.seven_live_count(actor, false) >= 5 then
     raise exception 'You have 5 unfinished matches. Finish or forfeit one before starting another.';
   end if;
@@ -353,8 +376,10 @@ $$;
 -- next searcher joins (or an AI commander, see seven_seat_bot). Retries are
 -- safe: a caller still waiting, or paired in the last two minutes without
 -- having planned yet, gets that match back.
+-- Returns {match, paired}: paired is true only for the call that just joined
+-- someone's search (so they are alerted once, not on every retry).
 create or replace function public.seven_matchmake(actor uuid, m_id text, is_ranked boolean, p_rules integer, initial jsonb, p_name text)
-returns public.matches language plpgsql set search_path = public as $$
+returns jsonb language plpgsql set search_path = public as $$
 declare m public.matches; lim integer := case when is_ranked then 10 else 5 end; nm text := p_name;
 begin
   perform pg_advisory_xact_lock(hashtextextended(actor::text, 7));
@@ -367,14 +392,14 @@ begin
   select * into m from public.matches where matchmaking and ranked = is_ranked and rules = p_rules
     and host_player = actor and status = 'open' and last_move_at >= now() - abandon_after
     order by created_at desc limit 1 for update;
-  if found then return m; end if;
+  if found then return jsonb_build_object('match', to_jsonb(m), 'paired', false); end if;
   select * into m from public.matches mm where matchmaking and ranked = is_ranked and rules = p_rules
     and actor in (host_player, guest_player) and status = 'active' and current_round = 1
     and last_move_at >= now() - interval '2 minutes'
     and not exists (select 1 from public.match_plans p where p.match_id = mm.id
       and p.team = case when mm.host_player = actor then 'blue' else 'red' end)
     order by last_move_at desc limit 1 for update;
-  if found then return m; end if;
+  if found then return jsonb_build_object('match', to_jsonb(m), 'paired', false); end if;
   if public.seven_live_count(actor, is_ranked) >= lim then
     raise exception 'You have % unfinished % matches. Finish or forfeit one first.', lim, case when is_ranked then 'ranked' else 'online' end;
   end if;
@@ -384,11 +409,11 @@ begin
   if found then
     update public.matches set guest_player = actor, guest_name = nm, status = 'active', last_move_at = now()
       where id = m.id returning * into m;
-    return m;
+    return jsonb_build_object('match', to_jsonb(m), 'paired', true);
   end if;
   insert into public.matches(id, host_player, host_name, initial_state, latest_state, rules, status, ranked, matchmaking, abandon_after)
     values (m_id, actor, nm, initial, initial, p_rules, 'open', is_ranked, true, interval '3 days') returning * into m;
-  return m;
+  return jsonb_build_object('match', to_jsonb(m), 'paired', false);
 end;
 $$;
 
@@ -439,17 +464,24 @@ $$;
 
 -- Store a team's plan for the current round. The host may plan round 1 while
 -- the match still waits for a guest. Repeating the same plan is a no-op; a
--- different one is refused. Returns {match, both}: both plans are in, so the
--- referee resolves the round. {expired: true}: the match passed its idle limit
--- and has just been settled.
+-- different one is refused. Returns {match, both, inserted}: both plans are
+-- in, so the referee resolves the round; inserted, this call stored the plan
+-- (a repeat is not news to the opponent). A repeat that arrives after the
+-- round was already played returns the match too. {expired: true}: the match
+-- passed its idle limit and has just been settled.
 create or replace function public.seven_submit_plan(actor uuid, m_id text, p_round integer, p_paths jsonb, p_name text default null)
 returns jsonb language plpgsql set search_path = public as $$
-declare m public.matches; t text; existing jsonb;
+declare m public.matches; t text; existing jsonb; inserted boolean;
 begin
   select * into m from public.matches where id = m_id for update;
   if not found then raise exception 'Match not found'; end if;
   t := case actor when m.host_player then 'blue' when m.guest_player then 'red' end;
   if t is null then raise exception 'Not your match'; end if;
+  -- A retry whose first attempt was played (its response was lost).
+  if p_round < m.current_round and exists (select 1 from public.turns where match_id = m_id and round = p_round
+      and team = t and paths = p_paths) then
+    return jsonb_build_object('match', to_jsonb(m), 'both', false, 'inserted', false);
+  end if;
   if m.status not in ('open','active') then raise exception 'This match has finished'; end if;
   if m.last_move_at < now() - m.abandon_after then
     m := public.seven_expire_match(m_id);
@@ -459,7 +491,9 @@ begin
   select paths into existing from public.match_plans where match_id = m_id and round = p_round and team = t;
   if found then
     if existing <> p_paths then raise exception 'Your orders for this round are already in'; end if;
+    inserted := false;
   else
+    inserted := true;
     insert into public.match_plans(match_id, round, team, paths) values (m_id, p_round, t, p_paths);
     insert into public.turns(match_id, round, team, player) values (m_id, p_round, t, actor)
       on conflict (match_id, round, team) do nothing;
@@ -469,15 +503,16 @@ begin
     else update public.matches set guest_name = p_name where id = m_id and guest_name is distinct from p_name; end if;
   end if;
   select * into m from public.matches where id = m_id;
-  return jsonb_build_object('match', to_jsonb(m),
+  return jsonb_build_object('match', to_jsonb(m), 'inserted', inserted,
     'both', (select count(*) from public.match_plans where match_id = m_id and round = p_round) = 2);
 end;
 $$;
 
 -- Record a resolved round: publish both plans on `turns`, keep the round's
 -- start state and seed for replays, advance the board, and finish the match
--- when a side has been eliminated. Only lands while the match is still on
--- p_round, so a duplicate resolution is a no-op (returns false).
+-- when a side has been eliminated (p_winner 'blue' or 'red', or 'draw' when
+-- both fell together). Only lands while the match is still on p_round, so a
+-- duplicate resolution is a no-op (returns false).
 create or replace function public.seven_apply_round(m_id text, p_round integer, p_end jsonb, p_seed bigint, p_winner text)
 returns boolean language plpgsql set search_path = public as $$
 declare m public.matches;
@@ -492,7 +527,7 @@ begin
     current_round = p_round + 1, seed = coalesce(seed, p_seed), last_move_at = now()
     where id = m_id;
   delete from public.match_plans where match_id = m_id and round = p_round;
-  if p_winner is not null then perform public.seven_finish(m_id, p_winner, 'battle'); end if;
+  if p_winner is not null then perform public.seven_finish(m_id, nullif(p_winner, 'draw'), 'battle'); end if;
   return true;
 end;
 $$;
@@ -640,6 +675,9 @@ returns void language plpgsql set search_path = public as $$
 declare id_ text;
 begin
   perform pg_advisory_xact_lock(hashtextextended(actor::text, 7));
+  -- Every match row first, before any profile: a round finishing meanwhile
+  -- takes its match row before profiles too, so the two can't deadlock.
+  perform 1 from public.matches where ranked and actor in (host_player, guest_player) order by id for update;
   for id_ in select id from public.matches where ranked and status in ('open','active') and actor in (host_player, guest_player) order by id loop
     perform public.seven_forfeit(actor, id_);
   end loop;

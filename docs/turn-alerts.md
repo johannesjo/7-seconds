@@ -12,7 +12,10 @@ caused it, so an alert can never slow down or fail a move.
 | The match ends by elimination | the player who planned first | Victory! / Defeat · … Watch the final round. |
 | Your opponent concedes | you | Victory! · *Name* conceded the match. |
 
-AI commanders are never alerted, nor is the player who just acted. A newer
+AI commanders are never alerted, nor is the player who just acted. Not
+covered: matches decided on time by the hourly job (a timeout found during a
+request does alert the winner), and a commander seated by the background job
+after its player left the search (they find the match as their turn). A newer
 alert for a match replaces the older one (per-match tag), in the browser and
 on Android.
 
@@ -32,8 +35,11 @@ on Android.
 - **Android app without Firebase** (a build without `google-services.json`,
   or a phone without Google Play services): local notifications from a match
   left open in the background, as before. Closing the app stops these.
-- **Email** (optional): set `RESEND_API_KEY` and `NOTIFY_FROM_EMAIL` on the
-  function and verify a sender domain in Resend.
+- **Email** (optional, off in production): set `RESEND_API_KEY` and
+  `NOTIFY_FROM_EMAIL` on the function and verify a sender domain in Resend.
+  Addresses in `players.email` are not verified, so anyone could have alerts
+  sent to someone else's address; add a confirmation step before turning
+  email on.
 
 ## Owner setup
 

@@ -9,7 +9,7 @@
 // (referee.test.ts) and the database functions separately (referee-sql.test.ts).
 import { GameEngine } from '../game';
 import { ROUND_DURATION_S } from '../constants';
-import { RULES_VERSION, sanitizePlan, blueAlive, type PathList } from '../online-plan';
+import { RULES_VERSION, sanitizePlan, blueAlive, redAlive, type PathList } from '../online-plan';
 import { isPlausibleGameState, type OnlineGameState } from '../online-types';
 import { planBotPaths, type BotDifficulty } from '../bot';
 import { createRng } from '../rng';
@@ -94,18 +94,25 @@ export function newMatchId(random: () => number): string {
   return id;
 }
 
-/** A display name from untrusted input: printable, short, never posing as an AI. */
-export function cleanName(value: unknown): string | null {
+/** Brackets around "AI" in any form, as an AI commander's name ends. */
+const AI_TAG = /[([{\uFF08\uFF3B\uFF5B]\s*a\s*i\s*[)\]}\uFF09\uFF3D\uFF5D]/gi;
+
+/** A display name from untrusted input: printable, short, never posing as an
+ *  AI commander. NFKC folds look-alikes (fullwidth letters and brackets), and
+ *  the AI tag is removed until none is left, so nesting can't rebuild one. */
+export function cleanName(value: unknown, max = 24): string | null {
   if (typeof value !== 'string') return null;
-  const name = value.normalize('NFC')
-    .replace(/[\p{C}<>]/gu, '')
-    .replace(/\(\s*ai\s*\)/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 24)
-    .trim();
+  let name = value.normalize('NFKC').replace(/[\p{C}<>]/gu, '');
+  for (let previous = ''; previous !== name;) {
+    previous = name;
+    name = name.replace(AI_TAG, '');
+  }
+  name = name.replace(/\s+/g, ' ').trim().slice(0, max).trim();
   return name || null;
 }
+
+/** Longest ranked (Play Games) name kept, matching the match seats' limit. */
+const RANKED_NAME_MAX = 40;
 
 function teamOf(match: MatchRow, user: string): Team | null {
   return match.host_player === user ? 'blue' : match.guest_player === user ? 'red' : null;
@@ -227,17 +234,24 @@ class Referee {
     if (teamOf(before, this.user.id)) return { match: await this.ended(before) };
     if (before.rules !== RULES_VERSION) throw new RequestError(versionMessage(before), 409);
     const match = await this.store.rpc<MatchRow>('seven_join', { actor: this.user.id, m_id: id, p_name: cleanName(this.body.name) });
+    // Past its idle limit: the database settled it instead of seating us.
+    if (match.guest_player !== this.user.id) throw new RequestError('This invite has expired.', 409, { match });
     this.alert(match, 'blue', 'joined');
     return { match };
   }
 
   private async matchmake(ranked: boolean): Promise<unknown> {
     const name = cleanName(this.body.name);
-    const match = await this.withFreshId(id => this.store.rpc<MatchRow>('seven_matchmake', {
-      actor: this.user.id, m_id: id, is_ranked: ranked, p_rules: RULES_VERSION, initial: this.initialState(), p_name: name,
-    }));
-    // Paired into someone's search just now: tell them, unless they've gone.
-    if (match.guest_player === this.user.id && match.current_round === 1) this.alert(match, 'blue', 'joined');
+    let paired = false;
+    const match = await this.withFreshId(async id => {
+      const result = await this.store.rpc<{ match: MatchRow; paired: boolean }>('seven_matchmake', {
+        actor: this.user.id, m_id: id, is_ranked: ranked, p_rules: RULES_VERSION, initial: this.initialState(), p_name: name,
+      });
+      paired = result.paired;
+      return result.match;
+    });
+    // Paired into someone's search just now (not a retry): tell them.
+    if (paired) this.alert(match, 'blue', 'joined');
     return { match };
   }
 
@@ -255,17 +269,26 @@ class Referee {
     const { match, team } = await this.mine();
     // seven_submit_plan settles an idle match itself.
     const current = await this.ended(match, false);
-    if (!IN_PLAY.includes(current.status)) throw new RequestError('This match has finished', 409, { match: current });
     const round = this.body.round;
     if (!Number.isInteger(round)) throw new RequestError('Invalid round', 400);
-    const plan = sanitizePlan(this.body.paths, current.latest_state, team);
+    // A retry of the previous round's plan, whose response was lost after the
+    // round was played: the database recognises it by the published plan.
+    const retry = round === current.current_round - 1 && current.prev_state != null;
+    if (!retry && !IN_PLAY.includes(current.status)) throw new RequestError('This match has finished', 409, { match: current });
+    const board = retry ? current.prev_state as OnlineGameState : current.latest_state;
+    const plan = sanitizePlan(this.body.paths, board, team);
     if (!plan) throw new RequestError('Invalid orders', 400);
-    const result = await this.store.rpc<{ match: MatchRow; both: boolean; expired?: boolean }>('seven_submit_plan', {
+    const result = await this.store.rpc<{ match: MatchRow; both: boolean; inserted?: boolean; expired?: boolean }>('seven_submit_plan', {
       actor: this.user.id, m_id: current.id, p_round: round, p_paths: plan, p_name: current.ranked ? null : cleanName(this.body.name),
     });
-    if (result.expired) throw new RequestError('This match passed its idle limit and has ended.', 409, { match: result.match });
+    if (result.expired) {
+      this.alertTimeout(current, result.match, team);
+      throw new RequestError('This match passed its idle limit and has ended.', 409, { match: result.match });
+    }
+    // A repeat still settles (its first attempt may have failed after storing
+    // the plan), but the opponent was already told.
     const settled = await this.settle(result.match);
-    this.alertAfterMove(result.match, settled, team);
+    if (result.inserted) this.alertAfterMove(result.match, settled, team, true);
     return { match: settled };
   }
 
@@ -275,8 +298,9 @@ class Referee {
   private async advance(): Promise<unknown> {
     const { match, team } = await this.mine();
     const current = await this.ended(match);
+    if (current.status !== match.status) this.alertTimeout(match, current, team);
     const settled = await this.settle(current);
-    this.alertAfterMove(current, settled, team);
+    this.alertAfterMove(current, settled, team, false);
     return { match: settled };
   }
 
@@ -340,7 +364,7 @@ class Referee {
     // rehearse a round against its exact random sequence in advance.
     const seed = Math.floor(this.deps.random() * 0x7fffffff);
     const { endState, gameOver } = GameEngine.resolveRound(match.latest_state, blue, red, seed, ROUND_TICKS);
-    const winner = gameOver ? (blueAlive(endState) ? 'blue' : 'red') : null;
+    const winner = !gameOver ? null : blueAlive(endState) ? 'blue' : redAlive(endState) ? 'red' : 'draw';
     await this.store.rpc<boolean>('seven_apply_round', { m_id: match.id, p_round: match.current_round, p_end: endState, p_seed: seed, p_winner: winner });
   }
 
@@ -353,17 +377,25 @@ class Referee {
     this.deps.notify({ player, match: match.id, kind, ranked: match.ranked, opponent: opponentName(match, recipient), round: match.current_round, ...extra });
   }
 
-  /** After the caller's move: the opponent hears that it's their turn, that
-   *  the round was played, or how the match ended. */
-  private alertAfterMove(before: MatchRow, after: MatchRow, team: Team): void {
+  /** After the caller's move: the opponent hears that it's their turn (only
+   *  for a newly stored plan), that the round was played, or how it ended. */
+  private alertAfterMove(before: MatchRow, after: MatchRow, team: Team, newPlan: boolean): void {
     const other: Team = team === 'blue' ? 'red' : 'blue';
     if (after.status === 'host_won' || after.status === 'guest_won') {
       if (after.finish_reason === 'battle') this.alert(after, other, 'result', { won: (after.status === 'host_won') === (other === 'blue') });
     } else if (after.status === 'active' && after.current_round > before.current_round) {
       this.alert(after, other, 'round');
-    } else if (after.status === 'active' && this.body.action === 'submit') {
+    } else if (after.status === 'active' && newPlan) {
       this.alert(after, other, 'turn');
     }
+  }
+
+  /** A match the caller's request found past its idle limit: the opponent
+   *  hears how it ended if it was decided on time. */
+  private alertTimeout(before: MatchRow, after: MatchRow, team: Team): void {
+    if (before.status !== 'active' || after.finish_reason !== 'timeout') return;
+    const other: Team = team === 'blue' ? 'red' : 'blue';
+    this.alert(after, other, 'result', { won: (after.status === 'host_won') === (other === 'blue') });
   }
 
   // --- ranked ----------------------------------------------------------------
@@ -371,8 +403,10 @@ class Referee {
   private async profile(): Promise<unknown> {
     if (!this.deps.playGames) throw new RequestError('Ranked play isn’t set up on this server yet.', 503);
     const player = await this.deps.playGames(this.body.serverAuthCode);
+    // Shown on every opponent's screen and in match seats: clean it like any name.
+    const name = cleanName(player.name, RANKED_NAME_MAX) ?? 'Commander';
     const p = await this.store.rpc<Record<string, unknown>>('seven_ranked_profile', {
-      actor: this.user.id, pgs_id: player.id, pgs_name: player.name, pgs_avatar: player.avatar,
+      actor: this.user.id, pgs_id: player.id, pgs_name: name, pgs_avatar: player.avatar,
     });
     const { display_name, avatar_url, rating, games, wins, losses, peak_rating } = p;
     return { profile: { display_name, avatar_url, rating, games, wins, losses, peak_rating } };

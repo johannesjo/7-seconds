@@ -1873,9 +1873,9 @@ var GameEngine = class _GameEngine {
   /** Check elimination win condition. Returns true if the round ended. */
   checkElimination() {
     const blueAlive2 = this.units.filter((u) => u.alive && u.team === "blue").length;
-    const redAlive = this.units.filter((u) => u.alive && u.team === "red").length;
-    if (blueAlive2 === 0 || redAlive === 0) {
-      if (redAlive === 0 && blueAlive2 > 0 && this.hordeMode) {
+    const redAlive2 = this.units.filter((u) => u.alive && u.team === "red").length;
+    if (blueAlive2 === 0 || redAlive2 === 0) {
+      if (redAlive2 === 0 && blueAlive2 > 0 && this.hordeMode) {
         this.running = false;
         this.renderer?.ticker.remove(this.tick, this);
         this.projectiles = [];
@@ -1991,14 +1991,14 @@ var GameEngine = class _GameEngine {
     this.pathDrawer?.clearGraphics();
     this.renderer?.effects?.clear();
     const blueAlive2 = this.units.filter((u) => u.alive && u.team === "blue").length;
-    const redAlive = this.units.filter((u) => u.alive && u.team === "red").length;
+    const redAlive2 = this.units.filter((u) => u.alive && u.team === "red").length;
     const blueTotal = this.units.filter((u) => u.team === "blue").length;
     const redTotal = this.units.filter((u) => u.team === "red").length;
     this.onEvent("end", {
       winner,
       blueAlive: blueAlive2,
-      redAlive,
-      blueKilled: redTotal - redAlive,
+      redAlive: redAlive2,
+      blueKilled: redTotal - redAlive2,
       redKilled: blueTotal - blueAlive2,
       duration: this.elapsedTime
     });
@@ -2134,12 +2134,12 @@ var GameEngine = class _GameEngine {
     while (e.simulationTick < maxTicks) {
       e.simulationStep(FIXED_DT);
       const blueAlive3 = e.units.some((u) => u.alive && u.team === "blue");
-      const redAlive2 = e.units.some((u) => u.alive && u.team === "red");
-      if (!blueAlive3 || !redAlive2) break;
+      const redAlive3 = e.units.some((u) => u.alive && u.team === "red");
+      if (!blueAlive3 || !redAlive3) break;
     }
     const blueAlive2 = e.units.some((u) => u.alive && u.team === "blue");
-    const redAlive = e.units.some((u) => u.alive && u.team === "red");
-    return { endState: e.getOnlineGameState(), gameOver: !blueAlive2 || !redAlive };
+    const redAlive2 = e.units.some((u) => u.alive && u.team === "red");
+    return { endState: e.getOnlineGameState(), gameOver: !blueAlive2 || !redAlive2 };
   }
   stop() {
     this.running = false;
@@ -2184,6 +2184,9 @@ function sanitizePlan(paths, state, team) {
 }
 function blueAlive(state) {
   return state.units.some((u) => u.team === "blue" && u.hp > 0);
+}
+function redAlive(state) {
+  return state.units.some((u) => u.team === "red" && u.hp > 0);
 }
 
 // src/bot.ts
@@ -2282,11 +2285,18 @@ function newMatchId(random) {
   for (let i = 0; i < 6; i++) id += ID_CHARS[Math.floor(random() * ID_CHARS.length)];
   return id;
 }
-function cleanName(value) {
+var AI_TAG = /[([{\uFF08\uFF3B\uFF5B]\s*a\s*i\s*[)\]}\uFF09\uFF3D\uFF5D]/gi;
+function cleanName(value, max = 24) {
   if (typeof value !== "string") return null;
-  const name = value.normalize("NFC").replace(/[\p{C}<>]/gu, "").replace(/\(\s*ai\s*\)/gi, "").replace(/\s+/g, " ").trim().slice(0, 24).trim();
+  let name = value.normalize("NFKC").replace(/[\p{C}<>]/gu, "");
+  for (let previous = ""; previous !== name; ) {
+    previous = name;
+    name = name.replace(AI_TAG, "");
+  }
+  name = name.replace(/\s+/g, " ").trim().slice(0, max).trim();
   return name || null;
 }
+var RANKED_NAME_MAX = 40;
 function teamOf(match, user) {
   return match.host_player === user ? "blue" : match.guest_player === user ? "red" : null;
 }
@@ -2409,20 +2419,26 @@ var Referee = class {
     if (teamOf(before, this.user.id)) return { match: await this.ended(before) };
     if (before.rules !== RULES_VERSION) throw new RequestError(versionMessage(before), 409);
     const match = await this.store.rpc("seven_join", { actor: this.user.id, m_id: id, p_name: cleanName(this.body.name) });
+    if (match.guest_player !== this.user.id) throw new RequestError("This invite has expired.", 409, { match });
     this.alert(match, "blue", "joined");
     return { match };
   }
   async matchmake(ranked) {
     const name = cleanName(this.body.name);
-    const match = await this.withFreshId((id) => this.store.rpc("seven_matchmake", {
-      actor: this.user.id,
-      m_id: id,
-      is_ranked: ranked,
-      p_rules: RULES_VERSION,
-      initial: this.initialState(),
-      p_name: name
-    }));
-    if (match.guest_player === this.user.id && match.current_round === 1) this.alert(match, "blue", "joined");
+    let paired = false;
+    const match = await this.withFreshId(async (id) => {
+      const result = await this.store.rpc("seven_matchmake", {
+        actor: this.user.id,
+        m_id: id,
+        is_ranked: ranked,
+        p_rules: RULES_VERSION,
+        initial: this.initialState(),
+        p_name: name
+      });
+      paired = result.paired;
+      return result.match;
+    });
+    if (paired) this.alert(match, "blue", "joined");
     return { match };
   }
   /** The searcher calls in an AI commander. */
@@ -2437,10 +2453,12 @@ var Referee = class {
   async submit() {
     const { match, team } = await this.mine();
     const current = await this.ended(match, false);
-    if (!IN_PLAY.includes(current.status)) throw new RequestError("This match has finished", 409, { match: current });
     const round = this.body.round;
     if (!Number.isInteger(round)) throw new RequestError("Invalid round", 400);
-    const plan = sanitizePlan(this.body.paths, current.latest_state, team);
+    const retry = round === current.current_round - 1 && current.prev_state != null;
+    if (!retry && !IN_PLAY.includes(current.status)) throw new RequestError("This match has finished", 409, { match: current });
+    const board = retry ? current.prev_state : current.latest_state;
+    const plan = sanitizePlan(this.body.paths, board, team);
     if (!plan) throw new RequestError("Invalid orders", 400);
     const result = await this.store.rpc("seven_submit_plan", {
       actor: this.user.id,
@@ -2449,9 +2467,12 @@ var Referee = class {
       p_paths: plan,
       p_name: current.ranked ? null : cleanName(this.body.name)
     });
-    if (result.expired) throw new RequestError("This match passed its idle limit and has ended.", 409, { match: result.match });
+    if (result.expired) {
+      this.alertTimeout(current, result.match, team);
+      throw new RequestError("This match passed its idle limit and has ended.", 409, { match: result.match });
+    }
     const settled = await this.settle(result.match);
-    this.alertAfterMove(result.match, settled, team);
+    if (result.inserted) this.alertAfterMove(result.match, settled, team, true);
     return { match: settled };
   }
   /** Catch up on anything the server owes: an AI commander's move, a round
@@ -2460,8 +2481,9 @@ var Referee = class {
   async advance() {
     const { match, team } = await this.mine();
     const current = await this.ended(match);
+    if (current.status !== match.status) this.alertTimeout(match, current, team);
     const settled = await this.settle(current);
-    this.alertAfterMove(current, settled, team);
+    this.alertAfterMove(current, settled, team, false);
     return { match: settled };
   }
   async forfeit() {
@@ -2517,7 +2539,7 @@ var Referee = class {
     const red = plans.find((p) => p.team === "red").paths;
     const seed = Math.floor(this.deps.random() * 2147483647);
     const { endState, gameOver } = GameEngine.resolveRound(match.latest_state, blue, red, seed, ROUND_TICKS);
-    const winner = gameOver ? blueAlive(endState) ? "blue" : "red" : null;
+    const winner = !gameOver ? null : blueAlive(endState) ? "blue" : redAlive(endState) ? "red" : "draw";
     await this.store.rpc("seven_apply_round", { m_id: match.id, p_round: match.current_round, p_end: endState, p_seed: seed, p_winner: winner });
   }
   // --- alerts --------------------------------------------------------------
@@ -2527,26 +2549,34 @@ var Referee = class {
     if (!player || player === this.user.id || recipient === "red" && match.guest_bot) return;
     this.deps.notify({ player, match: match.id, kind, ranked: match.ranked, opponent: opponentName(match, recipient), round: match.current_round, ...extra });
   }
-  /** After the caller's move: the opponent hears that it's their turn, that
-   *  the round was played, or how the match ended. */
-  alertAfterMove(before, after, team) {
+  /** After the caller's move: the opponent hears that it's their turn (only
+   *  for a newly stored plan), that the round was played, or how it ended. */
+  alertAfterMove(before, after, team, newPlan) {
     const other = team === "blue" ? "red" : "blue";
     if (after.status === "host_won" || after.status === "guest_won") {
       if (after.finish_reason === "battle") this.alert(after, other, "result", { won: after.status === "host_won" === (other === "blue") });
     } else if (after.status === "active" && after.current_round > before.current_round) {
       this.alert(after, other, "round");
-    } else if (after.status === "active" && this.body.action === "submit") {
+    } else if (after.status === "active" && newPlan) {
       this.alert(after, other, "turn");
     }
+  }
+  /** A match the caller's request found past its idle limit: the opponent
+   *  hears how it ended if it was decided on time. */
+  alertTimeout(before, after, team) {
+    if (before.status !== "active" || after.finish_reason !== "timeout") return;
+    const other = team === "blue" ? "red" : "blue";
+    this.alert(after, other, "result", { won: after.status === "host_won" === (other === "blue") });
   }
   // --- ranked ----------------------------------------------------------------
   async profile() {
     if (!this.deps.playGames) throw new RequestError("Ranked play isn\u2019t set up on this server yet.", 503);
     const player = await this.deps.playGames(this.body.serverAuthCode);
+    const name = cleanName(player.name, RANKED_NAME_MAX) ?? "Commander";
     const p = await this.store.rpc("seven_ranked_profile", {
       actor: this.user.id,
       pgs_id: player.id,
-      pgs_name: player.name,
+      pgs_name: name,
       pgs_avatar: player.avatar
     });
     const { display_name, avatar_url, rating, games, wins, losses, peak_rating } = p;

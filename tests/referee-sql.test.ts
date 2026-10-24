@@ -5,8 +5,11 @@
 //   SEVEN_PG_URL=postgresql://postgres@localhost:5432/postgres npx vitest run tests/
 //
 // Skipped without the URL (see tests/pg.ts).
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { vi, describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PG_URL, createTestDatabase, type Role, type TestDatabase } from './pg';
+
+// Each step spawns psql against a real database, and CI runs both files at once.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let db: TestDatabase;
 const run = (sql: string, role?: Role, uid?: string) => db.run(sql, role, uid);
@@ -112,14 +115,15 @@ describeSql('referee database', () => {
   });
 
   it('pairs searchers, reuses a waiting match on retry, and caps unfinished matches', () => {
-    const mm = (who: string, id: string) => run(`select (seven_matchmake('${who}', '${id}', false, 2, ${STATE}, null)).id;`);
+    const mm = (who: string, id: string) => run(`select seven_matchmake('${who}', '${id}', false, 2, ${STATE}, null)->'match'->>'id';`);
     expect(mm(A, 'queue1')).toBe('queue1');
     expect(mm(A, 'queue2')).toBe('queue1'); // still waiting: the same match
-    expect(mm(B, 'queue3')).toBe('queue1'); // paired into A's search
+    expect(run(`select seven_matchmake('${B}', 'queue3', false, 2, ${STATE}, null)->>'paired';`)).toBe('true'); // paired into A's search
     expect(mm(B, 'queue4')).toBe('queue1'); // retry within two minutes, nothing planned yet
+    expect(run(`select seven_matchmake('${B}', 'queue4', false, 2, ${STATE}, null)->>'paired';`)).toBe('false'); // and not news again
     expect(run(`select guest_player = '${B}', status from matches where id = 'queue1';`)).toBe('t|active');
     // Ranked and casual queues and other rules versions never mix.
-    expect(run(`select (seven_matchmake('${C}', 'queue5', false, 3, ${STATE}, null)).id;`)).toBe('queue5');
+    expect(run(`select seven_matchmake('${C}', 'queue5', false, 3, ${STATE}, null)->'match'->>'id';`)).toBe('queue5');
     expect(failure(`select seven_matchmake('${C}', 'queue6', true, 2, ${STATE}, null);`)).toMatch(/Play Games profile required/);
     run(`select seven_cancel('${C}', 'queue5'); select seven_forfeit('${A}', 'queue1');`);
 
@@ -164,8 +168,8 @@ describeSql('referee database', () => {
     run(`select seven_ranked_profile('${A}', 'pgsA', 'Ann', null); select seven_ranked_profile('${B}', 'pgsB', 'Bea', 'https://lh3.googleusercontent.com/a/b');`);
     expect(failure(`select seven_ranked_profile('${A}', 'pgsOther', 'Ann', null);`)).toMatch(/bound to another/);
     expect(failure(`select seven_ranked_profile('${C}', 'pgsC', 'Cy', 'https://evil.example/x.png');`)).toMatch(/avatar_url/);
-    expect(run(`select (seven_matchmake('${A}', 'rank01', true, 2, ${STATE}, 'ignored')).host_name;`)).toBe('Ann');
-    expect(run(`select (seven_matchmake('${B}', 'rank02', true, 2, ${STATE}, null)).id;`)).toBe('rank01');
+    expect(run(`select seven_matchmake('${A}', 'rank01', true, 2, ${STATE}, 'ignored')->'match'->>'host_name';`)).toBe('Ann');
+    expect(run(`select seven_matchmake('${B}', 'rank02', true, 2, ${STATE}, null)->'match'->>'id';`)).toBe('rank01');
     // Invites are casual only.
     expect(failure(`select seven_join('${C}', 'rank01', null);`)).toMatch(/not found/i);
 
@@ -227,5 +231,49 @@ describeSql('referee database', () => {
     run(`select seven_push_unregister('token-6-xxxxxxxxxxxxxxxxxxxxxxxx');`, 'authenticated', A);
     expect(run(`select count(*) from push_devices where player = '${A}';`)).toBe('4');
     expect(failure(`select seven_push_register('token-x-xxxxxxxxxxxxxxxxxxxxxxxx');`, 'anon')).toMatch(/permission denied|sign-in required/);
+  });
+
+  it('never hands out a win on time against an AI commander that had no chance to plan', () => {
+    clear(A);
+    run(`select seven_matchmake('${A}', 'nobot1', true, 2, ${STATE}, null);`);
+    run(`select seven_submit_plan('${A}', 'nobot1', 1, '[]'::jsonb, null);`);
+    backdate(`created_at = now() - interval '5 minutes'`, `id = 'nobot1'`);
+    expect(run(`select seven_assign_bots();`)).toBe('1'); // seated by the job: no plan
+    const before = run(`select rating, games from ranked_profiles where player = '${A}';`);
+    backdate(`last_move_at = now() - interval '4 days'`, `id = 'nobot1'`);
+    expect(run(`select public.expire_abandoned_matches();`, 'postgres')).toBe('1');
+    expect(run(`select status, finish_reason from matches where id = 'nobot1';`)).toBe('abandoned|abandoned');
+    expect(run(`select rating, games from ranked_profiles where player = '${A}';`)).toBe(before);
+  });
+
+  it('records a draw when both armies fall together', () => {
+    run(`select seven_create('${A}', 'draw01', 2, ${STATE}, null); select seven_join('${B}', 'draw01', null);
+      select seven_submit_plan('${A}', 'draw01', 1, '[]'::jsonb, null); select seven_submit_plan('${B}', 'draw01', 1, '[]'::jsonb, null);
+      select seven_apply_round('draw01', 1, ${STATE}, 1, 'draw');`);
+    expect(run(`select status, finish_reason from matches where id = 'draw01';`)).toBe('abandoned|battle');
+  });
+
+  it('tells a new plan from a repeat, and accepts a repeat after its round was played', () => {
+    run(`select seven_create('${A}', 'rept01', 2, ${STATE}, null); select seven_join('${B}', 'rept01', null);`);
+    expect(run(`select seven_submit_plan('${A}', 'rept01', 1, ${PLAN}, null)->>'inserted';`)).toBe('true');
+    expect(run(`select seven_submit_plan('${A}', 'rept01', 1, ${PLAN}, null)->>'inserted';`)).toBe('false');
+    run(`select seven_submit_plan('${B}', 'rept01', 1, '[]'::jsonb, null); select seven_apply_round('rept01', 1, ${STATE}, 5, 'blue');`);
+    // The match is over, yet the lost-response retry of round 1 still succeeds...
+    expect(run(`select seven_submit_plan('${A}', 'rept01', 1, ${PLAN}, null)->'match'->>'status';`)).toBe('host_won');
+    // ...while different orders for it are refused.
+    expect(failure(`select seven_submit_plan('${A}', 'rept01', 1, '[]'::jsonb, null);`)).toMatch(/has finished/);
+    expect(run(`select count(*) from match_plans where match_id = 'rept01';`)).toBe('0');
+  });
+
+  it('settles an expired invite someone tries to join, instead of rolling it back', () => {
+    run(`select seven_create('${A}', 'oldinv', 2, ${STATE}, null);`);
+    backdate(`last_move_at = now() - interval '8 days'`, `id = 'oldinv'`);
+    expect(run(`select (seven_join('${C}', 'oldinv', null)).status;`)).toBe('abandoned');
+    expect(run(`select guest_player is null from matches where id = 'oldinv';`)).toBe('t');
+  });
+
+  it('never reuses the id of a rated match that was deleted', () => {
+    run(`insert into ranked_results(match_id, winner, host_delta, guest_delta, reason, rounds) values ('ghost1', 'blue', 0, 0, 'battle', 1);`);
+    expect(failure(`select seven_create('${C}', 'ghost1', 2, ${STATE}, null);`)).toMatch(/23505|already used/);
   });
 });
