@@ -897,6 +897,8 @@ function startNextHordeWave(plan: HordeWavePlan): void {
   showWaveBanner(plan);
 }
 
+const UPGRADE_TAP_GUARD_MS = 350;
+
 /** The next wave as it will play, including the pact's curse once accepted. */
 function upcomingHordePlan(): HordeWavePlan {
   return hordePactAccepted && hordePact ? withCurse(hordeNextPlan!, hordePact.curse) : hordeNextPlan!;
@@ -942,6 +944,9 @@ function showUpgradeSelection(): void {
 
   const upgrades = pickUpgrades(hordeUnits, hordeWave, hordeAppliedUpgrades);
   upgradeCardsEl.innerHTML = '';
+  // A bonus pick deals new cards where the old ones were: ignore a double tap
+  // so it can't spend the next pick (and start the wave) unseen.
+  const shownAt = performance.now();
 
   for (const upgrade of upgrades) {
     const card = document.createElement('div');
@@ -956,6 +961,7 @@ function showUpgradeSelection(): void {
       ${unitTag}
     `;
     card.addEventListener('click', () => {
+      if (performance.now() - shownAt < UPGRADE_TAP_GUARD_MS) return;
       const allBlocks = hordeMap!.obstacles;
       hordeAppliedUpgrades.set(upgrade.id, (hordeAppliedUpgrades.get(upgrade.id) ?? 0) + 1);
       const prevCount = hordeUnits.length;
@@ -1281,6 +1287,10 @@ newBattleBtn.addEventListener('click', () => {
   hordeNextPlan = null;
   hordePact = null;
   hordePactAccepted = false;
+  hordeBonusPicks = 0;
+  hordePicksMade = 0;
+  hordeScore = 0;
+  hordeRecordAtStart = null;
   canContinueEndless = false;
   waveCounterEl.style.display = 'none';
 

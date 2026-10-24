@@ -4,7 +4,7 @@ import {
   waveComposition, waveScore, describePlan, spawnHordeWave, type HordeWavePlan, type WaveModifierId,
 } from './horde-waves';
 import { HORDE_WAVES } from './horde';
-import { HORDE_MAX_WAVES, MAP_WIDTH, MAP_HEIGHT, UNIT_STATS } from './constants';
+import { HORDE_MAX_WAVES, MAP_WIDTH, MAP_HEIGHT, UNIT_STATS, setMapSize } from './constants';
 import { createRng } from './rng';
 
 const count = (comp: { type: string; count: number }[], type: string) =>
@@ -63,6 +63,10 @@ describe('rollModifiers', () => {
     }
   });
 
+  it('keeps endless boss waves about the boss', () => {
+    expect(rollModifiers(HORDE_MAX_WAVES + 5, createRng(1))).toEqual([]);
+  });
+
   it('respects each modifier\'s earliest wave', () => {
     for (let seed = 1; seed < 200; seed++) {
       for (const id of rollModifiers(4, createRng(seed))) {
@@ -110,9 +114,21 @@ describe('spawnHordeWave', () => {
     }
   });
 
+  it('keeps flank columns at the sides on the narrowest map', () => {
+    setMapSize(360, 620);
+    try {
+      const units = spawnHordeWave(plan(HORDE_MAX_WAVES + 15, ['swarm', 'flank']), [], []);
+      for (const u of units) {
+        expect(Math.min(u.pos.x, MAP_WIDTH - u.pos.x)).toBeLessThanOrEqual(MAP_WIDTH * 0.3);
+      }
+    } finally {
+      setMapSize(1000, 1000);
+    }
+  });
+
   it('brings half the horde in close on an ambush', () => {
     const units = spawnHordeWave(plan(8, ['ambush']), [], []);
-    const close = units.filter(u => u.pos.y >= MAP_HEIGHT * 0.5);
+    const close = units.filter(u => u.pos.y >= MAP_HEIGHT * 0.45);
     expect(close.length).toBe(Math.floor(units.length / 2));
   });
 

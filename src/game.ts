@@ -741,6 +741,7 @@ export class GameEngine {
         radius: u.radius,
         shieldHits: u.shieldHits,
         ...(u.rocketFired ? { rocketFired: true } : {}),
+        ...(u.boss ? { boss: u.boss } : {}),
       })),
       projectiles: this.projectiles.map(p => ({
         x: p.pos.x,

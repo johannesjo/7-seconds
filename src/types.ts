@@ -141,6 +141,7 @@ export interface ReplayUnitSnapshot {
   radius: number;
   shieldHits?: number;
   rocketFired?: boolean;
+  boss?: string;
 }
 
 export interface ReplayProjectileSnapshot {

@@ -195,6 +195,8 @@ function sniperNestSize(wave: number): number {
 const FLANK_MARGIN = 24;
 const FLANK_COLUMN_GAP = 28;
 const FLANK_MAX_ROWS = 12;
+/** Flank columns stay within this share of the map width on each side. */
+const FLANK_MAX_WIDTH = 0.3;
 
 /** Line units up in columns along the left and right edges within a band of the map. */
 function placeOnFlanks(units: Unit[], yMinFrac: number, yMaxFrac: number, blocks: Obstacle[]): void {
@@ -203,7 +205,10 @@ function placeOnFlanks(units: Unit[], yMinFrac: number, yMaxFrac: number, blocks
   const yMin = MAP_HEIGHT * yMinFrac;
   const yMax = MAP_HEIGHT * yMaxFrac;
   sides.forEach((side, s) => {
-    const cols = Math.max(1, Math.ceil(side.length / FLANK_MAX_ROWS));
+    // Big waves on narrow maps add rows rather than columns, so the sides
+    // never close into a wall across the middle.
+    const maxCols = Math.max(1, Math.floor((MAP_WIDTH * FLANK_MAX_WIDTH - FLANK_MARGIN) / FLANK_COLUMN_GAP) + 1);
+    const cols = Math.min(maxCols, Math.max(1, Math.ceil(side.length / FLANK_MAX_ROWS)));
     const rows = Math.max(1, Math.ceil(side.length / cols));
     side.forEach((u, k) => {
       const offset = FLANK_MARGIN + (k % cols) * FLANK_COLUMN_GAP;
@@ -268,7 +273,8 @@ export function spawnHordeWave(plan: HordeWavePlan, blocks: Obstacle[], elevatio
   placeSniperNest(nest, elevationZones, blocks);
   const movable = units.filter(u => !nest.includes(u));
   if (mods.has('flank')) placeOnFlanks(movable, 0.2, 0.65, blocks);
-  if (mods.has('ambush')) placeOnFlanks(movable.filter((_, i) => i % 2 === 1), 0.5, 0.75, blocks);
+  // Close, but out of gun range of the spawn line on round 1.
+  if (mods.has('ambush')) placeOnFlanks(movable.filter((_, i) => i % 2 === 1), 0.45, 0.65, blocks);
 
   if (plan.boss) units.push(createBoss(plan.boss, plan.wave, blocks));
   applyEnemyStats(units, plan);
