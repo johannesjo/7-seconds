@@ -53,6 +53,8 @@ export interface Unit {
   momentum?: number;
   /** Shielder only: number of frontal hits absorbed by shield. Shield breaks at SHIELD_MAX_HITS. */
   shieldHits?: number;
+  /** Horde boss: its display name. Bosses are oversized versions of a base type. */
+  boss?: string;
 }
 
 export interface Projectile {

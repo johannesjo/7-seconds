@@ -1409,6 +1409,7 @@ var GameEngine = class _GameEngine {
   hordeStartDelay = 0;
   hordeBlueUnits = null;
   hordeRedArmy = null;
+  hordeRedUnits = null;
   hordeMap = null;
   ctfMode = false;
   ctfState = null;
@@ -1440,6 +1441,7 @@ var GameEngine = class _GameEngine {
     this.hordeMode = opts?.horde ?? false;
     this.hordeBlueUnits = opts?.hordeBlueUnits ?? null;
     this.hordeRedArmy = opts?.hordeRedArmy ?? null;
+    this.hordeRedUnits = opts?.hordeRedUnits ?? null;
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.onlineHostMode = opts?.onlineHost ?? false;
@@ -1486,8 +1488,8 @@ var GameEngine = class _GameEngine {
     }
     const allBlocks = this.obstacles;
     if (!this.ctfMode && !this.practice && !this.initialState) {
-      if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
-        const redUnits = createMissionArmy("red", this.hordeRedArmy, allBlocks);
+      if (this.hordeMode && this.hordeBlueUnits && (this.hordeRedUnits || this.hordeRedArmy)) {
+        const redUnits = this.hordeRedUnits ?? createMissionArmy("red", this.hordeRedArmy, allBlocks);
         const waveTag = `w${Date.now() % 1e4}`;
         for (const u of redUnits) {
           u.id = u.id.replace("red_", `red_${waveTag}_`);

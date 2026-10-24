@@ -86,6 +86,7 @@
       --color-result-blue: #4a9eff;
       --color-result-red: #ff4a4a;
       --color-result-horde-win: #ff8844;
+      --color-pact-sealed-bg: rgba(255, 74, 74, 0.16);
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -538,11 +539,31 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      justify-content: safe center;
       gap: 24px;
-      padding-top: var(--sat);
+      padding: calc(16px + var(--sat)) 16px calc(16px + var(--sab));
+      overflow-y: auto;
       background: var(--color-overlay-heavy);
       z-index: 18;
     }
+    .upgrade-next { font-size: 14px; opacity: 0.85; margin: -12px 0 0; text-align: center; }
+    .upgrade-next:empty { display: none; }
+    /* Pact: an optional curse on the next wave in exchange for a bonus pick */
+    .pact-btn {
+      max-width: 520px;
+      padding: 10px 16px;
+      font: inherit;
+      font-size: 13px;
+      line-height: 1.4;
+      text-align: center;
+      background: transparent;
+      color: inherit;
+      border: 1px dashed var(--color-result-red);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .pact-btn strong { color: var(--color-result-red); letter-spacing: 1px; text-transform: uppercase; }
+    .pact-btn[aria-pressed="true"] { background: var(--color-pact-sealed-bg); border-style: solid; }
 
     /* Upgrade cards */
     .upgrade-card {
@@ -635,6 +656,7 @@
       #result-screen button { min-height: 46px; font-size: 14px; }
       .speed-controls button { min-height: 36px; padding: 6px 10px; font-size: 11px; }
       .upgrade-card { width: 160px; padding: 14px 16px; }
+      #upgrade-screen { gap: 16px; }
       .upgrade-card .card-label { font-size: 15px; }
     }
 
@@ -765,6 +787,7 @@
         <p id="ai-record" class="menu-meta"></p>
         <button id="daily-btn" class="menu-btn menu-btn--daily">Daily challenge <span id="daily-badge" class="menu-badge" hidden></span></button>
         <button id="horde-btn" class="menu-btn menu-btn--horde">Horde</button>
+        <p id="horde-record" class="menu-meta"></p>
         <button id="tutorial-btn" class="menu-btn menu-btn--quiet">Learn to play</button>
       </section>
       <section class="menu-group" aria-labelledby="menu-online-heading">
@@ -897,8 +920,10 @@
   </div>
 
   <div id="upgrade-screen">
-    <h2 style="font-size:32px;letter-spacing:3px;text-transform:uppercase;color:var(--color-upgrade-heading)">Wave Clear!</h2>
-    <p style="font-size:16px;opacity:0.7">Choose an upgrade</p>
+    <h2 id="upgrade-title" style="font-size:32px;letter-spacing:3px;text-transform:uppercase;color:var(--color-upgrade-heading);text-align:center">Wave Clear!</h2>
+    <p id="upgrade-sub" style="font-size:16px;opacity:0.7;text-align:center">Choose an upgrade</p>
+    <p id="upgrade-next" class="upgrade-next"></p>
+    <button id="pact-btn" class="pact-btn" type="button" aria-pressed="false" hidden></button>
     <div id="upgrade-cards" style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;max-width:700px"></div>
     <button id="upgrade-replay-btn" style="display:none;padding:8px 24px;font-size:13px;border-radius:4px;cursor:pointer" class="replay-btn-upgrade">Watch Replay</button>
   </div>
@@ -910,6 +935,7 @@
       <div class="stats" id="result-stats"></div>
       <p id="result-record"></p>
       <div class="buttons">
+        <button id="endless-btn" class="result-primary" style="display:none">Keep going: Endless</button>
         <button id="rematch-btn" class="result-primary">Rematch</button>
         <button id="retry-encounter-btn" style="display:none" title="Retry the same map and armies from round 1">Try another plan</button>
         <button id="share-result-btn" style="display:none">Share result</button>

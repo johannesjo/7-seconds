@@ -56,6 +56,7 @@ export class GameEngine {
   private hordeStartDelay = 0;
   private hordeBlueUnits: Unit[] | null = null;
   private hordeRedArmy: { type: UnitType; count: number }[] | null = null;
+  private hordeRedUnits: Unit[] | null = null;
   private hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
   private ctfMode = false;
   private ctfState: CtfState | null = null;
@@ -85,6 +86,8 @@ export class GameEngine {
     horde?: boolean;
     hordeBlueUnits?: Unit[];
     hordeRedArmy?: { type: UnitType; count: number }[];
+    /** Pre-built wave enemies (bosses, modifiers); takes precedence over hordeRedArmy. */
+    hordeRedUnits?: Unit[];
     hordeMap?: { obstacles: Obstacle[]; elevationZones: ElevationZone[] };
     ctfMode?: boolean;
     ctfHotseat?: boolean;
@@ -109,6 +112,7 @@ export class GameEngine {
     this.hordeMode = opts?.horde ?? false;
     this.hordeBlueUnits = opts?.hordeBlueUnits ?? null;
     this.hordeRedArmy = opts?.hordeRedArmy ?? null;
+    this.hordeRedUnits = opts?.hordeRedUnits ?? null;
     this.hordeMap = opts?.hordeMap ?? null;
     this.ctfMode = opts?.ctfMode ?? false;
     this.onlineHostMode = opts?.onlineHost ?? false;
@@ -164,9 +168,9 @@ export class GameEngine {
     const allBlocks = this.obstacles;
 
     if (!this.ctfMode && !this.practice && !this.initialState) {
-      if (this.hordeMode && this.hordeBlueUnits && this.hordeRedArmy) {
+      if (this.hordeMode && this.hordeBlueUnits && (this.hordeRedUnits || this.hordeRedArmy)) {
         // Horde mode: use pre-created blue units + spawn wave enemies
-        const redUnits = createMissionArmy('red', this.hordeRedArmy, allBlocks);
+        const redUnits = this.hordeRedUnits ?? createMissionArmy('red', this.hordeRedArmy!, allBlocks);
         // Prefix red IDs with wave index to avoid renderer collisions
         const waveTag = `w${Date.now() % 10000}`;
         for (const u of redUnits) {
