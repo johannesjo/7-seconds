@@ -20,13 +20,13 @@ Terrain matters: elevation grants range bonuses, obstacles block movement and li
 
 ## Game Modes
 
-- **vs AI** — Single player against AI opponents, on Easy, Normal or Hard (Easy gives the AI one unit fewer and looser planning; Hard gives it an extra soldier). Your win/loss record and streak are kept per difficulty.
+- **Play vs AI** — Single player against AI opponents; pick Easy, Normal or Hard after tapping Play (Easy gives the AI one unit fewer and looser planning; Hard gives it an extra soldier). Your win/loss record and streak are kept per difficulty.
 - **Daily challenge** — The same map, armies and battle seed for everyone each day. Your first finished attempt counts; share the result as a spoiler-free emoji summary.
 - **Horde** — Survive 10 waves of increasingly difficult enemies, choosing upgrades between waves
-- **Play a Stranger** — Matched with a random opponent; if nobody is searching, an AI commander takes the seat
-- **Play a Friend** — Share a link and play against a friend, at your own pace
+- **Online: Random** — Matched with a random opponent; if nobody is searching, an AI commander takes the seat
+- **Online: Friend** — Share a link and play against a friend, at your own pace
 - **Ranked** (Android) — Elo ladder with Google Play Games sign-in
-- **Local PvP** — Hot-seat multiplayer on the same device
+- **Pass & Play** — Hot-seat multiplayer on the same device
 
 ## Unit Types
 
