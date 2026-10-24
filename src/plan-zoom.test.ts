@@ -53,8 +53,9 @@ describe('PinchZoom', () => {
   let canvas: EventTarget & { getBoundingClientRect(): DOMRect };
   let stage: { zoom: number; x: number; y: number; scale: { set(v: number): void }; position: { set(x: number, y: number): void } };
 
+  // Pointer 1 plays the first finger of a touch sequence.
   const pointer = (type: string, pointerId: number, clientX: number, clientY: number): Event =>
-    Object.assign(new Event(type), { pointerId, clientX, clientY });
+    Object.assign(new Event(type), { pointerId, clientX, clientY, isPrimary: pointerId === 1 });
 
   function makeCanvas(cssWidth: number): void {
     canvas = Object.assign(new EventTarget(), {
@@ -120,5 +121,14 @@ describe('PinchZoom', () => {
 
     zoom.detach();
     expect(stage).toMatchObject({ zoom: 1, x: 0, y: 0 });
+  });
+
+  it('does not count a finger whose pointerup was missed', () => {
+    makeCanvas(400);
+    const zoom = new PinchZoom(canvas as unknown as HTMLCanvasElement, stage);
+    zoom.attach();
+    canvas.dispatchEvent(pointer('pointerdown', 7, 100, 100)); // never lifted
+    canvas.dispatchEvent(pointer('pointerdown', 1, 200, 200)); // new touch sequence
+    expect(zoom.gesturing).toBe(false);
   });
 });

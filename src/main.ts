@@ -214,14 +214,21 @@ function markTutorialSeen(): void {
 }
 
 const ZOOM_HINT_KEY = '7s-zoom-hint-seen';
+const ZOOM_HINT_DELAY_MS = 4000;
+let zoomHintTimer: number | undefined;
 
-/** The first time a map is shown small enough for pinch zoom, say so. */
+/** The first time a map is shown small enough for pinch zoom, say so. Waits
+ *  out any turn toast shown alongside, and only counts as seen once shown. */
 function showZoomHint(): void {
   try {
     if (localStorage.getItem(ZOOM_HINT_KEY) !== null) return;
-    localStorage.setItem(ZOOM_HINT_KEY, '1');
   } catch { return; }
-  showToast('Pinch with two fingers to zoom in');
+  clearTimeout(zoomHintTimer);
+  zoomHintTimer = window.setTimeout(() => {
+    if (!planningOverlay.classList.contains('active')) return;
+    try { localStorage.setItem(ZOOM_HINT_KEY, '1'); } catch { /* unavailable */ }
+    showToast('Pinch with two fingers to zoom in');
+  }, ZOOM_HINT_DELAY_MS);
 }
 let retryEncounter: { state: OnlineGameState; seed: number } | null = null;
 let canRetryEncounter = false;

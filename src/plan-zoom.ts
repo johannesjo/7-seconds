@@ -115,6 +115,12 @@ export class PinchZoom {
   }
 
   private onDown = (e: PointerEvent): void => {
+    // A primary pointer starts a fresh touch sequence: drop any finger whose
+    // pointerup we somehow missed, so it can't turn a lone touch into a pinch.
+    if (e.isPrimary) {
+      this.pointers.clear();
+      this.gesture = null;
+    }
     this.pointers.set(e.pointerId, this.toCanvas(e));
     if (this.pointers.size === 2) {
       const { mid, dist } = this.midAndDist();
