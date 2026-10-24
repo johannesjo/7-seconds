@@ -3,6 +3,7 @@ import { initializeLocalTurnNotifications, getLocalTurnNotificationStatus, setLo
 import { getSupabaseClient } from './online';
 import { currentUserId, ensureAuth } from './online-auth';
 import { dlog } from './online-debug';
+import { turnAlertsAvailable, turnAlertsState, enableTurnAlerts, disableTurnAlerts, setupTurnAlerts, type OpenedAlert } from './turn-alerts';
 
 /** Public VAPID key; its private half belongs only in Supabase secrets. */
 export const VAPID_PUBLIC_KEY = 'BOGFapbC8n1znzd3Pdo8-HN--IiKKJO8lDxkiUJcIT4GOKC7lwbmaUO86-y766Q-vE9ulgTLY1NJ1zkk82X2AZs';
@@ -12,10 +13,22 @@ const webAvailable = () => !Capacitor.isNativePlatform()
   && typeof navigator !== 'undefined' && 'serviceWorker' in navigator
   && typeof Notification !== 'undefined' && !!VAPID_PUBLIC_KEY;
 
-/** Restore an existing opt-in without creating an account or prompting. */
-export async function initializeTurnNotifications(openMatch: (matchId: string) => void): Promise<void> {
+/** True when this device gets turn alerts from the server even while the
+ *  app is closed (Firebase in the Android app), not only from an open match. */
+export async function closedAppAlerts(): Promise<boolean> {
+  return Capacitor.isNativePlatform() && await turnAlertsAvailable();
+}
+
+/** Restore an existing opt-in without creating an account or prompting.
+ *  `openMatch` opens a tapped alert's match; `onAlert` hears alerts that
+ *  arrive while the app is open (to refresh match lists). */
+export async function initializeTurnNotifications(
+  openMatch: (matchId: string, ranked: boolean) => void,
+  onAlert: (alert: OpenedAlert) => void = () => {},
+): Promise<void> {
   if (Capacitor.isNativePlatform()) {
-    await initializeLocalTurnNotifications(openMatch);
+    if (await turnAlertsAvailable()) await setupTurnAlerts(alert => openMatch(alert.match, alert.ranked), onAlert);
+    else await initializeLocalTurnNotifications(id => openMatch(id, false));
     return;
   }
   try {
@@ -34,10 +47,19 @@ export async function initializeTurnNotifications(openMatch: (matchId: string) =
   }
 }
 
-export interface TurnNotificationStatus { enabled: boolean; available: boolean }
+export interface TurnNotificationStatus {
+  enabled: boolean;
+  available: boolean;
+  /** Turned on, but notifications are off in Android settings. */
+  blocked?: boolean;
+}
 
 /** Saved preference plus a usable channel; suitable for the lobby checkbox. */
 export async function getTurnNotificationStatus(): Promise<TurnNotificationStatus> {
+  if (await closedAppAlerts()) {
+    const state = await turnAlertsState();
+    return { enabled: state === 'on', available: true, blocked: state === 'blocked' };
+  }
   if (Capacitor.isNativePlatform()) return getLocalTurnNotificationStatus();
   const available = webAvailable();
   if (!available) return { enabled: false, available: false };
@@ -112,6 +134,10 @@ export async function registerTurnNotifications(opts: { email?: string } = {}): 
 
 /** Opt in after permission and a usable local/browser notification channel. */
 export async function setTurnNotifications(enabled: boolean): Promise<boolean> {
+  if (await closedAppAlerts()) {
+    if (!enabled) { await disableTurnAlerts(); return true; }
+    return (await enableTurnAlerts()) === 'on';
+  }
   if (Capacitor.isNativePlatform()) return setLocalTurnNotifications(enabled);
   const uid = await ensureAuth();
   if (!uid) return false;

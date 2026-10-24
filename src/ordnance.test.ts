@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { GameEngine } from './game';
 import { planRocket } from './ai-planner';
-import { hashPaths } from './online-async-core';
-import type { PathList } from './online-async-core';
+import { sanitizePlan, type PathList } from './online-plan';
 import type { OnlineGameState } from './online-types';
 import type { Obstacle, Unit } from './types';
 import { createUnit, segmentHitsRect } from './units';
@@ -192,25 +191,12 @@ describe('rocketeer', () => {
     e.stop();
   });
 
-  it('hashes plain paths exactly as before rockets existed', () => {
-    // Value computed with hashPaths at the commit before this feature.
-    expect(hashPaths([{ unitId: 'b', waypoints: [{ x: 1.5, y: 2.25 }, { x: 100, y: 200 }] }, { unitId: 'a', waypoints: [] }]))
-      .toBe(206322784);
-  });
-
-  it('hashes junk rocket paths without throwing, like the engine reads them', () => {
-    const base: PathList = [{ unitId: 'k', waypoints: [] }];
-    const junk = [{ ...base[0], rocketPath: [null, { x: null, y: 2 }] }] as unknown as PathList;
-    expect(hashPaths(junk)).toBe(hashPaths(base));
-    expect(() => hashPaths([{ ...base[0], rocketPath: { length: 2 } }] as unknown as PathList)).not.toThrow();
-  });
-
-  it('commits to the rocket path in the plan hash', () => {
-    const base: PathList = [{ unitId: 'k', waypoints: [] }];
-    const a = hashPaths([{ ...base[0], rocketPath: [{ x: 1, y: 2 }] }]);
-    const b = hashPaths([{ ...base[0], rocketPath: [{ x: 1, y: 3 }] }]);
-    expect(a).not.toBe(hashPaths(base));
-    expect(a).not.toBe(b);
-    expect(hashPaths([{ ...base[0], rocketPath: [] }])).toBe(hashPaths(base));
+  it('reads junk rocket paths without throwing, as the referee stores them', () => {
+    const s = state([{ id: 'k', type: 'rocketeer', team: 'red', x: 50, y: 50 }]);
+    const junk = [{ unitId: 'k', waypoints: [], rocketPath: [null, { x: null, y: 2 }] }] as unknown as PathList;
+    expect(sanitizePlan(junk, s, 'red')).toEqual([{ unitId: 'k', waypoints: [] }]);
+    expect(() => sanitizePlan([{ unitId: 'k', waypoints: [], rocketPath: { length: 2 } }], s, 'red')).not.toThrow();
+    expect(sanitizePlan([{ unitId: 'k', waypoints: [], rocketPath: [{ x: 1, y: 2 }] }], s, 'red'))
+      .toEqual([{ unitId: 'k', waypoints: [], rocketPath: [{ x: 1, y: 2 }] }]);
   });
 });

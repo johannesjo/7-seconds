@@ -1,8 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AsyncGameController, withTimeout, IO_TIMEOUT_MS, type AsyncIO, type PathStash, type AsyncGameHooks, type PlayRoundInput, type PollEnv } from './online-async-game';
-import { hashPaths, type PathList } from './online-async-core';
-import type { MatchRecord, MatchStatus, RoundTurn } from './online-async';
+import {
+  AsyncGameController, withTimeout, IO_TIMEOUT_MS, ADVANCE_INTERVAL_MS,
+  type AsyncIO, type AsyncGameHooks, type PlayRoundInput, type PollEnv, type WatchStore,
+} from './online-async-game';
+import type { PathList } from './online-async-core';
+import type { MatchRecord, MatchStatus, RoundTurn, RefereeResult } from './online-async';
 import type { OnlineGameState } from './online-types';
+import { RULES_VERSION } from './online-plan';
 
 function makeState(blueHp: number, redHp: number): OnlineGameState {
   const unit = (id: string, team: 'blue' | 'red', hp: number) => ({
@@ -16,66 +20,96 @@ function makeState(blueHp: number, redHp: number): OnlineGameState {
 }
 
 const initial = makeState(100, 100);
+const plan = (unitId: string, x = 1): PathList => [{ unitId, waypoints: [{ x, y: 1 }] }];
 
-/** Shared in-memory backend two controllers talk to. */
-class FakeBackend {
+/** An in-memory referee: holds each plan until both are in, then "resolves"
+ *  the round by taking 50 hp off red, so red falls after two rounds. */
+class FakeReferee {
   match: MatchRecord;
   turns: RoundTurn[] = [];
+  private plans = new Map<string, PathList>();
   listeners = new Set<() => void>();
+  calls: string[] = [];
+  /** When true, the second plan does not resolve the round (a failed run). */
+  holdResolution = false;
+  /** Next submit fails with this result. */
+  failNextSubmit: RefereeResult | null = null;
 
-  constructor(id: string, host: string) {
+  constructor(id: string, host: string, extra: Partial<MatchRecord> = {}) {
     this.match = {
-      id, hostPlayer: host, guestPlayer: null,
-      initialState: initial, latestState: initial,
-      seed: null, currentRound: 1, status: 'open',
+      id, hostPlayer: host, guestPlayer: null, hostName: 'Host', guestName: null, guestBot: false,
+      initialState: initial, latestState: initial, prevState: null, prevSeed: null,
+      currentRound: 1, status: 'open', finishReason: null, rules: RULES_VERSION,
+      ranked: false, matchmaking: false, updatedAt: '', ...extra,
     };
   }
 
   private notify() { for (const l of [...this.listeners]) l(); }
+  private ok(): RefereeResult { return { ok: true, match: { ...this.match } }; }
+
+  /** Seat a guest without a controller (e.g. an AI commander). */
+  seat(guest: string, bot = false) {
+    this.match = { ...this.match, guestPlayer: guest, guestBot: bot, guestName: bot ? 'Cadet Pip (AI)' : 'Guest', status: 'active' };
+  }
+
+  plan(team: 'blue' | 'red', paths: PathList, player: string) {
+    const round = this.match.currentRound;
+    this.plans.set(`${round}-${team}`, paths);
+    this.turns.push({ round, team, player, paths: null });
+    this.resolveIfReady();
+  }
+
+  resolveIfReady() {
+    const round = this.match.currentRound;
+    const blue = this.plans.get(`${round}-blue`), red = this.plans.get(`${round}-red`);
+    if (!blue || !red || this.holdResolution) return;
+    for (const t of this.turns) if (t.round === round) t.paths = t.team === 'blue' ? blue : red;
+    const start = this.match.latestState;
+    const end = makeState(100, Math.max(0, start.units[1].hp - 50));
+    const over = end.units[1].hp <= 0;
+    this.match = {
+      ...this.match, prevState: start, prevSeed: 1000 + round, latestState: end, currentRound: round + 1,
+      ...(over ? { status: 'host_won' as MatchStatus, finishReason: 'battle' as const } : {}),
+    };
+  }
 
   ioFor(userId: string): AsyncIO {
+    const team = () => (this.match.hostPlayer === userId ? 'blue' : 'red');
     return {
       getUserId: async () => userId,
-      loadMatch: async () => ({ ...this.match }),
+      loadMatch: async () => (userId === this.match.hostPlayer || userId === this.match.guestPlayer)
+        ? { kind: 'ok', match: { ...this.match } } : { kind: 'missing' },
       joinMatch: async () => {
-        if (!this.match.guestPlayer) {
-          this.match = { ...this.match, guestPlayer: userId, status: 'active' };
-          this.notify();
-        }
-        return { ...this.match };
+        this.calls.push('join');
+        if (this.match.guestPlayer && this.match.guestPlayer !== userId) return { ok: false, status: 409, message: 'This match already has two players' };
+        if (!this.match.guestPlayer) { this.seat(userId); this.notify(); }
+        return this.ok();
       },
       fetchTurns: async () => this.turns.map(t => ({ ...t })),
-      commit: async (_id, round, team, paths) => {
-        this.turns.push({ round, team, player: userId, commitHash: hashPaths(paths), paths: null });
+      submit: async (_id, round, paths) => {
+        this.calls.push('submit');
+        if (this.failNextSubmit) { const f = this.failNextSubmit; this.failNextSubmit = null; return f; }
+        if (round !== this.match.currentRound) return { ok: false, status: 409, message: 'The round has changed. Reload the match.' };
+        this.plan(team(), paths, userId);
+        if (this.match.guestBot && !this.turns.some(t => t.round === round && t.team === 'red')) this.plan('red', plan('r1'), 'bot');
         this.notify();
-        return true;
+        return this.ok();
       },
-      reveal: async (_id, round, team, paths) => {
-        const t = this.turns.find(x => x.round === round && x.team === team);
-        if (t) t.paths = paths;
+      advance: async () => {
+        this.calls.push('advance');
+        const round = this.match.currentRound;
+        if (this.match.guestBot && this.match.status === 'active' && !this.turns.some(t => t.round === round && t.team === 'red')) this.plan('red', plan('r1'), 'bot');
+        this.resolveIfReady();
         this.notify();
-        return true;
+        return this.ok();
       },
-      persist: async (_id, update) => {
-        // Optimistic concurrency: a stale/duplicate writer no-ops.
-        if (update.expectedRound != null && this.match.currentRound !== update.expectedRound) {
-          return false;
+      forfeit: async () => {
+        this.calls.push('forfeit');
+        if (this.match.status === 'open' || this.match.status === 'active') {
+          this.match = { ...this.match, status: team() === 'blue' ? 'guest_won' : 'host_won', finishReason: 'forfeit' };
+          this.notify();
         }
-        this.match = {
-          ...this.match,
-          latestState: update.latestState,
-          currentRound: update.currentRound,
-          ...(update.seed != null ? { seed: update.seed } : {}),
-          ...(update.status ? { status: update.status } : {}),
-        };
-        this.notify();
-        return true;
-      },
-      finish: async (_id, status) => {
-        if (this.match.status !== 'open' && this.match.status !== 'active') return false;
-        this.match = { ...this.match, status };
-        this.notify();
-        return true;
+        return this.ok();
       },
       subscribe: (_id, onChange) => {
         this.listeners.add(onChange);
@@ -85,13 +119,9 @@ class FakeBackend {
   }
 }
 
-function memStash(): PathStash {
-  const m = new Map<string, PathList>();
-  return {
-    save: (k, p) => { m.set(k, p); },
-    load: (k) => m.get(k) ?? null,
-    clear: (k) => { m.delete(k); },
-  };
+function memWatch(): WatchStore & { data: Map<string, number> } {
+  const data = new Map<string, number>();
+  return { data, get: id => data.get(id) ?? null, set: (id, r) => { data.set(id, r); } };
 }
 
 /** Controllable poll environment: tick() fires the interval, resume() fires a
@@ -99,13 +129,14 @@ function memStash(): PathStash {
 function fakePollEnv() {
   let intervalFn: (() => void) | null = null;
   let resumeFn: (() => void) | null = null;
-  const env: PollEnv & { tick: () => void; resume: () => void; visible: boolean; cleared: boolean } = {
+  const env: PollEnv & { tick: () => void; resume: () => void; visible: boolean; time: number } = {
     visible: true,
-    cleared: false,
+    time: 0,
     setInterval: (fn) => { intervalFn = fn; return 1; },
-    clearInterval: () => { env.cleared = true; intervalFn = null; },
+    clearInterval: () => { intervalFn = null; },
     isVisible: () => env.visible,
     onResume: (fn) => { resumeFn = fn; return () => { resumeFn = null; }; },
+    now: () => env.time,
     tick: () => intervalFn?.(),
     resume: () => resumeFn?.(),
   };
@@ -116,907 +147,310 @@ interface Spy {
   hooks: AsyncGameHooks;
   planTurns: number[];
   planAwaiting: boolean[];
-  awaitOpp: boolean[];
+  planAfterError: boolean[];
+  awaits: { awaitingGuest: boolean; playing: boolean }[];
   plays: PlayRoundInput[];
-  gameOver: MatchStatus[];
+  gameOver: { status: MatchStatus; reason: string | null }[];
   errors: string[];
   forfeitable: boolean[];
 }
-function makeHooks(): Spy {
-  const planTurns: number[] = [];
-  const planAwaiting: boolean[] = [];
-  const awaitOpp: boolean[] = [];
-  const plays: PlayRoundInput[] = [];
-  const gameOver: MatchStatus[] = [];
-  const errors: string[] = [];
-  const forfeitable: boolean[] = [];
+function makeHooks(onPlay?: (input: PlayRoundInput) => void): Spy {
+  const spy: Omit<Spy, 'hooks'> = { planTurns: [], planAwaiting: [], planAfterError: [], awaits: [], plays: [], gameOver: [], errors: [], forfeitable: [] };
   return {
-    planTurns, planAwaiting, awaitOpp, plays, gameOver, errors, forfeitable,
+    ...spy,
     hooks: {
-      onPlanTurn: (round, _s, _t, awaitingGuest) => { planTurns.push(round); planAwaiting.push(awaitingGuest); },
-      onAwaitOpponent: (_round, awaitingGuest) => { awaitOpp.push(awaitingGuest); },
-      onPlayRound: (input) => { plays.push(input); },
-      onGameOver: (status) => { gameOver.push(status); },
-      onError: (msg, canForfeit) => { errors.push(msg); forfeitable.push(!!canForfeit); },
+      onPlanTurn: (round, _s, _t, awaitingGuest, afterError) => { spy.planTurns.push(round); spy.planAwaiting.push(awaitingGuest); spy.planAfterError.push(!!afterError); },
+      onAwaitOpponent: (_round, awaitingGuest, playing) => { spy.awaits.push({ awaitingGuest, playing: !!playing }); },
+      onPlayRound: (input) => { spy.plays.push(input); onPlay?.(input); },
+      onGameOver: (status, _state, reason) => { spy.gameOver.push({ status, reason }); },
+      onError: (msg, canForfeit) => { spy.errors.push(msg); spy.forfeitable.push(!!canForfeit); },
     },
-  };
+  } as Spy;
 }
 
-const flush = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
+const flush = () => new Promise(r => setTimeout(r, 0));
+/** Let refreshes started by realtime events finish. */
+const settle = async () => { for (let i = 0; i < 5; i++) await flush(); };
 
-const bluePlan: PathList = [{ unitId: 'b1', waypoints: [{ x: 1, y: 2 }] }];
-const redPlan: PathList = [{ unitId: 'r1', waypoints: [{ x: 3, y: 4 }] }];
+function controller(backend: FakeReferee, user: string, spy: Spy, opts: { watched?: WatchStore; pollEnv?: PollEnv | null } = {}) {
+  return new AsyncGameController(backend.match.id, spy.hooks, {
+    io: backend.ioFor(user), watched: opts.watched ?? memWatch(), pollEnv: opts.pollEnv ?? null, now: () => 0,
+  });
+}
 
 describe('AsyncGameController', () => {
-  it('ignores a failed submission after the player has left the match', async () => {
-    const be = new FakeBackend('late-submit', 'host');
-    const spy = makeHooks();
-    let finishCommit!: (ok: boolean) => void;
-    const io = { ...be.ioFor('host'), commit: () => new Promise<boolean>(resolve => { finishCommit = resolve; }) };
-    const controller = new AsyncGameController('late-submit', spy.hooks, { io, stash: memStash(), pollEnv: null });
-    await controller.start();
-    const pending = controller.submitPlan(bluePlan);
-    controller.destroy();
-    finishCommit(false);
-    await pending;
-    expect(spy.errors).toEqual([]);
-    expect(be.listeners.size).toBe(0);
-  });
-
-  // Regression: a failed commit left planningRound set, so every later refresh
-  // returned early and the player could never re-plan — the match was stuck.
-  it('offers planning again after a failed submission once the match refreshes', async () => {
-    const be = new FakeBackend('retry', 'host');
-    const spy = makeHooks();
-    const env = fakePollEnv();
-    let failCommit = true;
-    const base = be.ioFor('host');
-    const io = { ...base, commit: async (...args: Parameters<AsyncIO['commit']>) => failCommit ? false : base.commit(...args) };
-    const controller = new AsyncGameController('retry', spy.hooks, { io, stash: memStash(), pollEnv: env });
-    await controller.start();
-    expect(spy.planTurns).toEqual([1]);
-
-    await controller.submitPlan(bluePlan);
-    expect(spy.errors).toHaveLength(1);
-
-    failCommit = false;
-    env.tick();
-    await flush();
-    expect(spy.planTurns).toEqual([1, 1]);
-    controller.destroy();
-  });
-
-  // A timed-out load resolves to null like a missing match; claiming "not
-  // found" would send the player away from a match that exists.
-  it('does not call a match missing when it could not be loaded', async () => {
-    const be = new FakeBackend('slow', 'host');
-    const spy = makeHooks();
-    const io = { ...be.ioFor('host'), loadMatch: async () => null };
-    const controller = new AsyncGameController('slow', spy.hooks, { io, stash: memStash(), pollEnv: null });
-    expect(await controller.start()).toBe(false);
-    expect(spy.errors).toHaveLength(1);
-    expect(spy.errors[0]).not.toMatch(/not found/i);
-    expect(spy.errors[0]).toMatch(/try again/i);
-  });
-
-  it.each(['auth', 'match', 'join', 'turns'])('does not reopen a match left while %s was loading', async (stage) => {
-    const be = new FakeBackend('cancelled', 'host');
-    const base = be.ioFor('guest');
-    const spy = makeHooks();
-    const env = fakePollEnv();
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const io: AsyncIO = {
-      ...base,
-      getUserId: async () => { if (stage === 'auth') await gate; return base.getUserId(); },
-      loadMatch: async id => { if (stage === 'match') await gate; return base.loadMatch(id); },
-      joinMatch: async id => { if (stage === 'join') await gate; return base.joinMatch(id); },
-      fetchTurns: async id => { if (stage === 'turns') await gate; return base.fetchTurns(id); },
-    };
-    const controller = new AsyncGameController('cancelled', spy.hooks, { io, pollEnv: env });
-    const opening = controller.start();
-    await flush();
-    controller.destroy();
-    release();
-    await opening;
-    expect(spy.planTurns).toEqual([]);
-    expect(spy.awaitOpp).toEqual([]);
-    expect(spy.plays).toEqual([]);
-    expect(spy.errors).toEqual([]);
-    expect(be.listeners.size).toBe(0);
-  });
-
-  it('runs a round through commit, auto-reveal, and resolve for both players', async () => {
-    const be = new FakeBackend('m1', 'host-uid');
-    const hostSpy = makeHooks();
-    const guestSpy = makeHooks();
-    const host = new AsyncGameController('m1', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    const guest = new AsyncGameController('m1', guestSpy.hooks, { io: be.ioFor('guest-uid'), stash: memStash() });
-
-    await host.start();
-    await guest.start();
-    await flush();
-
-    // Both were asked to plan round 1.
-    expect(hostSpy.planTurns).toContain(1);
-    expect(guestSpy.planTurns).toContain(1);
-
-    // Both submit; reveal happens automatically once both have committed.
-    await host.submitPlan(bluePlan);
-    await guest.submitPlan(redPlan);
-    await flush();
-
-    // Both reach resolution and are handed the same round to animate.
-    expect(hostSpy.plays.length).toBeGreaterThan(0);
-    expect(guestSpy.plays.length).toBeGreaterThan(0);
-    const hp = hostSpy.plays[0];
-    const gp = guestSpy.plays[0];
-    expect(hp.round).toBe(1);
-    expect(hp.bluePaths).toEqual(bluePlan);
-    expect(hp.redPaths).toEqual(redPlan);
-
-    // Seed is derived deterministically and identical on both sides.
-    expect(hp.seed).toBe(gp.seed);
-    expect(hp.seed).toBeGreaterThanOrEqual(0);
-
-    expect(hostSpy.errors).toEqual([]);
-    expect(guestSpy.errors).toEqual([]);
-    host.destroy();
-    guest.destroy();
-  });
-
-  it('advances to the next round after a non-terminal round is played', async () => {
-    const be = new FakeBackend('m2', 'host-uid');
-    const hostSpy = makeHooks();
-    const host = new AsyncGameController('m2', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    // Seed guest commit/reveal directly into the backend for a simpler single-driver test.
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m2');
-
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await guestIO.commit('m2', 1, 'red', redPlan);
-    await guestIO.reveal('m2', 1, 'red', redPlan);
-    await flush();
-
-    expect(hostSpy.plays.length).toBe(1);
-    // Round 1 ends with both alive -> not game over -> advance to round 2.
-    await host.onRoundPlayed(1, makeState(80, 60), false);
-    await flush();
-
-    expect(be.match.currentRound).toBe(2);
-    expect(be.match.status).toBe('active');
-    expect(hostSpy.planTurns).toContain(2);
-    host.destroy();
-  });
-
-  it('ends the match with the correct winner when a side is eliminated', async () => {
-    const be = new FakeBackend('m3', 'host-uid');
-    const hostSpy = makeHooks();
-    const host = new AsyncGameController('m3', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m3');
-
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await guestIO.commit('m3', 1, 'red', redPlan);
-    await guestIO.reveal('m3', 1, 'red', redPlan);
-    await flush();
-
-    // Red wiped out -> host (blue) wins.
-    await host.onRoundPlayed(1, makeState(50, 0), true);
-    await flush();
-
-    expect(be.match.status).toBe('host_won');
-    expect(hostSpy.gameOver).toContain('host_won');
-    host.destroy();
-  });
-
   it('surfaces an error and does not start if not authenticated', async () => {
-    const be = new FakeBackend('m4', 'host-uid');
+    const backend = new FakeReferee('m1', 'host');
     const spy = makeHooks();
-    const io = { ...be.ioFor('host-uid'), getUserId: async () => null };
-    const ctrl = new AsyncGameController('m4', spy.hooks, { io, stash: memStash() });
-    const ok = await ctrl.start();
-    expect(ok).toBe(false);
-    expect(spy.errors.length).toBe(1);
+    const c = new AsyncGameController('m1', spy.hooks, { io: { ...backend.ioFor('host'), getUserId: async () => null }, pollEnv: null });
+    expect(await c.start()).toBe(false);
+    expect(spy.errors[0]).toMatch(/unavailable/);
   });
 
-  it('rejects a tampered reveal that does not match its commitment', async () => {
-    const be = new FakeBackend('m5', 'host-uid');
-    const hostSpy = makeHooks();
-    const host = new AsyncGameController('m5', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m5');
-
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    // Guest commits to redPlan but reveals different paths.
-    await guestIO.commit('m5', 1, 'red', redPlan);
-    await guestIO.reveal('m5', 1, 'red', [{ unitId: 'r1', waypoints: [{ x: 99, y: 99 }] }]);
-    await flush();
-
-    expect(hostSpy.plays.length).toBe(0);
-    expect(hostSpy.errors.some(e => /verification/i.test(e))).toBe(true);
-    host.destroy();
-  });
-
-  it('reveals from the stash after the app is closed and reopened post-commit', async () => {
-    const be = new FakeBackend('m6', 'host-uid');
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m6');
-    const stash = memStash(); // survives the controller being recreated (= app reopen)
-
-    // First session: commit, then "close the app" (destroy) before revealing.
-    const spy1 = makeHooks();
-    const host1 = new AsyncGameController('m6', spy1.hooks, { io: be.ioFor('host-uid'), stash });
-    await host1.start();
-    await flush();
-    await host1.submitPlan(bluePlan);
-    host1.destroy();
-
-    // Opponent submits while we're away.
-    await guestIO.commit('m6', 1, 'red', redPlan);
-    await guestIO.reveal('m6', 1, 'red', redPlan);
-
-    // Second session: a fresh controller must auto-reveal from the stash and play.
-    const spy2 = makeHooks();
-    const host2 = new AsyncGameController('m6', spy2.hooks, { io: be.ioFor('host-uid'), stash });
-    await host2.start();
-    await flush();
-
-    expect(spy2.errors).toEqual([]);
-    expect(spy2.plays.length).toBe(1);
-    expect(spy2.plays[0].bluePaths).toEqual(bluePlan);
-    host2.destroy();
-  });
-
-  it('errors (no deadlock crash) when the committed plan is lost from the stash', async () => {
-    const be = new FakeBackend('m7', 'host-uid');
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m7');
-
-    // Commit recorded server-side, but this device has no stash entry.
-    await be.ioFor('host-uid').commit('m7', 1, 'blue', bluePlan);
-    await guestIO.commit('m7', 1, 'red', redPlan);
-    await guestIO.reveal('m7', 1, 'red', redPlan);
-
+  it('does not call a match missing when it could not be loaded', async () => {
+    const backend = new FakeReferee('m1', 'host');
     const spy = makeHooks();
-    const host = new AsyncGameController('m7', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    await host.start();
-    await flush();
-
-    expect(spy.plays.length).toBe(0);
-    expect(spy.errors.some(e => /lost|redraw/i.test(e))).toBe(true);
-    host.destroy();
+    const io = { ...backend.ioFor('guest'), loadMatch: async () => ({ kind: 'error' as const }) };
+    const c = new AsyncGameController('m1', spy.hooks, { io, pollEnv: null });
+    expect(await c.start()).toBe(false);
+    expect(spy.errors).toEqual(['Could not load this match. Check your connection and try again.']);
+    expect(backend.calls).not.toContain('join');
   });
 
-  it('offers forfeit when a committed plan is lost, and forfeiting ends the match', async () => {
-    const be = new FakeBackend('m17', 'host-uid');
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m17');
-
-    // Host commit recorded server-side, but this device has no stash entry, and
-    // the opponent has already revealed → host is stuck in reveal with no plan.
-    await be.ioFor('host-uid').commit('m17', 1, 'blue', bluePlan);
-    await guestIO.commit('m17', 1, 'red', redPlan);
-    await guestIO.reveal('m17', 1, 'red', redPlan);
-
-    const spy = makeHooks();
-    const host = new AsyncGameController('m17', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    await host.start();
-    await flush();
-
-    expect(spy.errors.some(e => /lost/i.test(e))).toBe(true);
-    expect(spy.forfeitable).toContain(true); // UI may offer a Forfeit action
-
-    // Forfeiting concedes: host is blue, so the guest (red) wins.
-    await host.forfeit();
-    await flush();
-    expect(be.match.status).toBe('guest_won');
-    expect(spy.gameOver).toContain('guest_won');
-    host.destroy();
+  it('joins an invite it holds the link to, and reports a full one', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    const guest = makeHooks();
+    expect(await controller(backend, 'guest', guest).start()).toBe(true);
+    expect(guest.planTurns).toEqual([1]);
+    const third = makeHooks();
+    expect(await controller(backend, 'third', third).start()).toBe(false);
+    expect(third.errors).toEqual(['This match already has two players']);
   });
 
-  it('forfeit is a no-op once the match is already decided', async () => {
-    const be = new FakeBackend('m18', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'host_won' };
-    const spy = makeHooks();
-    const host = new AsyncGameController('m18', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    await host.start();
-    await flush();
-    await host.forfeit();
-    await flush();
-    expect(be.match.status).toBe('host_won'); // unchanged
-    host.destroy();
+  it('lets the host plan their first move before a guest joins', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    const host = makeHooks();
+    const c = controller(backend, 'host', host);
+    await c.start();
+    expect(host.planTurns).toEqual([1]);
+    expect(host.planAwaiting).toEqual([true]);
+    await c.submitPlan(plan('b1'));
+    await settle();
+    expect(host.awaits.at(-1)).toEqual({ awaitingGuest: true, playing: false });
   });
 
-  it('carries state into round 2 and reuses the round-1 seed', async () => {
-    const be = new FakeBackend('m8', 'host-uid');
-    const hostSpy = makeHooks();
-    const host = new AsyncGameController('m8', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m8');
-
-    // Round 1.
-    await host.start();
+  it('plays a round on both screens once the second plan is in, then plans the next', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    const host = makeHooks();
+    const guest = makeHooks();
+    const hc = controller(backend, 'host', host);
+    const gc = controller(backend, 'guest', guest);
+    await hc.start();
+    await gc.start();
+    await hc.submitPlan(plan('b1', 5));
     await flush();
-    await host.submitPlan(bluePlan);
-    await guestIO.commit('m8', 1, 'red', redPlan);
-    await guestIO.reveal('m8', 1, 'red', redPlan);
-    await flush();
-    const seed1 = hostSpy.plays[0].seed;
+    expect(guest.planTurns).toEqual([1]); // the host's plan didn't disturb the guest's drawing
 
-    const endState1 = makeState(80, 60);
-    await host.onRoundPlayed(1, endState1, false);
-    await flush();
-    expect(be.match.seed).toBe(seed1);          // seed persisted on round 1
-    expect(be.match.currentRound).toBe(2);
-
-    // Round 2 with DIFFERENT paths (so a re-derived seed would differ).
-    const bluePlan2: PathList = [{ unitId: 'b1', waypoints: [{ x: 7, y: 7 }] }];
-    const redPlan2: PathList = [{ unitId: 'r1', waypoints: [{ x: 8, y: 8 }] }];
-    await host.submitPlan(bluePlan2);
-    await guestIO.commit('m8', 2, 'red', redPlan2);
-    await guestIO.reveal('m8', 2, 'red', redPlan2);
-    await flush();
-
-    expect(hostSpy.plays.length).toBe(2);
-    expect(hostSpy.plays[1].startState).toEqual(endState1); // carryover
-    expect(hostSpy.plays[1].seed).toBe(seed1);              // reused, not re-derived
-    host.destroy();
+    await gc.submitPlan(plan('r1', 7));
+    await settle();
+    for (const spy of [host, guest]) {
+      expect(spy.plays).toHaveLength(1);
+      expect(spy.plays[0]).toMatchObject({ round: 1, seed: 1001, startState: initial, bluePaths: plan('b1', 5), redPaths: plan('r1', 7) });
+    }
+    // Nothing more until the animation has been watched.
+    expect(host.planTurns).toEqual([1]);
+    await hc.onRoundPlayed(1);
+    await gc.onRoundPlayed(1);
+    await settle();
+    expect(host.planTurns).toEqual([1, 2]);
+    expect(guest.planTurns).toEqual([1, 2]);
   });
 
-  it('advances exactly once when both players resolve and persist the same round', async () => {
-    const be = new FakeBackend('m9', 'host-uid');
-    const hostSpy = makeHooks();
-    const guestSpy = makeHooks();
-    const host = new AsyncGameController('m9', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    const guest = new AsyncGameController('m9', guestSpy.hooks, { io: be.ioFor('guest-uid'), stash: memStash() });
-
-    await host.start();
-    await guest.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await guest.submitPlan(redPlan);
-    await flush();
-
-    expect(hostSpy.plays.length).toBe(1);
-    expect(guestSpy.plays.length).toBe(1);
-
-    // Both clients independently finish playback and persist the same round.
-    const endState = makeState(70, 70);
-    await host.onRoundPlayed(1, endState, false);
-    await guest.onRoundPlayed(1, endState, false);
-    await flush();
-
-    // Optimistic guard => advance once (round 2), not twice (round 3).
-    expect(be.match.currentRound).toBe(2);
-    host.destroy();
-    guest.destroy();
+  it('shows the final round, then the result with its reason', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    const host = makeHooks();
+    const hc = controller(backend, 'host', host);
+    await hc.start();
+    for (const round of [1, 2]) {
+      backend.plan('red', plan('r1'), 'guest');
+      await hc.submitPlan(plan('b1'));
+      await settle();
+      expect(host.plays.at(-1)?.round).toBe(round);
+      expect(host.gameOver).toEqual([]);
+      await hc.onRoundPlayed(round);
+      await settle();
+    }
+    expect(host.gameOver).toEqual([{ status: 'host_won', reason: 'battle' }]);
   });
 
-  it('recovers (no wedge) when persisting a resolved round fails transiently', async () => {
-    const be = new FakeBackend('m19', 'host-uid');
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m19');
+  it('replays the round played while the player was away, once', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    backend.plan('blue', plan('b1'), 'host');
+    backend.plan('red', plan('r1'), 'guest');
+    const watched = memWatch();
+    watched.set('m1', 0);
+    const guest = makeHooks();
+    const gc = controller(backend, 'guest', guest, { watched });
+    await gc.start();
+    expect(guest.plays.map(p => p.round)).toEqual([1]);
+    expect(guest.planTurns).toEqual([]);
+    await gc.onRoundPlayed(1);
+    expect(guest.planTurns).toEqual([2]);
+    expect(watched.get('m1')).toBe(1);
+    gc.destroy();
 
-    // A persist that blips once (transient error, retries already exhausted) and
-    // succeeds thereafter — distinct from a lost race, since the round does NOT
-    // advance behind us.
-    const hostIO = be.ioFor('host-uid');
-    let failPersistOnce = true;
-    const flakyIO: AsyncIO = {
-      ...hostIO,
-      persist: async (id, update) => {
-        if (failPersistOnce) { failPersistOnce = false; return false; }
-        return hostIO.persist(id, update);
-      },
-    };
+    const again = makeHooks();
+    await controller(backend, 'guest', again, { watched }).start();
+    expect(again.plays).toEqual([]);
+    expect(again.planTurns).toEqual([2]);
+  });
 
-    const spy = makeHooks();
+  it('on a new device shows only the latest round', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    backend.match = { ...backend.match, latestState: makeState(100, 300) }; // three rounds' worth of red hp
+    for (let i = 0; i < 2; i++) { backend.plan('blue', plan('b1'), 'host'); backend.plan('red', plan('r1'), 'guest'); }
+    const guest = makeHooks();
+    await controller(backend, 'guest', guest).start();
+    expect(guest.plays.map(p => p.round)).toEqual([2]);
+  });
+
+  it('skips a broken animation instead of wedging the match', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    backend.plan('blue', plan('b1'), 'host');
+    backend.plan('red', plan('r1'), 'guest');
+    const spy = makeHooks(() => { throw new Error('renderer gone'); });
+    const watched = memWatch();
+    watched.set('m1', 0);
+    await controller(backend, 'guest', spy, { watched }).start();
+    expect(spy.planTurns).toEqual([2]);
+  });
+
+  it('asks the referee to catch up when an AI commander owes a move, at most every few seconds', async () => {
+    const backend = new FakeReferee('m1', 'host', { matchmaking: true });
+    backend.seat('bot', true);
     const env = fakePollEnv();
-    const host = new AsyncGameController('m19', spy.hooks, { io: flakyIO, stash: memStash(), pollEnv: env });
+    const host = makeHooks();
+    // The commander's plan went missing: the host is left waiting.
+    const io = { ...backend.ioFor('host'), submit: async (_id: string, _r: number, paths: PathList) => {
+      backend.plan('blue', paths, 'host');
+      return { ok: true as const, match: { ...backend.match } };
+    } };
+    const hc = new AsyncGameController('m1', host.hooks, { io, watched: memWatch(), pollEnv: env });
+    await hc.start();
+    const advanceSpy = vi.spyOn(io, 'advance');
+    await hc.submitPlan(plan('b1'));
+    expect(advanceSpy).toHaveBeenCalledTimes(1);
+    expect(host.plays.map(p => p.round)).toEqual([1]);
+    await hc.onRoundPlayed(1);
 
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await guestIO.commit('m19', 1, 'red', redPlan);
-    await guestIO.reveal('m19', 1, 'red', redPlan);
-    await flush();
-    expect(spy.plays.length).toBe(1); // round 1 resolved and handed to playback
-
-    // Playback finishes; the persist write blips. The round must NOT advance and
-    // the session must NOT wedge — no dead-end error, and the latch is released.
-    await host.onRoundPlayed(1, makeState(80, 60), false);
-    await flush();
-    expect(be.match.currentRound).toBe(1); // write failed → not advanced
-    expect(spy.errors).toEqual([]);        // no dead-end surfaced
-
-    // A poll tick re-drives resolution; this time the persist lands and the
-    // round advances. Without the latch reset, resolve() would never re-emit.
+    // Round 2: the commander again owes a move, but a fresh catch-up waits.
+    env.time += ADVANCE_INTERVAL_MS / 2;
+    await hc.submitPlan(plan('b1'));
+    expect(advanceSpy).toHaveBeenCalledTimes(1);
+    env.time += ADVANCE_INTERVAL_MS;
     env.tick();
-    await flush();
-    expect(spy.plays.length).toBe(2);      // re-emitted playback for the retry
-    await host.onRoundPlayed(1, makeState(80, 60), false);
-    await flush();
-    expect(be.match.currentRound).toBe(2); // recovered
-    host.destroy();
+    await flush(); await flush();
+    expect(advanceSpy).toHaveBeenCalledTimes(2);
+    expect(host.plays.map(p => p.round)).toEqual([1, 2]);
   });
 
-  it('reports the authoritative team when a finished match is reopened (no planning hook)', async () => {
-    const be = new FakeBackend('m20', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'host_won' };
-    const spy = makeHooks();
-    // Guest reopens an already-decided match from "My Matches". onGameOver fires
-    // without onPlanTurn, so the UI's own team state would be stale — the
-    // controller must report the correct team (guest = red) so the win/loss is
-    // attributed from the right perspective rather than inverted.
-    const guest = new AsyncGameController('m20', spy.hooks, { io: be.ioFor('guest-uid'), stash: memStash() });
-    await guest.start();
-    await flush();
-    expect(spy.planTurns).toEqual([]);          // no planning hook fired
-    expect(spy.gameOver).toContain('host_won');
-    expect(guest.team).toBe('red');             // authoritative role, not stale UI state
-    expect(guest.opponentId).toBe('host-uid');
-    guest.destroy();
+  it('asks the referee to play a round whose plans are both in', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    backend.holdResolution = true;
+    const host = makeHooks();
+    const hc = controller(backend, 'host', host);
+    await hc.start();
+    backend.plan('red', plan('r1'), 'guest');
+    await hc.submitPlan(plan('b1'));
+    await settle();
+    expect(host.awaits.at(-1)).toEqual({ awaitingGuest: false, playing: true });
+    expect(backend.calls).toContain('advance');
+    backend.holdResolution = false;
+    hc.destroy();
+    // A later catch-up (here: forced past the throttle) plays it.
+    const late = new AsyncGameController('m1', host.hooks, { io: backend.ioFor('host'), watched: memWatch(), pollEnv: null, now: () => 1e9 });
+    await late.start();
+    expect(host.plays.map(p => p.round)).toEqual([1]);
   });
 
-  it('refuses to play an implausible match state (offers forfeit, never feeds the engine)', async () => {
-    const be = new FakeBackend('m21', 'host-uid');
-    // A participant-written latest_state with a non-positive map dimension — the
-    // kind of garbage a malicious/buggy matchmade stranger could write.
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active', latestState: { ...initial, mapWidth: -1 } };
-    const spy = makeHooks();
-    const host = new AsyncGameController('m21', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    await host.start();
-    await flush();
-    expect(spy.plays).toEqual([]);             // never handed to playback
-    expect(spy.planTurns).toEqual([]);          // never handed to the planner
-    expect(spy.errors.some(e => /invalid game state/i.test(e))).toBe(true);
-    expect(spy.forfeitable).toContain(true);    // clean exit offered
-    host.destroy();
+  it('re-prompts planning after a failed submit, flagged so the UI can skip "your turn"', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    const host = makeHooks();
+    const hc = controller(backend, 'host', host);
+    await hc.start();
+    backend.failNextSubmit = { ok: false, status: 0, message: 'offline' };
+    await hc.submitPlan(plan('b1'));
+    expect(host.errors).toEqual(['Could not submit your turn. Try again.']);
+    expect(host.planTurns).toEqual([1, 1]);
+    expect(host.planAfterError).toEqual([false, true]);
   });
 
-  it('reports game over when the match is already abandoned', async () => {
-    const be = new FakeBackend('m10', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'abandoned' };
-    const spy = makeHooks();
-    const host = new AsyncGameController('m10', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    await host.start();
-    await flush();
-    expect(spy.gameOver).toContain('abandoned');
-    expect(spy.plays.length).toBe(0);
-    host.destroy();
+  it('shows a permanent refusal as it is', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    const host = makeHooks();
+    const hc = controller(backend, 'host', host);
+    await hc.start();
+    backend.failNextSubmit = { ok: false, status: 426, message: 'Reload or update the app.' };
+    await hc.submitPlan(plan('b1'));
+    expect(host.errors).toEqual(['Reload or update the app.']);
   });
 
-  it('persists and reuses the seed even when a client loses the round-1 write race', async () => {
-    const be = new FakeBackend('m11', 'host-uid');
-    const hostSpy = makeHooks();
-    const guestSpy = makeHooks();
-    const host = new AsyncGameController('m11', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    const guest = new AsyncGameController('m11', guestSpy.hooks, { io: be.ioFor('guest-uid'), stash: memStash() });
-
-    await host.start();
-    await guest.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await guest.submitPlan(redPlan);
-    await flush();
-
-    const seed1 = hostSpy.plays[0].seed;
-    expect(guestSpy.plays[0].seed).toBe(seed1);
-
-    // Both clients finish playback and persist round 1; only one write lands.
-    const endState1 = makeState(80, 60);
-    await host.onRoundPlayed(1, endState1, false);
-    await guest.onRoundPlayed(1, endState1, false);
-    await flush();
-    expect(be.match.seed).toBe(seed1);
-    expect(be.match.currentRound).toBe(2);
-
-    // Round 2 with different paths: BOTH must reuse seed1, not re-derive.
-    const bluePlan2: PathList = [{ unitId: 'b1', waypoints: [{ x: 7, y: 7 }] }];
-    const redPlan2: PathList = [{ unitId: 'r1', waypoints: [{ x: 8, y: 8 }] }];
-    await host.submitPlan(bluePlan2);
-    await guest.submitPlan(redPlan2);
-    await flush();
-
-    expect(hostSpy.plays[1].seed).toBe(seed1);
-    expect(guestSpy.plays[1].seed).toBe(seed1);
-    host.destroy();
-    guest.destroy();
+  it('refuses a match on other rules, offering a forfeit', async () => {
+    const backend = new FakeReferee('m1', 'host', { rules: RULES_VERSION + 1 });
+    backend.seat('guest');
+    const host = makeHooks();
+    await controller(backend, 'host', host).start();
+    expect(host.errors[0]).toMatch(/newer version/);
+    expect(host.forfeitable).toEqual([true]);
+    expect(host.planTurns).toEqual([]);
   });
 
-  it('ignores onRoundPlayed for a round this controller did not play', async () => {
-    const be = new FakeBackend('m12', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
-    const spy = makeHooks();
-    const host = new AsyncGameController('m12', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    await host.start();
-    await flush();
-
-    // A stray/late onRoundPlayed for a round this controller never resolved must
-    // not advance the match (which would drop the write-once seed).
-    await host.onRoundPlayed(1, makeState(0, 50), true);
-    await flush();
-    expect(be.match.currentRound).toBe(1);
-    expect(be.match.status).toBe('active');
-    host.destroy();
+  it('refuses to play an implausible match state', async () => {
+    const backend = new FakeReferee('m1', 'host', { latestState: { units: 'x' } as unknown as OnlineGameState });
+    backend.seat('guest');
+    const host = makeHooks();
+    await controller(backend, 'host', host).start();
+    expect(host.forfeitable).toEqual([true]);
+    expect(host.planTurns).toEqual([]);
   });
 
-  it('does not re-prompt planning when the opponent commits first (preserves in-progress drawing)', async () => {
-    const be = new FakeBackend('m13', 'host-uid');
-    const hostSpy = makeHooks();
-    const host = new AsyncGameController('m13', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m13');
-
-    await host.start();
-    await flush();
-    expect(hostSpy.planTurns).toEqual([1]); // prompted to plan round 1 exactly once
-
-    // Opponent commits while the host is still drawing round 1. The realtime
-    // event re-drives evaluate(), but onPlanTurn must NOT fire again — re-firing
-    // would rebuild the draw UI and wipe the host's in-progress waypoints.
-    await guestIO.commit('m13', 1, 'red', redPlan);
-    await flush();
-    expect(hostSpy.planTurns).toEqual([1]); // still once, not re-prompted
-
-    host.destroy();
+  it('forfeits: the opponent wins and the match is over', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    const host = makeHooks();
+    const hc = controller(backend, 'host', host);
+    await hc.start();
+    await hc.forfeit();
+    await settle();
+    expect(host.gameOver).toEqual([{ status: 'guest_won', reason: 'forfeit' }]);
+    expect(hc.team).toBe('blue');
   });
 
   it('safety-net poll recovers a turn the realtime channel never delivered', async () => {
-    // Simulate a dead subscription: the controller's subscribe is a no-op, so
-    // the only way it learns the opponent moved is the poll.
-    const be = new FakeBackend('m15', 'host-uid');
-    const deadSubIO: AsyncIO = { ...be.ioFor('host-uid'), subscribe: () => () => {} };
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m15');
-
-    const spy = makeHooks();
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
     const env = fakePollEnv();
-    const host = new AsyncGameController('m15', spy.hooks, { io: deadSubIO, stash: memStash(), pollEnv: env });
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await flush();
-
-    // Opponent commits+reveals, but no realtime event reaches us.
-    await guestIO.commit('m15', 1, 'red', redPlan);
-    await guestIO.reveal('m15', 1, 'red', redPlan);
-    await flush();
-    expect(spy.plays.length).toBe(0); // nothing delivered the change yet
-
-    // A poll tick picks it up and the round resolves.
-    env.tick();
-    await flush();
-    expect(spy.plays.length).toBe(1);
-    expect(spy.errors).toEqual([]);
-    host.destroy();
-    expect(env.cleared).toBe(true);
-  });
-
-  it('does not poll while backgrounded, and refreshes immediately on resume', async () => {
-    const be = new FakeBackend('m16', 'host-uid');
-    const deadSubIO: AsyncIO = { ...be.ioFor('host-uid'), subscribe: () => () => {} };
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m16');
-
-    const spy = makeHooks();
-    const env = fakePollEnv();
-    const host = new AsyncGameController('m16', spy.hooks, { io: deadSubIO, stash: memStash(), pollEnv: env });
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await guestIO.commit('m16', 1, 'red', redPlan);
-    await guestIO.reveal('m16', 1, 'red', redPlan);
-    await flush();
-
-    // Backgrounded: a tick must do nothing.
+    const host = makeHooks();
+    const hc = new AsyncGameController('m1', host.hooks, { io: { ...backend.ioFor('host'), subscribe: () => () => {} }, watched: memWatch(), pollEnv: env });
+    await hc.start();
+    await hc.submitPlan(plan('b1'));
+    backend.plan('red', plan('r1'), 'guest'); // resolves without telling anyone
     env.visible = false;
     env.tick();
     await flush();
-    expect(spy.plays.length).toBe(0);
-
-    // Resume (visibility back / network back) refreshes immediately.
+    expect(host.plays).toEqual([]); // no polling in the background
     env.visible = true;
     env.resume();
-    await flush();
-    expect(spy.plays.length).toBe(1);
-    host.destroy();
-  });
-
-  it('lets the host plan their first move before a guest joins (awaitingGuest)', async () => {
-    const be = new FakeBackend('m14', 'host-uid'); // status 'open', no guest
-    const hostSpy = makeHooks();
-    const host = new AsyncGameController('m14', hostSpy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-
-    await host.start();
-    await flush();
-    // No friend yet, but the host is prompted to plan round 1 right away — with
-    // awaitingGuest=true so the UI keeps the share link up.
-    expect(hostSpy.planTurns).toEqual([1]);
-    expect(hostSpy.planAwaiting).toEqual([true]);
-
-    // Host commits their first move while still alone → now waiting for a friend
-    // to JOIN (awaitingGuest stays true so the invite stays visible).
-    await host.submitPlan(bluePlan);
-    await flush();
-    expect(hostSpy.awaitOpp).toContain(true);
-
-    // Friend joins and plays → the round resolves for the host.
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m14');
-    await guestIO.commit('m14', 1, 'red', redPlan);
-    await guestIO.reveal('m14', 1, 'red', redPlan);
-    await flush();
-    expect(hostSpy.plays.length).toBe(1);
-    expect(hostSpy.errors).toEqual([]);
-    host.destroy();
-  });
-
-  it('re-prompts planning when a submit fails, instead of stranding the player', async () => {
-    const be = new FakeBackend('m20', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
-    const io = be.ioFor('host-uid');
-    let failNext = true;
-    const realCommit = io.commit;
-    io.commit = async (...args) => {
-      if (failNext) { failNext = false; return false; }
-      return realCommit(...args);
-    };
-    const spy = makeHooks();
-    const host = new AsyncGameController('m20', spy.hooks, { io, stash: memStash() });
-    await host.start();
-    await flush();
-    expect(spy.planTurns).toEqual([1]);
-
-    await host.submitPlan(bluePlan);
-    await flush();
-    expect(spy.errors.some(e => /could not submit/i.test(e))).toBe(true);
-    // Planning is offered again for the same round so the player can retry.
-    expect(spy.planTurns).toEqual([1, 1]);
-
-    await host.submitPlan(bluePlan);
-    await flush();
-    expect(be.turns.some(t => t.team === 'blue' && t.round === 1)).toBe(true);
-    host.destroy();
-  });
-
-  it('keeps the committed plan in the stash when a conflicting re-submit fails', async () => {
-    const be = new FakeBackend('m21', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
-    const io = be.ioFor('host-uid');
-    const spy = makeHooks();
-    const host = new AsyncGameController('m21', spy.hooks, { io, stash: memStash() });
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await flush();
-
-    // A second submit for the same round (e.g. a stale tab) conflicts.
-    io.commit = async () => false;
-    await host.submitPlan([{ unitId: 'b1', waypoints: [{ x: 50, y: 50 }] }]);
-    await flush();
-
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.commit('m21', 1, 'red', redPlan);
-    await guestIO.reveal('m21', 1, 'red', redPlan);
-    await flush();
-
-    // The original (committed) plan is what got revealed, so the round plays.
-    expect(spy.plays.length).toBe(1);
-    expect(spy.plays[0].bluePaths).toEqual(bluePlan);
-    host.destroy();
-  });
-
-  it('offers forfeit instead of revealing a stashed plan that does not match the commit', async () => {
-    const be = new FakeBackend('m22', 'host-uid');
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m22');
-    await be.ioFor('host-uid').commit('m22', 1, 'blue', bluePlan);
-    await guestIO.commit('m22', 1, 'red', redPlan);
-
-    // The stash holds a different plan than the one committed.
-    const stash = memStash();
-    stash.save('7s-async-m22-r1-blue', [{ unitId: 'b1', waypoints: [{ x: 7, y: 7 }] }]);
-    const spy = makeHooks();
-    const host = new AsyncGameController('m22', spy.hooks, { io: be.ioFor('host-uid'), stash });
-    await host.start();
-    await flush();
-
-    expect(be.turns.find(t => t.team === 'blue')!.paths).toBeNull();
-    expect(spy.forfeitable).toContain(true);
-    host.destroy();
-  });
-
-  it('offers forfeit when the opponent reveal fails verification', async () => {
-    const be = new FakeBackend('m23', 'host-uid');
-    const spy = makeHooks();
-    const host = new AsyncGameController('m23', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash() });
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m23');
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await guestIO.commit('m23', 1, 'red', redPlan);
-    await guestIO.reveal('m23', 1, 'red', [{ unitId: 'r1', waypoints: [{ x: 99, y: 99 }] }]);
-    await flush();
-
-    expect(spy.plays.length).toBe(0);
-    expect(spy.forfeitable[spy.errors.findIndex(e => /verification/i.test(e))]).toBe(true);
-    host.destroy();
-  });
-
-  it('releases the playback latch when starting playback throws, so the round can be retried', async () => {
-    const be = new FakeBackend('m24', 'host-uid');
-    const spy = makeHooks();
-    let throwOnce = true;
-    const onPlayRound = spy.hooks.onPlayRound;
-    spy.hooks.onPlayRound = (input) => {
-      if (throwOnce) { throwOnce = false; throw new Error('boom'); }
-      onPlayRound(input);
-    };
-    const env = fakePollEnv();
-    const host = new AsyncGameController('m24', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash(), pollEnv: env });
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m24');
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await guestIO.commit('m24', 1, 'red', redPlan);
-    await guestIO.reveal('m24', 1, 'red', redPlan);
-    await flush();
-    expect(spy.plays.length).toBe(0);
-    expect(spy.forfeitable).toContain(true);
-
-    env.tick();
-    await flush();
-    expect(spy.plays.length).toBe(1);
-    await host.onRoundPlayed(1, makeState(80, 80), false);
-    await flush();
-    expect(be.match.currentRound).toBe(2);
-    host.destroy();
-  });
-
-  it('still reveals when a commit landed but was reported as failed (no stash wipe)', async () => {
-    const be = new FakeBackend('m25', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
-    const io = be.ioFor('host-uid');
-    const realCommit = io.commit;
-    // The row is stored, but the response is lost and the client sees failure.
-    io.commit = async (...args) => { await realCommit(...args); return false; };
-    const spy = makeHooks();
-    const host = new AsyncGameController('m25', spy.hooks, { io, stash: memStash() });
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await flush();
-
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.commit('m25', 1, 'red', redPlan);
-    await guestIO.reveal('m25', 1, 'red', redPlan);
-    await flush();
-
-    expect(spy.plays.length).toBe(1);
-    expect(spy.plays[0].bluePaths).toEqual(bluePlan);
-    expect(spy.forfeitable).not.toContain(true);
-    host.destroy();
-  });
-
-  it('flags the re-prompt after a failed submit so the UI can skip "your turn"', async () => {
-    const be = new FakeBackend('m26', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
-    const io = be.ioFor('host-uid');
-    io.commit = async () => false;
-    const afterError: (boolean | undefined)[] = [];
-    const spy = makeHooks();
-    spy.hooks.onPlanTurn = (round, _s, _t, _a, err) => { spy.planTurns.push(round); afterError.push(err); };
-    const host = new AsyncGameController('m26', spy.hooks, { io, stash: memStash() });
-    await host.start();
-    await flush();
-    await host.submitPlan(bluePlan);
-    await flush();
-
-    expect(afterError).toEqual([false, true]);
-    host.destroy();
+    await flush(); await flush();
+    expect(host.plays.map(p => p.round)).toEqual([1]);
   });
 
   it('does not re-emit the same stuck-state error on every poll', async () => {
-    const be = new FakeBackend('m27', 'host-uid');
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m27');
-    await be.ioFor('host-uid').commit('m27', 1, 'blue', bluePlan);
-    await guestIO.commit('m27', 1, 'red', redPlan);
-
+    const backend = new FakeReferee('m1', 'host', { rules: RULES_VERSION + 1 });
+    backend.seat('guest');
     const env = fakePollEnv();
-    const spy = makeHooks();
-    const host = new AsyncGameController('m27', spy.hooks, { io: be.ioFor('host-uid'), stash: memStash(), pollEnv: env });
-    await host.start();
-    await flush();
-    expect(spy.errors.length).toBe(1);
-
-    env.tick();
-    await flush();
-    env.tick();
-    await flush();
-    expect(spy.errors.length).toBe(1);
-    host.destroy();
-  });
-
-  it('reveals a retried plan that landed after an earlier plan never reached the server', async () => {
-    const be = new FakeBackend('m28', 'host-uid');
-    be.match = { ...be.match, guestPlayer: 'guest-uid', status: 'active' };
-    const io = be.ioFor('host-uid');
-    const realCommit = io.commit;
-    let attempt = 0;
-    io.commit = async (...args) => {
-      attempt++;
-      if (attempt === 1) return false; // never reached the server
-      await realCommit(...args);
-      return false; // landed, but the response was lost
-    };
-    const spy = makeHooks();
-    const host = new AsyncGameController('m28', spy.hooks, { io, stash: memStash() });
-    await host.start();
-    await flush();
-    const oldPlan: PathList = [{ unitId: 'b1', waypoints: [{ x: 50, y: 50 }] }];
-    await host.submitPlan(oldPlan);
-    await flush();
-    await host.submitPlan(bluePlan);
-    await flush();
-
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.commit('m28', 1, 'red', redPlan);
-    await guestIO.reveal('m28', 1, 'red', redPlan);
-    await flush();
-
-    expect(spy.plays.length).toBe(1);
-    expect(spy.plays[0].bluePaths).toEqual(bluePlan);
-    host.destroy();
-  });
-
-  it('surfaces repeated reveal failures and then offers forfeit', async () => {
-    const be = new FakeBackend('m29', 'host-uid');
-    const guestIO = be.ioFor('guest-uid');
-    await guestIO.joinMatch('m29');
-    const io = be.ioFor('host-uid');
-    await io.commit('m29', 1, 'blue', bluePlan);
-    await guestIO.commit('m29', 1, 'red', redPlan);
-    io.reveal = async () => false;
-
-    const stash = memStash();
-    stash.save('7s-async-m29-r1-blue', bluePlan);
-    const env = fakePollEnv();
-    const spy = makeHooks();
-    const host = new AsyncGameController('m29', spy.hooks, { io, stash, pollEnv: env });
-    await host.start();
-    await flush();
-    expect(spy.errors.length).toBe(1);
-    expect(spy.forfeitable).toEqual([false]);
-
-    env.tick();
-    await flush();
-    env.tick();
-    await flush();
-    expect(spy.forfeitable[spy.forfeitable.length - 1]).toBe(true);
-    host.destroy();
+    const host = makeHooks();
+    await new AsyncGameController('m1', host.hooks, { io: backend.ioFor('host'), watched: memWatch(), pollEnv: env }).start();
+    env.tick(); await flush();
+    env.tick(); await flush();
+    expect(host.errors).toHaveLength(1);
   });
 });
 
-// Regression: a request that never settled kept evaluate() busy forever, so every
-// later poll/realtime refresh was coalesced behind it and the match never moved.
 describe('withTimeout', () => {
   it('treats a hung call as failed so the next refresh can retry', async () => {
     vi.useFakeTimers();
     try {
       const hung = withTimeout(() => new Promise<boolean>(() => {}), false);
       const result = hung();
-      vi.advanceTimersByTime(IO_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(IO_TIMEOUT_MS);
       await expect(result).resolves.toBe(false);
     } finally {
       vi.useRealTimers();
@@ -1024,7 +458,7 @@ describe('withTimeout', () => {
   });
 
   it('passes through results and errors of calls that settle in time', async () => {
-    await expect(withTimeout(async (n: number) => n * 2, null)(21)).resolves.toBe(42);
-    await expect(withTimeout(async () => { throw new Error('boom'); }, null)()).rejects.toThrow('boom');
+    await expect(withTimeout(async (x: number) => x * 2, 0)(21)).resolves.toBe(42);
+    await expect(withTimeout(async () => { throw new Error('boom'); }, 0)()).rejects.toThrow('boom');
   });
 });

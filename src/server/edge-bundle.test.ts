@@ -3,9 +3,12 @@ import * as source from './edge-entry';
 // The committed bundle the Edge Function imports. Importing it here proves it
 // is valid ESM, runs with no DOM, and reproduces the engine bit for bit.
 // `npm run referee:check` (CI) fails when it is older than the source.
-// @ts-expect-error - generated JS bundle; index.ts types it with referee.d.mts
-import * as bundle from '../../supabase/functions/match-referee/referee.mjs';
+import * as typedBundle from '../../supabase/functions/match-referee/referee.mjs';
 import { createRng } from '../rng';
+
+// referee.d.mts types only what the Edge Function uses; the test reaches further.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const bundle = typedBundle as unknown as Record<string, any>;
 
 describe('match-referee bundle', () => {
   it('exports what the Edge Function and its type declarations name', () => {
