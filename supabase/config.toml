@@ -1,0 +1,5 @@
+[functions.match-referee]
+# The handler checks every bearer token itself with auth.getUser(): anonymous
+# sessions for casual play, Google sessions for ranked. The gateway's legacy-only
+# JWT check would reject current (ES256) sessions.
+verify_jwt = false

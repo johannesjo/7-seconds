@@ -5,6 +5,14 @@ def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
+// Ranked play: the public Google Web OAuth client and Play Games application ids
+// (android/gradle.properties). Left empty, the build has no Ranked mode.
+def rankedGoogleWebClientId = providers.gradleProperty('rankedGoogleWebClientId').getOrElse('').trim()
+def rankedPlayGamesAppId = providers.gradleProperty('rankedPlayGamesAppId').getOrElse('').trim()
+def rankedIdentityEnabled = !rankedGoogleWebClientId.isEmpty() && !rankedPlayGamesAppId.isEmpty()
+if (rankedIdentityEnabled && (!rankedGoogleWebClientId.matches('[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com') || !rankedPlayGamesAppId.matches('[0-9]+'))) {
+    throw new GradleException('Invalid ranked Google web client ID or Play Games application ID; see docs/ranked.md.')
+}
 
 android {
     namespace = "io.github.johannesjo.sevenseconds"
@@ -28,6 +36,9 @@ android {
         versionCode 5
         versionName "1.4.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        resValue 'string', 'ranked_google_web_client_id', rankedGoogleWebClientId
+        resValue 'string', 'game_services_project_id', rankedPlayGamesAppId
+        resValue 'bool', 'ranked_identity_enabled', rankedIdentityEnabled.toString()
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -58,6 +69,12 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // Ranked: Google sign-in and Play Games. Turn alerts: Firebase Cloud Messaging.
+    implementation 'androidx.credentials:credentials:1.6.0'
+    implementation 'androidx.credentials:credentials-play-services-auth:1.6.0'
+    implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.0'
+    implementation 'com.google.android.gms:play-services-games-v2:21.0.0'
+    implementation "com.google.firebase:firebase-messaging:$firebaseMessagingVersion"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
@@ -65,3 +82,11 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
+
+// Turn alerts need the Firebase app config. Without google-services.json the build still works:
+// Firebase stays uninitialized and the game uses local notifications instead. See docs/turn-alerts.md.
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+} else {
+    logger.info('google-services.json not found: server turn alerts are disabled in this build')
+}

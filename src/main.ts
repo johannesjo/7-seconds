@@ -9,14 +9,20 @@ import { HORDE_MAX_WAVES, ROUND_DURATION_S, MAP_HEIGHT, SHIELD_MAX_HITS } from '
 import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
-import { findMatch } from './online-matchmaking';
-import { AsyncGameController, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
-import type { PathList } from './online-async-core';
+import { AsyncGameController, sessionIO, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
+import type { PathList, FinishReason } from './online-async-core';
 import { outcomeNeedsYou } from './online-async-core';
-import { createAsyncMatch, loadMatch, getAsyncJoinId, loadMyMatches, getAsyncShareUrl } from './online-async';
+import {
+  referee, loadMatch, subscribeMatch, getAsyncJoinId, loadMyMatches, getAsyncShareUrl, casualSession,
+  type MatchRecord, type OnlineSession, type RefereeResult,
+} from './online-async';
 import { currentUserId } from './online-auth';
-import { initializeTurnNotifications, getTurnNotificationStatus, setTurnNotifications } from './online-push';
+import { initializeTurnNotifications, getTurnNotificationStatus, setTurnNotifications, closedAppAlerts } from './online-push';
+import { showingMatch, openTurnAlertSettings } from './turn-alerts';
 import { rememberOpenMatch, renderMatches } from './match-list';
+import { getPlayerName, setPlayerName } from './player-name';
+import { rankedSession, rankedAvailable, rankedSignedIn, rankedRequest, rankedMatchNote, findRankedMatch, type RankedMatchView } from './ranked';
+import { RankedScreen } from './ranked-ui';
 import './online-debug'; // side-effect: shows debug overlay when ?debug=1
 import { OnlineGameState } from './online-types';
 import { PathDrawer } from './path-drawer';
@@ -241,17 +247,17 @@ let hordeUnits: Unit[] = [];
 let hordeMap: { obstacles: Obstacle[]; elevationZones: ElevationZone[] } | null = null;
 let hordeAppliedUpgrades = new Map<string, number>();
 
-// Online state. `onlineActive` flags an online flow in progress (matchmaking or
-// an async match), so the matchmaking search can be cancelled. The playback*
-// state is the local player's board: drawn during planning and animated by the
-// headless engine when a resolved round plays back.
+// Online state. `onlineActive` flags an online flow in progress (a search or
+// an online match), so the search can be cancelled. The playback* state is the
+// local player's board: drawn during planning and animated by the headless
+// engine when a played round is shown.
 let onlineActive = false;
-let returnToMatches = false;
+/** Where "Back" goes after an online match: the friend-match hub or Ranked. */
+let returnTo: 'matches' | 'ranked' | null = null;
 let asyncStartVersion = 0;
 let playbackPathDrawer: PathDrawer | null = null;
 let playbackUnits: Unit[] = [];
 let playbackElevationZones: ElevationZone[] = [];
-let cancelMatchmaking: (() => void) | null = null;
 let playbackEngine: GameEngine | null = null;
 let playbackEffectIndex = 0;
 
@@ -263,9 +269,8 @@ let asyncCurrentRound = 1;
 let asyncMatchEnded = false;
 /** Guards the per-round playback finish so it runs exactly once. */
 let asyncRoundFinished = false;
-/** Deterministic authoritative round result, computed up front (frame-rate
- *  independent). The animated playback is cosmetic; this is what we persist. */
-let asyncResult: { endState: OnlineGameState; gameOver: boolean } | null = null;
+/** The session the current online match is played as (casual or ranked). */
+let asyncSession: OnlineSession = casualSession;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -1084,8 +1089,8 @@ retryEncounterBtn.addEventListener('click', () => {
 });
 
 newBattleBtn.addEventListener('click', () => {
-  const reopenMatches = returnToMatches;
-  returnToMatches = false;
+  const reopen = returnTo;
+  returnTo = null;
   recorderMod?.cancelIfRecording();
   forfeitTrackedBattle();
   engine?.stop();
@@ -1108,6 +1113,7 @@ newBattleBtn.addEventListener('click', () => {
   rematchBtn.textContent = 'Rematch';
 
   // Reset online state
+  stopSearch();
   destroyAsync();
   onlineActive = false;
   onlineLobby.style.display = 'none';
@@ -1129,7 +1135,8 @@ newBattleBtn.addEventListener('click', () => {
 
   showPreview();
   showScreen('prompt');
-  if (reopenMatches) void openMatchesList();
+  if (reopen === 'matches') void openMatchesList();
+  if (reopen === 'ranked') openRankedScreen();
 });
 
 // Exit game button (in battle HUD)
@@ -1192,22 +1199,45 @@ function stopPlaybackEngine(): void {
   renderer?.renderProjectiles([]);
 }
 
-// --- Async ("play-by-mail") online matches -------------------------------
+
+// --- Online matches --------------------------------------------------------
+// Every move goes to the match referee, which plays each round once both plans
+// are in; this client draws the plan and animates the published round.
 
 const ASYNC_ROUND_END_TICK = Math.round(ROUND_DURATION_S * 60);
+const battleNote = document.getElementById('battle-note')!;
+const searchPanel = document.getElementById('search-panel')!;
+const searchCountdown = document.getElementById('search-countdown')!;
+const searchBotButtons = document.getElementById('search-bot-buttons')!;
+const searchBotEasyBtn = document.getElementById('search-bot-easy-btn') as HTMLButtonElement;
+const searchBotHardBtn = document.getElementById('search-bot-hard-btn') as HTMLButtonElement;
+const onlineLobbyTitle = document.getElementById('online-lobby-title')!;
+const rankedBtn = document.getElementById('ranked-btn')!;
+const playerNameInput = document.getElementById('player-name-input') as HTMLInputElement;
 
-/** Tear down any in-progress async match. */
+/** The ranked header for the match on screen, once fetched. */
+let rankedView: RankedMatchView | null = null;
+let rankedViewVersion = 0;
+
+/** Tear down any in-progress online match. */
 function destroyAsync(): void {
   asyncStartVersion++;
+  rankedViewVersion++;
   asyncController?.destroy();
   asyncController = null;
+  asyncSession = casualSession;
+  rankedView = null;
   playbackPathDrawer?.destroy();
   playbackPathDrawer = null;
   renderer?.ticker.remove(asyncTickCallback);
   stopPlaybackEngine();
+  showingMatch(null);
+  battleNote.style.display = 'none';
   asyncNotify.style.display = 'none';
   asyncFirstMoveBtn.style.display = 'none';
   asyncForfeitBtn.style.display = 'none';
+  setForfeitMode('forfeit');
+  onlineReloadBtn.style.display = 'none';
   asyncBackBtn.style.display = 'none';
 }
 
@@ -1226,16 +1256,87 @@ asyncFirstMoveBtn.addEventListener('click', () => {
   confirmBtn.classList.add('active');
 });
 
-// Forfeit: concede the match to escape an unrecoverable state (or just give up).
-asyncForfeitBtn.addEventListener('click', () => {
+// Forfeit: concede the match (or withdraw an invite nobody joined).
+/** The lobby's forfeit button either withdraws an invite nobody joined
+ *  (never a concession) or concedes the match. */
+function setForfeitMode(mode: 'withdraw' | 'forfeit'): void {
+  asyncForfeitBtn.dataset.mode = mode;
+  asyncForfeitBtn.textContent = mode === 'withdraw' ? 'Withdraw invite' : 'Forfeit match';
+}
+
+asyncForfeitBtn.addEventListener('click', async () => {
+  const controller = asyncController;
+  if (!controller) return;
+  if (asyncForfeitBtn.dataset.mode === 'withdraw') {
+    const status = onlineStatus.textContent ?? '';
+    asyncForfeitBtn.style.display = 'none';
+    setOnlineStatus('Withdrawing…', true);
+    const error = await controller.withdraw();
+    if (error && controller === asyncController) {
+      showToast(error);
+      setOnlineStatus(status);
+      asyncForfeitBtn.style.display = '';
+    }
+    return;
+  }
+  if (controller.record?.status === 'active') {
+    const question = controller.record.ranked ? 'Concede this ranked match? It counts as a loss.' : `Concede this match? ${opponentName()[0].toUpperCase()}${opponentName().slice(1)} wins.`;
+    if (!confirm(question)) return;
+  }
   asyncForfeitBtn.style.display = 'none';
   setOnlineStatus('Forfeiting…', true);
-  void asyncController?.forfeit();
+  void controller.forfeit();
 });
 
-/** Ticker callback that animates a resolved async round headlessly and, once
- *  it ends deterministically (a side eliminated, or the fixed round duration
- *  elapses), reports the authoritative end state back to the controller. */
+const onlineReloadBtn = document.getElementById('online-reload-btn')!;
+onlineReloadBtn.addEventListener('click', () => { window.location.reload(); });
+
+/** The opponent's name as this player should read it. */
+function opponentName(match: MatchRecord | null = asyncController?.record ?? null): string {
+  if (!match || !asyncController) return 'your opponent';
+  const mine = asyncController.team;
+  const name = mine === 'blue' ? match.guestName : match.hostName;
+  return name ?? (match.guestBot && mine === 'blue' ? 'the AI commander' : 'your opponent');
+}
+
+/** The line under the HUD: who you play (and, ranked, what is at stake). */
+function updateBattleNote(): void {
+  const match = asyncController?.record;
+  if (!match) { battleNote.style.display = 'none'; return; }
+  battleNote.classList.remove('win', 'loss');
+  if (match.ranked) {
+    const note = rankedMatchNote(rankedView);
+    battleNote.textContent = note.text;
+    if (note.tone) battleNote.classList.add(note.tone);
+  } else if (match.guestPlayer) {
+    battleNote.textContent = `vs ${opponentName(match)}`;
+  } else {
+    battleNote.style.display = 'none';
+    return;
+  }
+  battleNote.style.display = 'block';
+}
+
+/** Fetch the ranked header (stakes, then the rated result). The result is
+ *  written as the match ends, so a few retries cover a slow update. */
+async function refreshRankedView(id: string, attempts = 3): Promise<void> {
+  const version = ++rankedViewVersion;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const { battle } = await rankedRequest<{ battle: RankedMatchView }>('view', { id });
+      if (version !== rankedViewVersion) return;
+      rankedView = battle;
+      updateBattleNote();
+      const over = battle.status !== 'open' && battle.status !== 'active';
+      if (!over || battle.result || battle.status === 'abandoned') return;
+    } catch { /* retried below */ }
+    await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+    if (version !== rankedViewVersion) return;
+  }
+}
+
+/** Ticker callback that animates a played round headlessly and reports back
+ *  once it ends (a side eliminated, or the fixed round duration elapsed). */
 function asyncTickCallback(ticker: { deltaMS: number }): void {
   if (!playbackEngine || !renderer) return;
   playbackEngine.externalTick(ticker.deltaMS);
@@ -1258,16 +1359,13 @@ function asyncTickCallback(ticker: { deltaMS: number }): void {
 
   if (asyncRoundFinished) return;
   const tick = playbackEngine.getSimulationTick();
-  // The animation's end timing is cosmetic; the persisted result is the
-  // deterministic one computed in startAsyncRoundPlayback (frame-independent).
   if (asyncMatchEnded || tick >= ASYNC_ROUND_END_TICK) {
     asyncRoundFinished = true;
     renderer.ticker.remove(asyncTickCallback);
     lastReplayData = playbackEngine.getReplayData() ?? lastReplayData;
     const round = asyncCurrentRound;
-    const result = asyncResult;
     stopPlaybackEngine();
-    if (result) void asyncController?.onRoundPlayed(round, result.endState, result.gameOver);
+    void asyncController?.onRoundPlayed(round);
   }
 }
 
@@ -1303,42 +1401,25 @@ function runCountIn(onDone: () => void): void {
   show();
 }
 
-/** Run a resolved round: compute the authoritative outcome deterministically,
- *  then animate the same round for the player to watch. */
+/** Animate a round the referee played, from its start state, both plans and
+ *  the seed it used: the same deterministic simulation, shown frame by frame. */
 function startAsyncRoundPlayback(input: PlayRoundInput): void {
   stopPlaybackEngine();
   asyncMatchEnded = false;
   asyncRoundFinished = false;
-  // The round reported back via onRoundPlayed when playback ends. onPlanTurn
-  // also sets this, but it never fires when a match is reopened mid-round (the
-  // controller goes straight to reveal/resolve) — a stale round made the
-  // controller drop the report and wedged the round.
   asyncCurrentRound = input.round;
 
-  // Vary the PRNG per round (matches the live path's seed + roundNumber scheme;
-  // resolveRound and the cosmetic engine both start fresh with roundNumber=1, so
-  // without this every round would reuse the same sequence). Applied to BOTH
-  // passes and derived only from (match seed, round) so it's identical on every
-  // client. Round 1 keeps seed+1, so the match seed itself is unchanged.
-  const roundSeed = input.seed + (input.round - 1);
-
-  // Authoritative, frame-rate-independent result — identical on every client.
-  asyncResult = GameEngine.resolveRound(
-    input.startState, input.bluePaths, input.redPaths, roundSeed, ASYNC_ROUND_END_TICK,
-  );
-
-  // Cosmetic animated playback (its sampled end state is NOT persisted).
   playbackEngine = new GameEngine(null, (type) => {
     if (type === 'end') asyncMatchEnded = true;
-  }, { seed: roundSeed });
+  }, { seed: input.seed });
   playbackEngine.loadOnlineGameState(input.startState);
   playbackEngine.setBluePaths(input.bluePaths);
   playbackEngine.setRedPaths(input.redPaths);
   roundCounterEl.textContent = `Round ${input.round}`;
 
   // Paint the starting positions so the player can read the board, then count
-  // in 3-2-1 before the action animates — a beat to orient on who's where
-  // before "what happened" replays. startPlaying() is deferred to the count's end.
+  // in 3-2-1 before the action animates.
+  renderer!.adaptToRemoteMap(input.startState.mapWidth, input.startState.mapHeight);
   renderer!.renderElevationZones(input.startState.elevationZones);
   renderer!.renderObstacles(input.startState.obstacles);
   renderer!.renderUnits(playbackEngine.getUnits());
@@ -1352,7 +1433,26 @@ function startAsyncRoundPlayback(input: PlayRoundInput): void {
   });
 }
 
-/** Bridge the async protocol controller to the UI / playback engine. */
+/** How a finished match is headlined, from this player's side. */
+function resultText(status: string, reason: FinishReason | null, iWon: boolean): { title: string; detail: string } {
+  if (status === 'abandoned') {
+    switch (reason) {
+      case 'version': return { title: 'Match ended', detail: 'It was made with another version of the game' };
+      case 'cancelled': return { title: 'Match withdrawn', detail: 'Nobody had joined yet' };
+      case 'battle': return { title: 'Draw', detail: 'Both armies fell together' };
+      default: return { title: 'Match abandoned', detail: 'Nobody played for too long' };
+    }
+  }
+  const who = opponentName();
+  const named = who[0].toUpperCase() + who.slice(1);
+  switch (reason) {
+    case 'forfeit': return { title: iWon ? 'Victory' : 'Defeat', detail: iWon ? `${named} conceded` : 'You conceded' };
+    case 'timeout': return { title: iWon ? 'Victory' : 'Defeat', detail: iWon ? `${named} ran out of time` : 'You ran out of time' };
+    default: return { title: iWon ? 'Victory' : 'Defeat', detail: 'Elimination' };
+  }
+}
+
+/** Bridge the online protocol controller to the UI / playback engine. */
 function asyncHooks(): AsyncGameHooks {
   return {
     onPlanTurn(round, startState, myTeam, awaitingGuest, afterError) {
@@ -1382,22 +1482,19 @@ function asyncHooks(): AsyncGameHooks {
         ? 'var(--color-planning-blue)' : 'var(--color-planning-red)';
       battleHud.style.display = 'none';
       roundCounterEl.textContent = `Round ${round}`;
+      updateBattleNote();
       showScreen('battle');
 
       if (awaitingGuest && !asyncMatchmade) {
         // Host's first move before a friend joins. The full-screen lobby would
         // cover the canvas, so we keep the invite up with a "Plan first move"
         // button that dismisses the lobby into the (already set-up) planning UI.
-        // No "your turn" notification — the host just opened this themselves.
-        // (Matchmade games skip this: the stranger is already arriving, so the
-        // host just plans — no share link.)
         planningOverlay.classList.remove('active');
         confirmBtn.classList.remove('active');
         onlineShareContainer.style.display = '';
         asyncNotify.style.display = 'flex';
-        // Offer Forfeit even while waiting for a guest: lets a host clear an open
-        // match to get back under the concurrent-match cap (forfeit() handles
-        // 'open' matches), so the cap warning's advice is actually actionable.
+        // Withdrawing an invite nobody joined frees a slot under the match limit.
+        setForfeitMode('withdraw');
         asyncForfeitBtn.style.display = '';
         asyncFirstMoveBtn.style.display = '';
         setOnlineStatus('Share this link so a friend can join — or plan your first move now.', false);
@@ -1412,14 +1509,15 @@ function asyncHooks(): AsyncGameHooks {
       // Re-prompted after a failed submit: keep the error toast readable and
       // don't alert for a turn the player just tried to take.
       if (afterError) return;
-      // Browsers use Web Push; Android can show an ordinary local alert if the
-      // running match receives a turn update while its WebView is backgrounded.
-      if (document.visibilityState === 'visible') showToast("It's your turn!");
+      if (document.visibilityState === 'visible') showToast(round === 1 ? 'Plan your first move!' : "It's your turn!");
+      // Without server-sent alerts, Android can still show a local one if this
+      // running match gets a turn update while its WebView is backgrounded.
       const matchId = asyncController?.matchId;
-      if (matchId) void notifyLocalTurn(matchId, round);
+      const ranked = asyncSession.ranked;
+      if (matchId) void closedAppAlerts().then(serverAlerts => { if (!serverAlerts) void notifyLocalTurn(matchId, round, ranked); });
     },
 
-    onAwaitOpponent(round, awaitingGuest) {
+    onAwaitOpponent(round, awaitingGuest, playing) {
       playbackPathDrawer?.destroy();
       playbackPathDrawer = null;
       planningOverlay.classList.remove('active');
@@ -1431,13 +1529,16 @@ function asyncHooks(): AsyncGameHooks {
         // invite visible so a friend can join and start the match.
         onlineShareContainer.style.display = '';
         asyncNotify.style.display = 'flex';
-        // Same as the first-move screen: allow forfeiting an open match so the
-        // host can drop back under the concurrent-match cap without a guest.
+        setForfeitMode('withdraw');
         asyncForfeitBtn.style.display = '';
         setOnlineStatus('First move locked in! Share the link — the match begins when a friend joins.', true);
       } else {
         onlineShareContainer.style.display = 'none';
-        setOnlineStatus(`Turn submitted (round ${round}). Waiting for your friend — you can safely leave and return later.`, true);
+        const match = asyncController?.record;
+        if (playing) setOnlineStatus('Both plans are in. Playing the round…', true);
+        else if (match?.guestBot) setOnlineStatus(`${opponentName()[0].toUpperCase()}${opponentName().slice(1)} is planning…`, true);
+        else setOnlineStatus(`Plan submitted (round ${round}). Waiting for ${opponentName()} — you can leave and come back later.`, true);
+        asyncNotify.style.display = match?.guestBot ? 'none' : 'flex';
       }
       onlineLobby.style.display = 'flex';
       showScreen('battle');
@@ -1454,32 +1555,25 @@ function asyncHooks(): AsyncGameHooks {
       startAsyncRoundPlayback(input);
     },
 
-    onGameOver(status, finalState) {
-      // Capture from the controller before destroyAsync(): use its authoritative
-      // team, not the module-level asyncMyTeam — the latter is only set when WE
-      // plan a round this session, so it's stale (and would invert the result)
-      // when a finished match is reopened from "My Matches". The W/L record is
-      // keyed by opponent uid + match id, recorded once per match.
+    onGameOver(status, finalState, reason) {
+      // Capture from the controller before destroyAsync(): its team is
+      // authoritative even when a finished match is reopened.
       const myTeam = asyncController?.team ?? asyncMyTeam;
       const opponentId = asyncController?.opponentId ?? null;
       const matchId = asyncController?.matchId ?? null;
+      const ranked = asyncSession.ranked;
+      const { title, detail } = resultText(status, reason, status === (myTeam === 'blue' ? 'host_won' : 'guest_won'));
+      const note = ranked ? rankedView : null;
       destroyAsync();
-      // When a match ends without round playback the lobby overlay was never
-      // dismissed by onPlayRound, so hide it here or it covers the result screen
-      // (z-index:25) and the match looks stuck. Three such paths: forfeit
-      // (finish -> onGameOver directly), reopening an already-finished match
-      // from "My Matches", and a poll/realtime detecting the opponent abandoned
-      // while we sit on the await screen. Hiding the lobby also hides the share
-      // box nested inside it.
       onlineLobby.style.display = 'none';
       if (status === 'abandoned') {
         // Neutral, not a win/loss color
-        setResultHeading('Match abandoned', 'Your opponent left', '');
+        setResultHeading(title, detail, '');
       } else {
         const winner: Team = status === 'guest_won' ? 'red' : 'blue';
-        const iWon = (myTeam === winner);
-        if (opponentId && matchId) recordMatchResultOnce(matchId, opponentId, iWon);
-        setResultHeading(iWon ? 'Victory' : 'Defeat', 'Elimination', teamColor(winner));
+        const iWon = myTeam === winner;
+        if (!ranked && opponentId && matchId) recordMatchResultOnce(matchId, opponentId, iWon);
+        setResultHeading(title, detail, teamColor(winner));
         audio.play(iWon ? 'victory' : 'defeat');
       }
       const survivors = (team: Team) => {
@@ -1487,6 +1581,16 @@ function asyncHooks(): AsyncGameHooks {
         return `${army.filter(u => u.hp > 0).length}/${army.length}`;
       };
       resultStatsEl.innerHTML = [`Blue survivors: ${survivors('blue')}`, `Red survivors: ${survivors('red')}`].join('<br>');
+      if (ranked && matchId) {
+        // The rated result: shown once the database has it.
+        const line = document.createElement('div');
+        line.className = 'ranked-result-line';
+        line.textContent = rankedMatchNote(note).text;
+        resultStatsEl.append(document.createElement('br'), line);
+        void rankedRequest<{ battle: RankedMatchView }>('view', { id: matchId })
+          .then(({ battle }) => { line.textContent = rankedMatchNote(battle).text; })
+          .catch(() => { line.textContent = 'Open Ranked to see your new rating.'; });
+      }
       rematchBtn.style.display = 'none';
       replayBtn.style.display = lastReplayData ? '' : 'none';
       newBattleBtn.textContent = 'Back';
@@ -1501,38 +1605,71 @@ function asyncHooks(): AsyncGameHooks {
       onlineShareContainer.style.display = 'none';
       asyncFirstMoveBtn.style.display = 'none';
       setOnlineStatus(message);
-      // A forfeitable error (e.g. a lost commit that can never be revealed) is a
-      // dead end otherwise — offer a clean way to concede and end the match.
+      setForfeitMode('forfeit');
       asyncForfeitBtn.style.display = canForfeit ? '' : 'none';
+      onlineLobby.style.display = 'flex';
+      showScreen('battle');
+    },
+
+    onMatch(match) {
+      updateBattleNote();
+      if (match.ranked) void refreshRankedView(match.id);
+      // A friend joined while the invite was up: no more link or withdrawing.
+      if (match.status === 'active' && asyncForfeitBtn.dataset.mode === 'withdraw') {
+        setForfeitMode('forfeit');
+        asyncForfeitBtn.style.display = 'none';
+        onlineShareContainer.style.display = 'none';
+        const joined = `${opponentName(match)[0].toUpperCase()}${opponentName(match).slice(1)} joined!`;
+        if (asyncFirstMoveBtn.style.display !== 'none') setOnlineStatus(`${joined} Plan your first move.`);
+        else if (onlineLobby.style.display === 'none') showToast(joined);
+      }
+    },
+
+    onOutdated(message) {
+      playbackPathDrawer?.destroy();
+      playbackPathDrawer = null;
+      planningOverlay.classList.remove('active');
+      confirmBtn.classList.remove('active');
+      onlineShareContainer.style.display = 'none';
+      asyncFirstMoveBtn.style.display = 'none';
+      asyncForfeitBtn.style.display = 'none';
+      asyncNotify.style.display = 'none';
+      setOnlineStatus(message);
+      onlineReloadBtn.style.display = '';
       onlineLobby.style.display = 'flex';
       showScreen('battle');
     },
   };
 }
 
-/** Soft cap on simultaneously in-play async matches per player. */
-const MAX_CONCURRENT_ASYNC_MATCHES = 5;
-
-/** True while the current async match was created via stranger matchmaking, so
- *  both players are already present: the host should plan immediately rather
+/** True while the current online match was found by matchmaking, so both
+ *  players are already present: the host should plan immediately rather
  *  than see the friend-invite "share this link / plan your first move" UX. */
 let asyncMatchmade = false;
 
-/** Start an async match: create a new one (host) or open/join an existing one. */
-async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean } = {}): Promise<void> {
+/** Open an online match: create a friend invite (no id), or open/join one. */
+async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean; ranked?: boolean } = {}): Promise<void> {
+  stopSearch();
   destroyAsync();
   const version = asyncStartVersion;
+  const session = opts.ranked ? rankedSession : casualSession;
+  asyncSession = session;
   asyncMatchmade = opts.matchmade ?? false;
-  returnToMatches = true;
+  returnTo = opts.ranked ? 'ranked' : 'matches';
   onlineActive = true;
+  asyncBackBtn.textContent = opts.ranked ? '← Ranked' : '← Matches';
   asyncBackBtn.style.display = 'block';
   closeMatchesList();
+  rankedScreen.hide();
   showScreen('battle');
+  onlineLobbyTitle.textContent = opts.ranked ? 'Ranked' : 'Online';
   onlineLobby.style.display = 'flex';
-  onlineCancelBtn.textContent = 'Back to matches';
+  onlineCancelBtn.textContent = opts.ranked ? 'Back to Ranked' : 'Back to matches';
   onlineShareContainer.style.display = 'none';
+  searchPanel.style.display = 'none';
   onlineStatus.style.display = '';
-  showOnlineRecord(); // overall W/L (self-hides when there are no games yet)
+  if (opts.ranked) onlineRecord.style.display = 'none';
+  else showOnlineRecord(); // overall W/L (self-hides when there are no games yet)
   asyncNotify.style.display = 'flex';
   void refreshNotificationSetting();
   setOnlineStatus(roomId ? 'Loading match…' : 'Creating match…', true);
@@ -1541,54 +1678,225 @@ async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean
 
   let id = roomId;
   if (!id) {
-    // Cap concurrent open matches so a player can't strand a pile of zombies a
-    // friend never joins (and clutter their own list). Existing matches can
-    // always be resumed/forfeited from the match hub.
-    const mine = await loadMyMatches();
+    const created = await referee.create(casualSession, getPlayerName());
     if (version !== asyncStartVersion) return;
-    if (!mine) {
-      setOnlineStatus('Could not load your matches. Go back and try again.');
-      return;
-    }
-    const liveCount = mine.filter(s =>
-      s.match.status === 'open' || s.match.status === 'active').length;
-    if (liveCount >= MAX_CONCURRENT_ASYNC_MATCHES) {
-      setOnlineStatus(`You have ${liveCount} unfinished matches. Go back to your matches and finish or forfeit one before starting another.`);
-      return;
-    }
-    setOnlineStatus('Creating match...', true);
-    const generated = GameEngine.generateInitialState();
-    const created = await createAsyncMatch(generated);
-    if (version !== asyncStartVersion) return;
-    if (!created) {
-      setOnlineStatus('Could not create a match. Check your connection, then go back and try again.');
+    if (!created.ok) {
+      setOnlineStatus(created.status === 0 ? 'Could not create a match. Check your connection, then go back and try again.' : created.message);
       return;
     }
     id = created.match.id;
     onlineShareContainer.style.display = '';
     setOnlineStatus('Share this link with your friend — the match starts when they join.', true);
   } else {
-    setOnlineStatus('Loading match...', true);
+    setOnlineStatus('Loading match…', true);
   }
 
-  // Populate the invite link for both new and resumed host matches: when a host
-  // reopens an open match, the hooks reveal the share box but never set the URL,
-  // so without this the field shows up empty. getAsyncShareUrl is id-only/pure.
   onlineShareUrl.value = getAsyncShareUrl(id);
 
-  const controller = new AsyncGameController(id, asyncHooks());
+  const controller = new AsyncGameController(id, asyncHooks(), {
+    io: sessionIO(session, () => (session.ranked ? null : getPlayerName())),
+  });
   asyncController = controller;
+  showingMatch(id);
   const ok = await controller.start();
   if (version !== asyncStartVersion) return;
   if (!ok) {
     controller.destroy();
     asyncController = null;
-  } else {
+  } else if (!opts.ranked) {
     rememberOpenMatch(id);
   }
 }
 
-// One entry point for starting and returning to durable online matches.
+// --- Random opponents: a search, and an AI commander if nobody comes ---------
+
+/** Seconds a search waits for a human before an AI commander takes the seat.
+ *  Ranked searches wait longer (the server allows commanders after 30 s). */
+const SEARCH_BOT_DELAY_S = { casual: 20, ranked: 40 };
+const SEARCH_POLL_MS = 3_000;
+
+interface Search {
+  session: OnlineSession;
+  id: string | null;
+  deadline: number;
+  timer: ReturnType<typeof setInterval> | null;
+  unsubscribe: (() => void) | null;
+  callingBot: boolean;
+  /** Automatic AI requests made; after two refusals the search waits for a player. */
+  botAttempts: number;
+  /** No more automatic AI request (it was refused); the player can still ask. */
+  botRefused: boolean;
+  /** Why the last AI request failed, shown until the next one. */
+  notice: string | null;
+  lastPoll: number;
+}
+let search: Search | null = null;
+let searchVersion = 0;
+
+function stopSearch(): void {
+  searchVersion++;
+  if (!search) return;
+  if (search.timer) clearInterval(search.timer);
+  search.unsubscribe?.();
+  search = null;
+  searchPanel.style.display = 'none';
+}
+
+/** Search for a random opponent, casual or ranked. */
+async function startSearch(ranked: boolean): Promise<void> {
+  stopSearch();
+  destroyAsync();
+  const version = searchVersion;
+  const session = ranked ? rankedSession : casualSession;
+  onlineActive = true;
+  returnTo = ranked ? 'ranked' : null;
+  closeMatchesList();
+  rankedScreen.hide();
+  await initRenderer();
+  if (version !== searchVersion) return;
+  showSearchLobby(ranked);
+  setOnlineStatus('Looking for an opponent…', true);
+  search = { session, id: null, deadline: Infinity, timer: null, unsubscribe: null, callingBot: false, botAttempts: 0, botRefused: false, notice: null, lastPoll: 0 };
+
+  const result: RefereeResult = ranked ? await findRankedMatch() : await referee.matchmake(casualSession, getPlayerName());
+  if (version !== searchVersion) {
+    // Cancelled while the request was out: withdraw a search it opened.
+    if (result.ok && result.match.status === 'open') void referee.cancel(session, result.match.id);
+    return;
+  }
+  if (!result.ok) {
+    searchPanel.style.display = 'none';
+    setOnlineStatus(result.status === 0 ? 'Could not reach the online server. Check your connection and try again.' : result.message);
+    return;
+  }
+  handleSearchMatch(result.match);
+}
+
+/** Pick an open search back up (from the match list or Ranked). */
+function resumeSearch(match: MatchRecord, ranked: boolean): void {
+  stopSearch();
+  destroyAsync();
+  onlineActive = true;
+  returnTo = ranked ? 'ranked' : 'matches';
+  closeMatchesList();
+  rankedScreen.hide();
+  const version = searchVersion;
+  void initRenderer().then(() => {
+    if (version !== searchVersion) return; // left meanwhile
+    showSearchLobby(ranked);
+    search = { session: ranked ? rankedSession : casualSession, id: null, deadline: Infinity, timer: null, unsubscribe: null, callingBot: false, botAttempts: 0, botRefused: false, notice: null, lastPoll: 0 };
+    handleSearchMatch(match);
+  });
+}
+
+function showSearchLobby(ranked: boolean): void {
+  showScreen('battle');
+  onlineLobbyTitle.textContent = ranked ? 'Ranked search' : 'Finding an opponent';
+  onlineLobby.style.display = 'flex';
+  onlineShareContainer.style.display = 'none';
+  asyncNotify.style.display = 'none';
+  onlineRecord.style.display = 'none';
+  searchPanel.style.display = 'flex';
+  searchCountdown.textContent = '';
+  // Casual players may pick a commander at once; ranked gives humans a chance first.
+  searchBotButtons.style.display = ranked ? 'none' : 'flex';
+  searchBotEasyBtn.disabled = false;
+  searchBotHardBtn.disabled = false;
+  onlineCancelBtn.textContent = 'Cancel search';
+}
+
+/** A search's match: start playing once someone has joined, else wait. */
+function handleSearchMatch(match: MatchRecord): void {
+  const current = search;
+  if (!current) return;
+  if (match.guestPlayer) {
+    void startAsyncGame(match.id, { matchmade: true, ranked: current.session.ranked });
+    return;
+  }
+  if (current.id === null) {
+    current.id = match.id;
+    const delay = current.session.ranked ? SEARCH_BOT_DELAY_S.ranked : SEARCH_BOT_DELAY_S.casual;
+    // A resumed casual search may already have waited long enough. Ranked
+    // always waits in full: the server refuses a commander before 30 s.
+    const waited = current.session.ranked ? 0 : Math.max(0, (Date.now() - Date.parse(match.updatedAt || '')) / 1000) || 0;
+    current.deadline = Date.now() + Math.max(0, delay - waited) * 1000;
+    current.unsubscribe = subscribeMatch(current.session, match.id, () => { void pollSearch(); });
+    current.timer = setInterval(() => { void tickSearch(); }, 1000);
+  }
+  setOnlineStatus('Searching for an opponent…', true);
+  void tickSearch();
+}
+
+async function tickSearch(): Promise<void> {
+  const current = search;
+  if (!current || current.id === null) return;
+  const left = Math.ceil((current.deadline - Date.now()) / 1000);
+  if (current.callingBot) return;
+  if (current.notice) {
+    searchCountdown.textContent = current.notice;
+  } else if (current.botRefused) {
+    searchCountdown.textContent = current.session.ranked
+      ? 'Still searching. You already have three ranked matches against AI commanders, so this one waits for a player.'
+      : 'Still searching for a player.';
+  } else if (left > 0) {
+    searchCountdown.textContent = current.session.ranked
+      ? `Nobody yet. If no player joins in ${left} s, an AI commander takes the seat (rated as usual).`
+      : `Nobody yet. An AI commander joins in ${left} s, or pick one now.`;
+  } else {
+    await callSearchBot();
+    return;
+  }
+  if (Date.now() - current.lastPoll >= SEARCH_POLL_MS) await pollSearch();
+}
+
+/** Realtime is the fast path; this poll covers a dropped socket. */
+async function pollSearch(): Promise<void> {
+  const current = search;
+  if (!current || current.id === null) return;
+  current.lastPoll = Date.now();
+  const loaded = await loadMatch(current.session, current.id);
+  if (search !== current || loaded.kind !== 'ok') return;
+  if (loaded.match.status !== 'open' && loaded.match.status !== 'active') {
+    stopSearch();
+    setOnlineStatus('This search has ended. Start a new one.');
+    return;
+  }
+  if (loaded.match.guestPlayer) handleSearchMatch(loaded.match);
+}
+
+async function callSearchBot(difficulty?: 'recruit' | 'veteran'): Promise<void> {
+  const current = search;
+  if (!current || current.id === null || current.callingBot) return;
+  current.callingBot = true;
+  current.notice = null;
+  searchBotEasyBtn.disabled = true;
+  searchBotHardBtn.disabled = true;
+  searchCountdown.textContent = 'An AI commander is taking the seat…';
+  const result = await referee.bot(current.session, current.id, difficulty);
+  if (search !== current) return;
+  current.callingBot = false;
+  searchBotEasyBtn.disabled = false;
+  searchBotHardBtn.disabled = false;
+  if (result.ok && result.match.guestPlayer) {
+    handleSearchMatch(result.match);
+    return;
+  }
+  // Refused (too early, or too many ranked AI matches) or failed: keep
+  // searching, and ask once more a little later.
+  if (difficulty === undefined && ++current.botAttempts < 2) current.deadline = Date.now() + 30_000;
+  else current.botRefused = true;
+  current.notice = !result.ok && result.status !== 409 ? result.message : null;
+  void tickSearch();
+}
+
+searchBotEasyBtn.addEventListener('click', () => { void callSearchBot('recruit'); });
+searchBotHardBtn.addEventListener('click', () => { void callSearchBot('veteran'); });
+
+onlineRandomBtn.addEventListener('click', () => { void startSearch(false); });
+
+// --- The friend-match hub --------------------------------------------------
+
+// One entry point for starting and returning to friend matches.
 onlineAsyncBtn.addEventListener('click', () => { void openMatchesList(); });
 
 /** Passive menu refresh: never creates an anonymous account on load. */
@@ -1618,6 +1926,7 @@ async function openMatchesList(): Promise<void> {
   battleScreen.inert = true;
   if (!alreadyOpen) {
     matchesScreen.scrollTop = 0;
+    playerNameInput.value = getPlayerName() ?? '';
     document.getElementById('matches-title')!.focus();
   }
   matchesList.replaceChildren();
@@ -1639,14 +1948,22 @@ async function openMatchesList(): Promise<void> {
     return;
   }
   matchesStatus.style.display = 'none';
-  renderMatches(matchesList, summaries, id => { void startAsyncGame(id); });
+  renderMatches(matchesList, summaries, id => {
+    const summary = summaries.find(s => s.match.id === id);
+    if (summary?.outcome === 'searching') resumeSearch(summary.match, false);
+    else void startAsyncGame(id);
+  });
 }
 
+playerNameInput.addEventListener('change', () => {
+  setPlayerName(playerNameInput.value);
+  playerNameInput.value = getPlayerName() ?? '';
+});
 matchesNewBtn.addEventListener('click', () => { void startAsyncGame(null); });
 matchesRefreshBtn.addEventListener('click', () => { void openMatchesList(); });
 matchesBackBtn.addEventListener('click', () => {
   closeMatchesList();
-  returnToMatches = false;
+  returnTo = null;
   onlineAsyncBtn.focus();
   void refreshMatchesBadge();
 });
@@ -1654,10 +1971,44 @@ matchesScreen.addEventListener('keydown', event => {
   if (event.key === 'Escape') matchesBackBtn.click();
 });
 
+// --- Ranked ---------------------------------------------------------------
+
+const rankedScreen = new RankedScreen(document.getElementById('ranked-screen')!, {
+  openMatch: (id, searching) => {
+    if (!searching) { void startAsyncGame(id, { ranked: true }); return; }
+    void loadMatch(rankedSession, id).then(loaded => {
+      if (loaded.kind === 'ok') resumeSearch(loaded.match, true);
+      else void startAsyncGame(id, { ranked: true });
+    });
+  },
+  findOpponent: () => { void startSearch(true); },
+  closed: restoreFocus => {
+    promptScreen.inert = false;
+    battleScreen.inert = false;
+    if (restoreFocus && rankedBtn.offsetParent) rankedBtn.focus();
+  },
+});
+
+/** Ranked is a modal dialog over the menu: what's behind it is inert. */
+function openRankedScreen(): void {
+  promptScreen.inert = true;
+  battleScreen.inert = true;
+  void rankedScreen.open();
+}
+
+rankedBtn.addEventListener('click', openRankedScreen);
+
+// The Ranked button appears only in the Android app with Play Games configured.
+void rankedAvailable().then(available => { rankedBtn.style.display = available ? '' : 'none'; });
+
+// --- Turn alerts --------------------------------------------------------------
+
 async function refreshNotificationSetting(): Promise<void> {
   const version = asyncStartVersion;
-  const local = Capacitor.isNativePlatform();
-  asyncNotifyLabel.textContent = local ? 'Turn alerts on this device' : "Notify me when it's my turn";
+  const native = Capacitor.isNativePlatform();
+  const serverAlerts = await closedAppAlerts();
+  if (version !== asyncStartVersion) return;
+  asyncNotifyLabel.textContent = native ? 'Turn alerts on this device' : "Notify me when it's my turn";
   asyncNotifyCb.disabled = true;
   asyncNotifyCb.checked = false;
   asyncNotifyHint.textContent = 'Checking notifications…';
@@ -1665,12 +2016,17 @@ async function refreshNotificationSetting(): Promise<void> {
   if (version !== asyncStartVersion) return;
   asyncNotifyCb.checked = status.enabled;
   asyncNotifyCb.disabled = !status.available;
-  asyncNotifyHint.textContent = status.available
-    ? (local ? LOCAL_TURN_HINT : '')
-    : 'Turn notifications are unavailable in this version of the app or browser.';
+  asyncNotifyHint.textContent = !status.available
+    ? 'Turn notifications are unavailable in this version of the app or browser.'
+    : status.blocked ? 'Notifications are off for 7 Seconds in Android settings. Tap here to allow them.'
+    : native && !serverAlerts ? LOCAL_TURN_HINT : '';
 }
 
-// Local Android notifications / Web Push opt-in after an explicit user gesture.
+asyncNotifyHint.addEventListener('click', () => {
+  if (asyncNotifyHint.textContent?.startsWith('Notifications are off')) void openTurnAlertSettings();
+});
+
+// Turn alerts opt-in after an explicit user gesture.
 asyncNotifyCb.addEventListener('change', async () => {
   const version = asyncStartVersion;
   const enabled = asyncNotifyCb.checked;
@@ -1680,74 +2036,21 @@ asyncNotifyCb.addEventListener('change', async () => {
   if (version !== asyncStartVersion) return;
   asyncNotifyCb.disabled = false;
   asyncNotifyCb.checked = ok ? enabled : !enabled;
-  asyncNotifyHint.textContent = ok
-    ? (enabled ? (Capacitor.isNativePlatform() ? LOCAL_TURN_HINT : "You'll be notified when it's your turn.") : 'Turn notifications are off.')
-    : 'Could not save notifications. Check your connection and notification permissions, then try again.';
-});
-
-// How long a matchmade guest waits for the host's freshly-created match row to
-// replicate into view before giving up: up to JOIN_LAG_TRIES probes spaced
-// JOIN_LAG_INTERVAL_MS apart (~4s total; normally resolves on the first probe).
-const JOIN_LAG_TRIES = 8;
-const JOIN_LAG_INTERVAL_MS = 500;
-
-// Online vs Random — client-side matchmaking via Supabase Realtime
-onlineRandomBtn.addEventListener('click', async () => {
-  onlineActive = true;
-  returnToMatches = false;
-  onlineCancelBtn.textContent = 'Cancel search';
-
-  await initRenderer();
-
-  onlineLobby.style.display = 'flex';
-  onlineShareContainer.style.display = 'none';
-  showOnlineRecord();
-  setOnlineStatus('Searching for opponent...', true);
-
-  const { promise, cancel } = findMatch();
-  cancelMatchmaking = cancel;
-
-  try {
-    const result = await promise;
-    cancelMatchmaking = null;
-
-    // Both peers paired on the same room id via presence. Run the stranger game
-    // on the durable log too: the host creates the match under that id; the
-    // guest joins it. No WebRTC — a present opponent just makes the turn log
-    // resolve within seconds (Realtime), and a leaver degrades to play-by-mail.
-    if (result.role === 'host') {
-      setOnlineStatus('Opponent found! Setting up game...', true);
-      const created = await createAsyncMatch(GameEngine.generateInitialState(), result.roomId);
-      if (!created) {
-        if (onlineActive) setOnlineStatus('Could not start the match. Try again.');
-        return;
-      }
-      await startAsyncGame(result.roomId, { matchmade: true });
-    } else {
-      setOnlineStatus('Opponent found! Joining game...', true);
-      // The host writes the match row right after pairing; tolerate the brief
-      // replication lag before it's queryable (also rides out a transient read).
-      let exists = false;
-      for (let i = 0; i < JOIN_LAG_TRIES && onlineActive && !exists; i++) {
-        exists = (await loadMatch(result.roomId)) != null;
-        // No sleep after the final probe — we're about to give up anyway.
-        if (!exists && i < JOIN_LAG_TRIES - 1) await new Promise((r) => setTimeout(r, JOIN_LAG_INTERVAL_MS));
-      }
-      if (!exists) {
-        if (onlineActive) setOnlineStatus('Could not join the match. Try again.');
-        return;
-      }
-      await startAsyncGame(result.roomId, { matchmade: true });
-    }
-  } catch {
-    cancelMatchmaking = null;
-    if (onlineActive) {
-      setOnlineStatus('No opponent found. Try again.');
-    }
+  if (!ok) {
+    const status = await getTurnNotificationStatus().catch(() => null);
+    if (version !== asyncStartVersion) return;
+    asyncNotifyHint.textContent = status?.blocked
+      ? 'Notifications are off for 7 Seconds in Android settings. Tap here to allow them.'
+      : 'Could not turn on notifications. Check your connection and notification permissions, then try again.';
+    return;
   }
+  const serverAlerts = await closedAppAlerts();
+  asyncNotifyHint.textContent = !enabled ? 'Turn notifications are off.'
+    : Capacitor.isNativePlatform() && !serverAlerts ? LOCAL_TURN_HINT : "You'll be notified when it's your turn.";
 });
 
-// Online lobby share/copy button
+// --- Lobby buttons ----------------------------------------------------------
+
 onlineCopyBtn.addEventListener('click', async () => {
   const url = onlineShareUrl.value;
   if (navigator.share) {
@@ -1765,22 +2068,38 @@ onlineCopyBtn.addEventListener('click', async () => {
 });
 
 onlineCancelBtn.addEventListener('click', () => {
-  cancelMatchmaking?.();
-  cancelMatchmaking = null;
+  // Leaving a search withdraws it, unless someone joined meanwhile.
+  if (search?.id) void referee.cancel(search.session, search.id);
+  stopSearch();
   newBattleBtn.click();
 });
 
+/** Open a match from a link or a tapped alert. Ranked matches need the ranked
+ *  sign-in; without it, the Ranked screen asks for it. */
+async function openLinkedMatch(id: string, ranked: boolean): Promise<void> {
+  if (ranked && !await rankedSignedIn()) {
+    openRankedScreen();
+    return;
+  }
+  void startAsyncGame(id, { ranked });
+}
+
 window.addEventListener('age-verified-async-join', ((e: CustomEvent<string>) => {
-  void startAsyncGame(e.detail);
+  const [id, ranked] = e.detail.split('|');
+  void openLinkedMatch(id, ranked === 'ranked');
 }) as EventListener);
 
 // Clean up online connections on tab close to avoid zombie Supabase channels
 window.addEventListener('beforeunload', () => {
   asyncController?.destroy();
+  stopSearch();
 });
 
-// A local notification tap uses the same entry route and age gate as an invite.
-void initializeTurnNotifications(id => { window.location.assign(getAsyncShareUrl(id)); });
+// A tapped alert uses the same entry route and age gate as an invite link.
+void initializeTurnNotifications(
+  (id, ranked) => { window.location.assign(getAsyncShareUrl(id, ranked)); },
+  () => { void refreshMatchesBadge(); },
+);
 
 document.addEventListener('visibilitychange', () => {
   audio.setPageHidden(document.visibilityState === 'hidden');
@@ -1806,16 +2125,18 @@ document.addEventListener('click', event => {
   // Count available turns without signing in a new player on load.
   void refreshMatchesBadge();
 
-  // Async match link (?amatch=) — distinct from live ?join= WebRTC rooms.
+  // Online match link (?amatch=id, plus &ranked=1 for ranked matches).
   const asyncJoinId = getAsyncJoinId();
   if (asyncJoinId) {
+    const ranked = new URLSearchParams(window.location.search).get('ranked') === '1';
     const cleanUrl = new URL(window.location.href);
     cleanUrl.searchParams.delete('amatch');
+    cleanUrl.searchParams.delete('ranked');
     window.history.replaceState({}, '', cleanUrl.toString());
     if (localStorage.getItem('7s-age-verified')) {
-      void startAsyncGame(asyncJoinId);
+      void openLinkedMatch(asyncJoinId, ranked);
     } else {
-      sessionStorage.setItem('7s-pending-async-join', asyncJoinId);
+      sessionStorage.setItem('7s-pending-async-join', ranked ? `${asyncJoinId}|ranked` : asyncJoinId);
     }
     return;
   }

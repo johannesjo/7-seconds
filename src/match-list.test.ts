@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { groupMatches, matchAction } from './match-list';
-import type { MatchSummary, MatchStatus } from './online-async';
+import { groupMatches, matchAction, opponentLabel } from './match-list';
+import type { MatchSummary, MatchStatus, MatchRecord } from './online-async';
 import type { MatchOutcome } from './online-async-core';
 
-function match(id: string, outcome: MatchOutcome, status: MatchStatus = 'active'): MatchSummary {
+function match(id: string, outcome: MatchOutcome, status: MatchStatus = 'active', extra: Partial<MatchRecord> = {}): MatchSummary {
   const state = { units: [], obstacles: [], elevationZones: [], mapWidth: 800, mapHeight: 600 };
   return { iAmHost: true, outcome, match: {
-    id, status, currentRound: 2, hostPlayer: 'me', guestPlayer: 'friend',
-    seed: null, initialState: state, latestState: state,
+    id, status, currentRound: 2, hostPlayer: 'me', guestPlayer: 'friend', hostName: 'Me', guestName: 'Pal', guestBot: false,
+    initialState: state, latestState: state, prevState: null, prevSeed: null, finishReason: null,
+    rules: 2, ranked: false, matchmaking: false, updatedAt: '', ...extra,
   } };
 }
 
@@ -37,7 +38,7 @@ describe('match hub', () => {
       match('waiting', 'their-turn'), match('ready', 'resolving'), match('old', 'abandoned', 'abandoned'),
     ];
     const groups = groupMatches(summaries, 'last');
-    expect(groups.map(g => g.title)).toEqual(['Last opened', 'Your turn', 'Invites', 'Waiting & ready rounds', 'Finished matches']);
+    expect(groups.map(g => g.title)).toEqual(['Last opened', 'Your turn', 'Invites & searches', 'Waiting & ready rounds', 'Finished matches']);
     expect(groups.flatMap(g => g.matches).map(s => s.match.id)).toEqual(summaries.map(s => s.match.id));
   });
 
@@ -54,5 +55,12 @@ describe('match hub', () => {
     const groups = groupMatches([match('old', 'you-lost', 'guest_won')], 'old');
     expect(groups).toHaveLength(1);
     expect(groups[0].finished).toBe(true);
+  });
+
+  it('names the opponent, or the AI commander, once there is one', () => {
+    expect(opponentLabel(match('a', 'your-turn'))).toBe('vs Pal');
+    expect(opponentLabel(match('b', 'their-turn', 'active', { guestName: null, guestBot: true }))).toBe('vs an AI commander');
+    expect(opponentLabel(match('c', 'searching', 'open', { guestPlayer: null, matchmaking: true }))).toBeNull();
+    expect(matchAction(match('c', 'searching', 'open', { guestPlayer: null, matchmaking: true })).action).toBe('Resume search');
   });
 });

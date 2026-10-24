@@ -1,10 +1,12 @@
-import { getSupabaseClient, generateRoomId } from './online';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseClient } from './online';
 import { ensureAuth } from './online-auth';
 import { dlog } from './online-debug';
 import { withRetry } from './online-retry';
 import type { OnlineGameState } from './online-types';
-import type { AsyncTeam, PathList, TurnRecord, MatchOutcome } from './online-async-core';
-import { hashPaths, summariseMatch } from './online-async-core';
+import { RULES_VERSION, type PathList } from './online-plan';
+import type { AsyncTeam, TurnRecord, MatchOutcome, FinishReason } from './online-async-core';
+import { summariseMatch } from './online-async-core';
 
 export type MatchStatus = 'open' | 'active' | 'host_won' | 'guest_won' | 'abandoned';
 
@@ -12,11 +14,22 @@ export interface MatchRecord {
   id: string;
   hostPlayer: string;
   guestPlayer: string | null;
+  hostName: string | null;
+  guestName: string | null;
+  /** The guest seat is held by an AI commander. */
+  guestBot: boolean;
   initialState: OnlineGameState;
   latestState: OnlineGameState;
-  seed: number | null;
+  /** Start state and seed of the round before currentRound, to replay it. */
+  prevState: OnlineGameState | null;
+  prevSeed: number | null;
   currentRound: number;
   status: MatchStatus;
+  finishReason: FinishReason | null;
+  rules: number;
+  ranked: boolean;
+  matchmaking: boolean;
+  updatedAt: string;
 }
 
 export interface RoundTurn extends TurnRecord {
@@ -24,18 +37,35 @@ export interface RoundTurn extends TurnRecord {
   player: string;
 }
 
-/** Build a share link for an async match. Uses a distinct `amatch` param so
- *  async links are never confused with live `?join` WebRTC rooms. */
-export function getAsyncShareUrl(id: string): string {
+/** Who this client plays online as: the anonymous casual guest, or the
+ *  Google account signed in for ranked play. Each has its own session and
+ *  sees only its own matches. */
+export interface OnlineSession {
+  client(): SupabaseClient;
+  /** The signed-in user id, signing in if this session may do so by itself. */
+  ensureUser(): Promise<string | null>;
+  ranked: boolean;
+}
+
+export const casualSession: OnlineSession = {
+  client: getSupabaseClient,
+  ensureUser: ensureAuth,
+  ranked: false,
+};
+
+/** Build a share link for an online match. */
+export function getAsyncShareUrl(id: string, ranked = false): string {
   const url = new URL(window.location.href);
   url.searchParams.set('amatch', id);
+  if (ranked) url.searchParams.set('ranked', '1');
+  else url.searchParams.delete('ranked');
   url.searchParams.delete('join');
   url.searchParams.delete('relay');
   url.searchParams.delete('debug');
   return url.toString();
 }
 
-/** Read the async match id from the current URL, or null if absent. */
+/** Read the match id (and whether it's ranked) from the current URL. */
 export function getAsyncJoinId(): string | null {
   return new URLSearchParams(window.location.search).get('amatch');
 }
@@ -46,23 +76,42 @@ interface MatchRow {
   id: string;
   host_player: string;
   guest_player: string | null;
+  host_name?: string | null;
+  guest_name?: string | null;
+  guest_bot?: boolean;
   initial_state: OnlineGameState;
   latest_state: OnlineGameState;
-  seed: number | null;
+  prev_state?: OnlineGameState | null;
+  prev_seed?: number | string | null;
   current_round: number;
   status: MatchStatus;
+  finish_reason?: FinishReason | null;
+  rules?: number;
+  ranked?: boolean;
+  matchmaking?: boolean;
+  updated_at?: string;
 }
 
-function mapMatch(row: MatchRow): MatchRecord {
+export function mapMatch(row: MatchRow): MatchRecord {
   return {
     id: row.id,
     hostPlayer: row.host_player,
     guestPlayer: row.guest_player,
+    hostName: row.host_name ?? null,
+    guestName: row.guest_name ?? null,
+    guestBot: row.guest_bot ?? false,
     initialState: row.initial_state,
     latestState: row.latest_state,
-    seed: row.seed,
+    prevState: row.prev_state ?? null,
+    // bigint column: PostgREST may hand it back as a string.
+    prevSeed: row.prev_seed == null ? null : Number(row.prev_seed),
     currentRound: row.current_round,
     status: row.status,
+    finishReason: row.finish_reason ?? null,
+    rules: row.rules ?? 1,
+    ranked: row.ranked ?? false,
+    matchmaking: row.matchmaking ?? false,
+    updatedAt: row.updated_at ?? '',
   };
 }
 
@@ -70,109 +119,106 @@ interface TurnRow {
   round: number;
   team: AsyncTeam;
   player: string;
-  commit_hash: number;
   paths: PathList | null;
 }
 
 function mapTurn(row: TurnRow): RoundTurn {
+  return { round: row.round, team: row.team, player: row.player, paths: row.paths };
+}
+
+// --- the referee ---------------------------------------------------------
+
+/** The outcome of a referee request. `status` 0 is a network failure; 426
+ *  means this client runs other rules than the server and must be updated. */
+export type RefereeResult =
+  | { ok: true; match: MatchRecord }
+  | { ok: false; status: number; message: string; match?: MatchRecord };
+
+const REFEREE_TIMEOUT_MS = 20_000;
+/** Safe to repeat after a lost response: the referee treats a repeat as the
+ *  same request. Creating an invite is not (it would make a second one). */
+const REPEATABLE = new Set(['join', 'matchmake', 'bot', 'submit', 'advance', 'forfeit', 'cancel']);
+const UNREACHABLE = 'Could not reach the online server. Check your connection and try again.';
+
+async function invokeOnce(session: OnlineSession, body: Record<string, unknown>): Promise<RefereeResult & { transient?: boolean }> {
+  let result;
+  try {
+    result = await session.client().functions.invoke('match-referee', { body, timeout: REFEREE_TIMEOUT_MS });
+  } catch (error) {
+    dlog(`referee: ${body.action} threw ${error}`);
+    return { ok: false, status: 0, message: UNREACHABLE, transient: true };
+  }
+  const { data, error } = result;
+  if (!error) {
+    const row = (data as { match?: MatchRow } | null)?.match;
+    return row ? { ok: true, match: mapMatch(row) } : { ok: false, status: 500, message: 'The online server sent an unexpected reply.' };
+  }
+  const response = (error as { context?: unknown }).context instanceof Response ? (error as { context: Response }).context : null;
+  if (!response) return { ok: false, status: 0, message: UNREACHABLE, transient: true };
+  const payload = await response.clone().json().catch(() => null) as { error?: unknown; match?: MatchRow } | null;
+  const message = typeof payload?.error === 'string' ? payload.error : UNREACHABLE;
+  dlog(`referee: ${body.action} -> ${response.status} ${message}`);
   return {
-    round: row.round,
-    team: row.team,
-    player: row.player,
-    // bigint column: PostgREST may hand it back as a string.
-    commitHash: Number(row.commit_hash),
-    paths: row.paths,
+    ok: false, status: response.status, message,
+    ...(payload?.match ? { match: mapMatch(payload.match) } : {}),
+    transient: response.status >= 500 || response.status === 429,
   };
 }
 
-// --- match lifecycle -----------------------------------------------------
-
-/** Create a new async match as host. Returns the record and share URL,
- *  or null if auth/DB is unavailable. */
-export async function createAsyncMatch(
-  initialState: OnlineGameState,
-  id: string = generateRoomId(),
-): Promise<{ match: MatchRecord; shareUrl: string } | null> {
-  const uid = await ensureAuth();
-  if (!uid) return null;
-
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from('matches')
-    .insert({
-      id,
-      host_player: uid,
-      initial_state: initialState,
-      latest_state: initialState,
-      current_round: 1,
-      status: 'open',
-    })
-    .select()
-    .single();
-
-  if (error || !data) {
-    dlog(`async: createMatch failed: ${error?.message}`);
-    return null;
+/** Call the match referee as `session`. Transient failures of repeatable
+ *  actions are retried with backoff before they are reported. */
+export async function callReferee(session: OnlineSession, action: string, params: Record<string, unknown> = {}, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Promise<RefereeResult> {
+  if (!await session.ensureUser()) return { ok: false, status: 401, message: 'Online play is unavailable right now.' };
+  const body = { action, rules: RULES_VERSION, ...params };
+  const attempts = REPEATABLE.has(action) ? 3 : 1;
+  for (let attempt = 1; ; attempt++) {
+    const { transient, ...result } = await invokeOnce(session, body);
+    if (result.ok || !transient || attempt >= attempts) return result;
+    await sleep(400 * 2 ** attempt + Math.random() * 200);
   }
-  dlog(`async: created match ${id}`);
-  return { match: mapMatch(data as MatchRow), shareUrl: getAsyncShareUrl(id) };
 }
 
-export async function loadMatch(id: string): Promise<MatchRecord | null> {
-  await ensureAuth();
-  const client = getSupabaseClient();
-  const { data, error } = await client.from('matches').select().eq('id', id).single();
-  if (error || !data) {
-    dlog(`async: loadMatch ${id} failed: ${error?.message}`);
-    return null;
+/** Short names for the referee actions every match uses. */
+export const referee = {
+  create: (s: OnlineSession, name: string | null) => callReferee(s, 'create', { name }),
+  join: (s: OnlineSession, id: string, name: string | null) => callReferee(s, 'join', { id, name }),
+  matchmake: (s: OnlineSession, name: string | null) => callReferee(s, 'matchmake', { name, ranked: s.ranked }),
+  bot: (s: OnlineSession, id: string, difficulty?: 'recruit' | 'veteran') => callReferee(s, 'bot', { id, difficulty }),
+  submit: (s: OnlineSession, id: string, round: number, paths: PathList, name: string | null) => callReferee(s, 'submit', { id, round, paths, name }),
+  advance: (s: OnlineSession, id: string) => callReferee(s, 'advance', { id }),
+  forfeit: (s: OnlineSession, id: string) => callReferee(s, 'forfeit', { id }),
+  cancel: (s: OnlineSession, id: string) => callReferee(s, 'cancel', { id }),
+};
+
+// --- reads (RLS: a player sees only their own matches) ---------------------
+
+/** `missing`: no such match visible to this player (not theirs, or gone);
+ *  `error`: the read failed and the answer is unknown. */
+export type LoadResult = { kind: 'ok'; match: MatchRecord } | { kind: 'missing' } | { kind: 'error' };
+
+export async function loadMatch(session: OnlineSession, id: string): Promise<LoadResult> {
+  if (!await session.ensureUser()) return { kind: 'error' };
+  const res = await withRetry(() => session.client().from('matches').select().eq('id', id).maybeSingle(), { label: `loadMatch ${id}` })
+    .catch(() => null);
+  if (!res || res.error) {
+    dlog(`async: loadMatch ${id} failed: ${res?.error?.message ?? 'connection error'}`);
+    return { kind: 'error' };
   }
-  return mapMatch(data as MatchRow);
-}
-
-/** Join an open match as guest. If already a participant, just returns it. */
-export async function joinAsyncMatch(id: string): Promise<MatchRecord | null> {
-  const uid = await ensureAuth();
-  if (!uid) return null;
-
-  const existing = await loadMatch(id);
-  if (!existing) return null;
-  if (existing.hostPlayer === uid || existing.guestPlayer === uid) return existing;
-  if (existing.guestPlayer) {
-    dlog(`async: match ${id} already has a guest`);
-    return null;
-  }
-
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from('matches')
-    .update({ guest_player: uid, status: 'active' })
-    .eq('id', id)
-    .is('guest_player', null)
-    .select()
-    .single();
-
-  if (error || !data) {
-    dlog(`async: joinMatch ${id} failed: ${error?.message}`);
-    return null;
-  }
-  dlog(`async: joined match ${id} as guest`);
-  return mapMatch(data as MatchRow);
+  return res.data ? { kind: 'ok', match: mapMatch(res.data as MatchRow) } : { kind: 'missing' };
 }
 
 /** Returns the match's turns, or null on a transient load failure (callers
  *  must treat null as "unknown", NOT as "no turns"). */
-export async function fetchTurns(id: string): Promise<RoundTurn[] | null> {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from('turns')
-    .select()
-    .eq('match_id', id)
-    .order('round', { ascending: true });
-  if (error || !data) {
-    dlog(`async: fetchTurns ${id} failed: ${error?.message}`);
+export async function fetchTurns(session: OnlineSession, id: string): Promise<RoundTurn[] | null> {
+  const res = await withRetry(
+    () => session.client().from('turns').select('round, team, player, paths').eq('match_id', id).order('round', { ascending: true }),
+    { label: `fetchTurns ${id}` },
+  ).catch(() => null);
+  if (!res || res.error || !res.data) {
+    dlog(`async: fetchTurns ${id} failed: ${res?.error?.message ?? 'connection error'}`);
     return null;
   }
-  return (data as TurnRow[]).map(mapTurn);
+  return (res.data as TurnRow[]).map(mapTurn);
 }
 
 /** Filter a turn list down to a single round. */
@@ -188,16 +234,13 @@ export interface MatchSummary {
   outcome: MatchOutcome;
 }
 
-/** Load all live matches plus recent history for the signed-in player, each
- *  collapsed to a single player-facing outcome (your-turn / their-turn / …).
- *  This is the data behind the "my matches" / resume screen — the durable turn
- *  log means a player can leave any match and pick it back up from here.
- *  Returns null on a transient failure (caller shows a retry, not "no matches").
- */
-export async function loadMyMatches(limit = 40): Promise<MatchSummary[] | null> {
-  const uid = await ensureAuth();
+/** Load all live matches plus recent history for the signed-in casual player,
+ *  each collapsed to a single player-facing outcome. Returns null on a
+ *  transient failure (caller shows a retry, not "no matches"). */
+export async function loadMyMatches(limit = 40, session: OnlineSession = casualSession): Promise<MatchSummary[] | null> {
+  const uid = await session.ensureUser();
   if (!uid) return null;
-  const client = getSupabaseClient();
+  const client = session.client();
 
   const query = () => client.from('matches').select()
     .or(`host_player.eq.${uid},guest_player.eq.${uid}`)
@@ -218,7 +261,7 @@ export async function loadMyMatches(limit = 40): Promise<MatchSummary[] | null> 
   const turnsByMatch = new Map<string, RoundTurn[]>();
   if (live.length > 0) {
     const tres = await withRetry(
-      () => client.from('turns').select().in('match_id', live.map(m => m.id)),
+      () => client.from('turns').select('match_id, round, team, player, paths').in('match_id', live.map(m => m.id)),
       { label: 'loadMyMatches turns' },
     ).catch(() => null);
     if (!tres || tres.error) {
@@ -235,149 +278,11 @@ export async function loadMyMatches(limit = 40): Promise<MatchSummary[] | null> 
   return matches.map((m) => {
     const iAmHost = m.hostPlayer === uid;
     const roundTurns = (turnsByMatch.get(m.id) ?? []).filter(t => t.round === m.currentRound);
-    return { match: m, iAmHost, outcome: summariseMatch(m.status, iAmHost, roundTurns) };
+    return { match: m, iAmHost, outcome: summariseMatch(m.status, iAmHost, roundTurns, m.matchmaking) };
   });
 }
 
-// --- commit / reveal -----------------------------------------------------
-
-/** Commit step: store only the hash of our paths (paths column stays null).
- *
- *  Idempotent: a retried or double-fired commit (network flake, double-tap)
- *  must not read as failure just because the row already exists. We upsert with
- *  `ignoreDuplicates` (INSERT ... ON CONFLICT DO NOTHING, so an existing reveal
- *  is never clobbered), then read the slot back: a matching `commit_hash` —
- *  including a row we've since revealed — is success; a *different* hash under
- *  the same (match,round,team) slot is a real conflict we surface. */
-export async function commitTurn(
-  id: string, round: number, team: AsyncTeam, paths: PathList,
-): Promise<boolean> {
-  const uid = await ensureAuth();
-  if (!uid) return false;
-  const client = getSupabaseClient();
-  const hash = hashPaths(paths);
-  const ins = await withRetry(
-    () => client.from('turns').upsert(
-      { match_id: id, round, team, player: uid, commit_hash: hash },
-      { onConflict: 'match_id,round,team', ignoreDuplicates: true },
-    ),
-    { label: `commitTurn r${round}/${team}` },
-  );
-  if (ins.error) {
-    dlog(`async: commitTurn r${round}/${team} failed: ${ins.error.message}`);
-    return false;
-  }
-  // Verify what's actually stored. ignoreDuplicates returns no row on conflict,
-  // so this read is the source of truth for "did my commitment land".
-  const check = await withRetry(
-    () => client.from('turns').select('commit_hash')
-      .eq('match_id', id).eq('round', round).eq('team', team).maybeSingle(),
-    { label: `commitTurn verify r${round}/${team}` },
-  );
-  if (check.error || !check.data) {
-    // Couldn't confirm (transient). The upsert itself reported no error, so
-    // treat as committed rather than prompting a redraw the player already did.
-    return true;
-  }
-  const stored = Number((check.data as { commit_hash: number | string }).commit_hash);
-  if (stored === hash) return true;
-  dlog(`async: commitTurn r${round}/${team} slot holds a different commitment (${stored} != ${hash})`);
-  return false;
-}
-
-/** Reveal step: fill in our paths once both sides have committed. */
-export async function revealTurn(
-  id: string, round: number, team: AsyncTeam, paths: PathList,
-): Promise<boolean> {
-  const client = getSupabaseClient();
-  const { data, error } = await withRetry(
-    () => client
-      .from('turns')
-      .update({ paths, revealed_at: new Date().toISOString() })
-      .eq('match_id', id)
-      .eq('round', round)
-      .eq('team', team)
-      .select('match_id'),
-    { label: `revealTurn r${round}/${team}` },
-  );
-  if (error) {
-    dlog(`async: revealTurn r${round}/${team} failed: ${error.message}`);
-    return false;
-  }
-  // 0 rows (e.g. RLS mismatch) is a silent no-op, not a reveal: report it so
-  // the controller doesn't refresh-and-reveal in a tight loop.
-  if ((data?.length ?? 0) === 0) {
-    dlog(`async: revealTurn r${round}/${team} updated no rows`);
-    return false;
-  }
-  return true;
-}
-
-/** Persist the result of resolving a round: advance the snapshot/round, and
- *  set the match seed on round 1 and the final status when the game is over.
- *
- *  `expectedRound` applies optimistic concurrency — the update only lands while
- *  the row is still on that round, so a late or duplicate writer (both players
- *  resolve independently) can't clobber progress already made. */
-export async function persistRoundResult(
-  id: string,
-  update: {
-    latestState: OnlineGameState; currentRound: number;
-    seed?: number; status?: MatchStatus; expectedRound?: number;
-  },
-): Promise<boolean> {
-  const client = getSupabaseClient();
-  const patch: Record<string, unknown> = {
-    latest_state: update.latestState,
-    current_round: update.currentRound,
-  };
-  if (update.seed != null) patch.seed = update.seed;
-  if (update.status) patch.status = update.status;
-
-  // `.select('id')` returns the rows the update actually touched. With the
-  // optimistic `expectedRound` guard this is 0 rows when another client already
-  // advanced the round — a *benign* lost race, not an error. Returning false
-  // here lets the controller distinguish "my write landed" from "someone beat
-  // me to it" and avoid re-deriving a divergent seed.
-  const res = await withRetry(() => {
-    let query = client.from('matches').update(patch).eq('id', id);
-    if (update.expectedRound != null) query = query.eq('current_round', update.expectedRound);
-    return query.select('id');
-  }, { label: `persistRoundResult ${id}` });
-
-  if (res.error) {
-    dlog(`async: persistRoundResult ${id} failed: ${res.error.message}`);
-    return false;
-  }
-  const rows = (res.data as unknown[] | null)?.length ?? 0;
-  return rows > 0;
-}
-
-/** Move a match to a terminal status (a player forfeits, or claims an
- *  abandoned match). Idempotent and race-safe: the update only lands while the
- *  match is still in play (`open`/`active`), so the first finish wins and a
- *  second concurrent finish no-ops rather than flipping an already-decided
- *  result. Returns true iff this call is the one that ended the match. */
-export async function finishMatch(id: string, status: MatchStatus): Promise<boolean> {
-  const client = getSupabaseClient();
-  const res = await withRetry(
-    () => client.from('matches').update({ status })
-      .eq('id', id).in('status', ['open', 'active']).select('id'),
-    { label: `finishMatch ${id}` },
-  );
-  if (res.error) {
-    dlog(`async: finishMatch ${id} -> ${status} failed: ${res.error.message}`);
-    return false;
-  }
-  return ((res.data as unknown[] | null)?.length ?? 0) > 0;
-}
-
 // --- realtime ------------------------------------------------------------
-
-export interface MatchSubscription {
-  onTurnChange: (turn: RoundTurn) => void;
-  onMatchChange: (match: MatchRecord) => void;
-}
 
 /** Max channel reconnect attempts before we lean entirely on the safety-net
  *  poll. Kept small: the poll already guarantees liveness, so this is just to
@@ -388,13 +293,12 @@ const MAX_SUBSCRIBE_RETRIES = 5;
  *  these fire within seconds; when one is away the rows simply wait.
  *
  *  Self-healing: Realtime can drop the socket (sleep/resume, network change)
- *  and never recover on its own — the old code only logged the bad status, so a
- *  match could hang silently. Here a CHANNEL_ERROR / TIMED_OUT / CLOSED tears
+ *  and never recover on its own. A CHANNEL_ERROR / TIMED_OUT / CLOSED tears
  *  the channel down and re-subscribes with bounded backoff. The controller's
  *  safety-net poll is the ultimate guarantee; this just restores instant push.
  *  Returns an unsubscribe function. */
-export function subscribeMatch(id: string, handlers: MatchSubscription): () => void {
-  const client = getSupabaseClient();
+export function subscribeMatch(session: OnlineSession, id: string, onChange: () => void): () => void {
+  const client = session.client();
   let channel: ReturnType<typeof client.channel> | null = null;
   let closed = false;
   let attempt = 0;
@@ -404,28 +308,12 @@ export function subscribeMatch(id: string, handlers: MatchSubscription): () => v
     if (closed) return;
     channel = client
       .channel(`match:${id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'turns', filter: `match_id=eq.${id}` },
-        (payload) => {
-          const row = payload.new as TurnRow;
-          if (row?.round != null) handlers.onTurnChange(mapTurn(row));
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${id}` },
-        (payload) => {
-          const row = payload.new as MatchRow;
-          if (row?.id) handlers.onMatchChange(mapMatch(row));
-        },
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'turns', filter: `match_id=eq.${id}` }, () => onChange())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${id}` }, () => onChange())
       .subscribe((status) => {
         dlog(`async: match:${id} subscription ${status}`);
         if (status === 'SUBSCRIBED') { attempt = 0; return; }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          scheduleReconnect();
-        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') scheduleReconnect();
       });
   };
 

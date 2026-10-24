@@ -23,8 +23,9 @@ Terrain matters: elevation grants range bonuses, obstacles block movement and li
 - **vs AI** — Single player against AI opponents, on Easy, Normal or Hard (Easy gives the AI one unit fewer and looser planning; Hard gives it an extra soldier). Your win/loss record and streak are kept per difficulty.
 - **Daily challenge** — The same map, armies and battle seed for everyone each day. Your first finished attempt counts; share the result as a spoiler-free emoji summary.
 - **Horde** — Survive 10 waves of increasingly difficult enemies, choosing upgrades between waves
-- **Online vs Random** — Matchmake against a random opponent via Supabase Realtime
-- **Online vs Friend** — Share a link and play against a friend
+- **Play a Stranger** — Matched with a random opponent; if nobody is searching, an AI commander takes the seat
+- **Play a Friend** — Share a link and play against a friend, at your own pace
+- **Ranked** (Android) — Elo ladder with Google Play Games sign-in
 - **Local PvP** — Hot-seat multiplayer on the same device
 
 ## Unit Types
@@ -57,7 +58,7 @@ Terrain matters: elevation grants range bonuses, obstacles block movement and li
 ## Tech Stack
 
 - **Renderer**: [PixiJS](https://pixijs.com/) 8 (WebGL)
-- **Online**: [Supabase](https://supabase.com/) Realtime (WebRTC peer-to-peer with relay fallback)
+- **Online**: [Supabase](https://supabase.com/) (Postgres, Realtime, and the `match-referee` Edge Function that plays each round; see [docs/online-play.md](docs/online-play.md))
 - **Mobile**: [Capacitor](https://capacitorjs.com/) (Android)
 - **Build**: [Vite](https://vite.dev/) + TypeScript (strict)
 - **Tests**: [Vitest](https://vitest.dev/)
@@ -73,10 +74,18 @@ npm install
 npm run dev        # start dev server
 npm run build      # production build
 npm run test:run   # run tests
+npm run typecheck  # app and integration-test types
 npm run screenshots  # capture every main screen at phone and desktop size into output/screenshots/
 ```
 
 `npm run screenshots` needs Playwright with Chromium installed globally (`npm i -g playwright && npx playwright install chromium`) and fails if the page throws an error.
+
+Online play talks to the shared Supabase project. To develop against a local
+stack instead, set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for
+`npm run dev`. The database and referee integration tests need a PostgreSQL 16
+server: `SEVEN_PG_URL=postgresql://postgres@localhost:5432/postgres npm run test:db`.
+After changing the engine or the referee, run `npm run referee:bundle` and
+commit `supabase/functions/match-referee/referee.mjs`. Deployment: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Recording
 

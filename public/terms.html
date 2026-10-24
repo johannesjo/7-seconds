@@ -26,12 +26,12 @@
   <p>By using <strong>7 Seconds</strong>, you agree to the following terms.</p>
 
   <h2>Online Play</h2>
-  <p>Online play creates a direct peer-to-peer (P2P) connection between you and another player using WebRTC. By choosing to play online, you acknowledge that:</p>
+  <p>Online matches are played through our game server (hosted on Supabase), which stores each match and plays every round once both players' plans are in. By choosing to play online, you acknowledge that:</p>
   <ul>
-    <li>Your public IP address may be visible to the other player during connection negotiation, and theirs to you. This is inherent to P2P connections.</li>
-    <li>When a direct connection is not possible (e.g., on mobile networks), traffic may be routed through third-party TURN relay servers, which process your IP address and relay encrypted game data.</li>
-    <li>A signaling service (Supabase) is used to establish the connection. Signaling messages are ephemeral and not stored.</li>
-    <li>You are responsible for your conduct during online play.</li>
+    <li>Your display name (if you set one) and, in Ranked, your Play Games name, picture, rating and record are shown to other players.</li>
+    <li>When nobody else is searching, an AI commander may take your opponent's seat. Its name ends in "(AI)".</li>
+    <li>Matches that nobody moves in for several days end automatically. A player who leaves a round unplanned for too long loses on time; Ranked results are rated.</li>
+    <li>You are responsible for your conduct during online play, including your display name.</li>
   </ul>
 
   <h2>Age Requirement</h2>
@@ -40,30 +40,29 @@
   <h2>Acceptable Use</h2>
   <p>You agree not to:</p>
   <ul>
-    <li>Abuse, exploit, or manipulate the connection or signaling system</li>
-    <li>Harass or threaten other players</li>
-    <li>Attempt to extract or misuse another player's IP address</li>
+    <li>Abuse, exploit, or manipulate the game server or matchmaking</li>
+    <li>Harass or threaten other players, or choose an offensive display name</li>
+    <li>Manipulate Ranked results, for example by playing against your own accounts</li>
     <li>Use automated tools to interfere with gameplay</li>
   </ul>
 
   <h2>Disclaimer of Warranties</h2>
-  <p>The game is provided "as is" without warranties of any kind. There is no guarantee of availability, uptime, or uninterrupted online play. Connections depend on both players' networks and may fail.</p>
+  <p>The game is provided "as is" without warranties of any kind. There is no guarantee of availability, uptime, or uninterrupted online play. Ratings and match history may be reset, for example when the game's rules change.</p>
 
   <h2>Limitation of Liability</h2>
   <p>To the maximum extent permitted by law, the developer is not liable for:</p>
   <ul>
     <li>Any interactions between players during online play</li>
-    <li>IP address exposure inherent to P2P connections or relay-mediated connections</li>
     <li>Connection failures, latency, or disconnections</li>
     <li>Any damages arising from the use of the game</li>
   </ul>
 
   <h2>Third-Party Services</h2>
-  <p>Online play relies on third-party services for connection setup and data relay. See our <a href="privacy-policy.html">Privacy Policy</a> for details on data processing.</p>
+  <p>Online play relies on third-party services. See our <a href="privacy-policy.html">Privacy Policy</a> for details on data processing.</p>
   <ul>
-    <li><strong>Supabase</strong> — signaling relay. Subject to <a href="https://supabase.com/terms" target="_blank" rel="noopener">Supabase Terms of Service</a>.</li>
-    <li><strong>Google and Cloudflare STUN servers</strong> — NAT traversal.</li>
-    <li><strong>Metered.ca and freestun.net TURN relay servers</strong> — relay traffic when direct P2P connections cannot be established (e.g., mobile networks). Subject to <a href="https://www.metered.ca/terms" target="_blank" rel="noopener">Metered Terms of Service</a>.</li>
+    <li><strong>Supabase</strong> — hosts the game server and its database. Subject to <a href="https://supabase.com/terms" target="_blank" rel="noopener">Supabase Terms of Service</a>.</li>
+    <li><strong>Google Play Games Services</strong> — Ranked sign-in on Android. Subject to the <a href="https://play.google.com/about/play-terms/" target="_blank" rel="noopener">Google Play Terms of Service</a>.</li>
+    <li><strong>Firebase Cloud Messaging</strong> and browser push services — optional turn notifications.</li>
   </ul>
 
   <h2>Intellectual Property</h2>
@@ -81,6 +80,6 @@
   <h2>Contact</h2>
   <p>Questions about these terms can be directed to <a href="https://github.com/johannesjo/7-seconds">github.com/johannesjo/7-seconds</a>.</p>
 
-  <p><em>Last updated: March 10, 2026</em></p>
+  <p><em>Last updated: October 24, 2026</em></p>
 </body>
 </html>

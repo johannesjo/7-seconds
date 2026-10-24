@@ -58,7 +58,7 @@ describe('ordinary local turn notifications', () => {
     expect(Number.isInteger(notice.id)).toBe(true);
     expect(notice.id).toBeGreaterThan(0);
     expect(notice.id).toBeLessThan(2 ** 31);
-    expect(notice.extra).toEqual({ matchId: 'abc123' });
+    expect(notice.extra).toEqual({ matchId: 'abc123', ranked: false });
     vi.stubGlobal('document', { visibilityState: 'visible' });
     await notifications.notifyLocalTurn('abc123', 3);
     expect(mocks.schedule).toHaveBeenCalledOnce();
@@ -80,9 +80,11 @@ describe('ordinary local turn notifications', () => {
     expect(mocks.addListener).toHaveBeenCalledOnce();
     const action = mocks.addListener.mock.calls[0][1];
     action({ notification: { extra: { matchId: 'abc123' } } });
-    expect(open).toHaveBeenCalledWith('abc123');
+    expect(open).toHaveBeenCalledWith('abc123', false);
+    action({ notification: { extra: { matchId: 'rank12', ranked: true } } });
+    expect(open).toHaveBeenLastCalledWith('rank12', true);
     action({ notification: { extra: { matchId: 'https://example.com' } } });
-    expect(open).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledTimes(2); // the junk id opened nothing
   });
 
   it('handles builds without the local notification plugin', async () => {

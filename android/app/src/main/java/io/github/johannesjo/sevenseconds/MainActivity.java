@@ -12,6 +12,10 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Ranked sign-in (Play Games) and turn alerts (Firebase); both stay
+        // inert in builds without their configuration. See docs/ranked.md.
+        registerPlugin(RankedIdentityPlugin.class);
+        registerPlugin(TurnAlertsPlugin.class);
         super.onCreate(savedInstanceState);
 
         WebView webView = getBridge().getWebView();

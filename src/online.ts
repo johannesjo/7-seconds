@@ -1,9 +1,11 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-export const SUPABASE_URL = 'https://puoxmqovckvfoqyihasl.supabase.co';
+// VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY at build time point the game at
+// another project, e.g. a local `supabase start` stack.
+export const SUPABASE_URL: string = import.meta.env?.VITE_SUPABASE_URL || 'https://puoxmqovckvfoqyihasl.supabase.co';
 // Full JWT form required — the short `sb_publishable_*` format causes
 // Supabase Realtime subscription failures. Do not replace with short key.
-export const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4';
+export const SUPABASE_KEY: string = import.meta.env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1b3htcW92Y2t2Zm9xeWloYXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MDM4NjksImV4cCI6MjA4ODQ3OTg2OX0.6rg48T_ddfzj_0-TKwluvxMpTQgSj9aqzyTRMFkHFT4';
 
 /** Generate a v4 UUID without throwing in insecure contexts.
  *  `crypto.randomUUID` is only defined in secure contexts (HTTPS/localhost);

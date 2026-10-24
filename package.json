@@ -9,9 +9,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:edge": "node scripts/build-edge-engine.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests",
+    "referee:bundle": "node scripts/build-referee.mjs",
+    "referee:check": "node scripts/build-referee.mjs --check",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:db": "vitest run tests/",
+    "db:migrate": "node scripts/apply-migrations.mjs",
     "screenshots": "node scripts/screenshots.mjs",
     "video:capture": "bash scripts/capture-action-videos.sh",
     "video:verify": "bash scripts/verify-action-videos.sh",
@@ -36,6 +40,8 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.1.0",
+    "@types/node": "^25.3.2",
+    "esbuild": "^0.27.3",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
