@@ -92,12 +92,13 @@ const upgradeSubEl = document.getElementById('upgrade-sub')!;
 const upgradeNextEl = document.getElementById('upgrade-next')!;
 const pactBtn = document.getElementById('pact-btn') as HTMLButtonElement;
 const endlessBtn = document.getElementById('endless-btn')!;
-const hordeRecordEl = document.getElementById('horde-record')!;
+const hordeBadge = document.getElementById('horde-badge')!;
 
 const dailyBtn = document.getElementById('daily-btn')!;
 const dailyBadge = document.getElementById('daily-badge')!;
-const aiRecordEl = document.getElementById('ai-record')!;
-const difficultyButtons = [...document.querySelectorAll<HTMLButtonElement>('#difficulty-picker [data-difficulty]')];
+const difficultyScreen = document.getElementById('difficulty-screen')!;
+const settingsScreen = document.getElementById('settings-screen')!;
+const difficultyButtons = [...difficultyScreen.querySelectorAll<HTMLButtonElement>('[data-difficulty]')];
 const settingToggles = [...document.querySelectorAll<HTMLButtonElement>('.setting-toggle[data-setting]')];
 const themeToggle = document.getElementById('theme-toggle')!;
 const pixiContainer = document.getElementById('pixi-container')!;
@@ -225,6 +226,24 @@ function tutorialSeen(): boolean {
 function markTutorialSeen(): void {
   try { localStorage.setItem(TUTORIAL_SEEN_KEY, '1'); } catch { /* storage unavailable */ }
 }
+
+const ZOOM_HINT_KEY = '7s-zoom-hint-seen';
+const ZOOM_HINT_DELAY_MS = 4000;
+let zoomHintTimer: number | undefined;
+
+/** The first time a map is shown small enough for pinch zoom, say so. Waits
+ *  out any turn toast shown alongside, and only counts as seen once shown. */
+function showZoomHint(): void {
+  try {
+    if (localStorage.getItem(ZOOM_HINT_KEY) !== null) return;
+  } catch { return; }
+  clearTimeout(zoomHintTimer);
+  zoomHintTimer = window.setTimeout(() => {
+    if (!planningOverlay.classList.contains('active')) return;
+    try { localStorage.setItem(ZOOM_HINT_KEY, '1'); } catch { /* unavailable */ }
+    showToast('Pinch with two fingers to zoom in');
+  }, ZOOM_HINT_DELAY_MS);
+}
 let retryEncounter: { state: OnlineGameState; seed: number } | null = null;
 let canRetryEncounter = false;
 /** The current vs-AI battle is a retry of an earlier one: practice, not stats. */
@@ -315,6 +334,7 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
   document.body.classList.toggle('screen-prompt', screen === 'prompt');
   if (screen !== 'battle') audio.setMood('calm');
   if (screen === 'prompt') refreshMenuMeta();
+  else closeMenuDialogs();
   if (screen === 'battle') readyClip = null;
   if (screen === 'result') {
     clipBtn.style.display = lastReplayData && canRecordClips() ? '' : 'none';
@@ -455,7 +475,7 @@ function finishTutorialRound(): void {
   audio.play(tutorialPassed ? 'victory' : 'defeat');
   resultStatsEl.textContent = tutorialPassed ? lesson.success : lesson.retry;
   rematchBtn.textContent = !tutorialPassed ? 'Retry lesson'
-    : tutorialLesson === TUTORIAL_LESSONS.length - 1 ? 'Play vs AI' : 'Next lesson';
+    : tutorialLesson === TUTORIAL_LESSONS.length - 1 ? `Play vs AI (${DIFFICULTY_LABELS[difficulty]})` : 'Next lesson';
   replayBtn.style.display = lastReplayData ? '' : 'none';
   returnToScreen = 'result';
   showScreen('result');
@@ -642,6 +662,7 @@ async function initRenderer(): Promise<void> {
   await renderer.init(pixiContainer);
   renderer.effects!.onCue = handleFeedbackCue;
   renderer.onPathDrawn = () => audio.play('draw');
+  renderer.onZoomAvailable = showZoomHint;
 }
 
 function showPreview(): void {
@@ -1040,7 +1061,7 @@ function syncSettingsUi(settings: Readonly<Settings>): void {
     const key = btn.dataset.setting as keyof Settings;
     btn.setAttribute('aria-pressed', String(settings[key]));
   }
-  themeToggle.textContent = settings.dayMode ? 'Paper theme' : 'Night theme';
+  themeToggle.dataset.value = settings.dayMode ? 'Paper' : 'Night';
   document.body.classList.toggle('reduced-motion', settings.reducedMotion);
   audio.setSfxEnabled(settings.sound);
   audio.setMusicEnabled(settings.music);
@@ -1065,42 +1086,83 @@ themeToggle.addEventListener('click', () => {
 onSettingsChange(syncSettingsUi);
 syncSettingsUi(getSettings());
 
-function setDifficulty(next: Difficulty): void {
-  difficulty = next;
-  try { localStorage.setItem(DIFFICULTY_KEY, next); } catch { /* unavailable */ }
-  refreshMenuMeta();
+const settingsBtn = document.getElementById('settings-btn')!;
+
+function openSettings(): void {
+  settingsScreen.style.display = 'block';
+  promptScreen.inert = true;
+  battleScreen.inert = true;
+  settingsScreen.scrollTop = 0;
+  document.getElementById('settings-title')!.focus();
 }
-for (const [index, btn] of difficultyButtons.entries()) {
-  btn.addEventListener('click', () => setDifficulty(btn.dataset.difficulty as Difficulty));
-  // Radio-group keyboard pattern: arrows move and select, one tab stop.
-  btn.addEventListener('keydown', event => {
-    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
-      : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
-    if (!step) return;
-    event.preventDefault();
-    const next = difficultyButtons[(index + step + difficultyButtons.length) % difficultyButtons.length];
-    setDifficulty(next.dataset.difficulty as Difficulty);
-    next.focus();
+
+function closeSettings(): void {
+  closeMenuDialogs();
+  settingsBtn.focus();
+}
+
+/** Hide the menu's settings and difficulty dialogs, e.g. when a game or an
+ *  online flow takes over while one is still open. */
+function closeMenuDialogs(): void {
+  if (settingsScreen.style.display !== 'block' && difficultyScreen.style.display !== 'block') return;
+  settingsScreen.style.display = 'none';
+  difficultyScreen.style.display = 'none';
+  promptScreen.inert = false;
+  battleScreen.inert = false;
+}
+
+settingsBtn.addEventListener('click', openSettings);
+document.getElementById('settings-back-btn')!.addEventListener('click', closeSettings);
+// On the document, so Escape still works after a click moves focus to <body>.
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  if (settingsScreen.style.display === 'block') closeSettings();
+  else if (difficultyScreen.style.display === 'block') closeDifficulty();
+});
+
+function openDifficulty(): void {
+  refreshMenuMeta();
+  difficultyScreen.style.display = 'block';
+  promptScreen.inert = true;
+  battleScreen.inert = true;
+  difficultyScreen.scrollTop = 0;
+  // Start on the last-played level so Enter replays it.
+  difficultyButtons.find(btn => btn.dataset.difficulty === difficulty)!.focus();
+}
+
+function closeDifficulty(): void {
+  closeMenuDialogs();
+  aiBtn.focus();
+}
+
+document.getElementById('difficulty-back-btn')!.addEventListener('click', closeDifficulty);
+for (const btn of difficultyButtons) {
+  btn.addEventListener('click', async () => {
+    difficulty = btn.dataset.difficulty as Difficulty;
+    try { localStorage.setItem(DIFFICULTY_KEY, difficulty); } catch { /* unavailable */ }
+    closeMenuDialogs();
+    aiMode = true;
+    dailyChallenge = null;
+    await initRenderer();
+    startGame();
   });
 }
 
-/** Refresh the menu's record line, difficulty picker and daily badge. */
+/** Refresh the per-difficulty records and the daily badge. */
 function refreshMenuMeta(): void {
   for (const btn of difficultyButtons) {
-    const checked = btn.dataset.difficulty === difficulty;
-    btn.setAttribute('aria-checked', String(checked));
-    btn.tabIndex = checked ? 0 : -1;
+    const level = btn.dataset.difficulty as Difficulty;
+    if (level === difficulty) btn.setAttribute('aria-current', 'true');
+    else btn.removeAttribute('aria-current');
+    const record = getAiRecord(level);
+    btn.querySelector('.difficulty-record')!.textContent = record.wins + record.losses > 0
+      ? `${record.wins}W – ${record.losses}L${record.streak > 1 ? ` · streak ${record.streak}` : ''}`
+        + (record.bestStreak > 1 ? ` · best ${record.bestStreak}` : '')
+      : '';
   }
-  const record = getAiRecord(difficulty);
-  aiRecordEl.textContent = record.wins + record.losses > 0
-    ? `${record.wins}W – ${record.losses}L${record.streak > 1 ? ` · streak ${record.streak}` : ''}`
-      + (record.bestStreak > 1 ? ` · best ${record.bestStreak}` : '')
-    : '';
   const horde = getHordeRecord();
-  hordeRecordEl.textContent = horde.bestWave > 0
-    ? `Best: ${horde.bestWave} wave${horde.bestWave === 1 ? '' : 's'} · ${horde.bestScore.toLocaleString()} pts`
-      + (horde.clears > 0 ? ` · cleared ×${horde.clears}` : '')
-    : '';
+  hordeBadge.hidden = horde.bestWave === 0;
+  hordeBadge.textContent = `best wave ${horde.bestWave}`;
   const today = getDailyChallenge();
   const result = getDailyResult(today.date);
   const streak = getDailyStreak(today.date);
@@ -1139,12 +1201,7 @@ battleBtn.addEventListener('click', async () => {
   startGame();
 });
 
-aiBtn.addEventListener('click', async () => {
-  aiMode = true;
-  dailyChallenge = null;
-  await initRenderer();
-  startGame();
-});
+aiBtn.addEventListener('click', openDifficulty);
 
 dailyBtn.addEventListener('click', async () => {
   aiMode = true;
@@ -1642,6 +1699,7 @@ function asyncHooks(): AsyncGameHooks {
       playbackPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
       playbackPathDrawer.onInspectUnit = showUnitInfo;
       playbackPathDrawer.onPathDrawn = () => audio.play('draw');
+      playbackPathDrawer.onZoomAvailable = showZoomHint;
       playbackPathDrawer.enable(myTeam, playbackUnits, playbackElevationZones);
 
       planningLabel.textContent = 'Your Planning';
@@ -1827,6 +1885,7 @@ async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean
   asyncBackBtn.textContent = opts.ranked ? '← Ranked' : '← Matches';
   asyncBackBtn.style.display = 'block';
   closeMatchesList();
+  closeMenuDialogs();
   rankedScreen.hide();
   showScreen('battle');
   onlineLobbyTitle.textContent = opts.ranked ? 'Ranked' : 'Online';
@@ -1918,6 +1977,7 @@ async function startSearch(ranked: boolean): Promise<void> {
   onlineActive = true;
   returnTo = ranked ? 'ranked' : null;
   closeMatchesList();
+  closeMenuDialogs();
   rankedScreen.hide();
   await initRenderer();
   if (version !== searchVersion) return;
@@ -1946,6 +2006,7 @@ function resumeSearch(match: MatchRecord, ranked: boolean): void {
   onlineActive = true;
   returnTo = ranked ? 'ranked' : 'matches';
   closeMatchesList();
+  closeMenuDialogs();
   rankedScreen.hide();
   const version = searchVersion;
   void initRenderer().then(() => {

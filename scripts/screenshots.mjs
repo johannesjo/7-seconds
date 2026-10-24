@@ -64,6 +64,7 @@ try {
     await shot('01-menu');
 
     await page.click('#ai-btn');
+    await page.click('#difficulty-screen [data-difficulty="normal"]');
     await page.waitForTimeout(800);
     await shot('02-planning');
     await drawPaths(page);

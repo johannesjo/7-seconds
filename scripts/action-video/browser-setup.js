@@ -31,7 +31,8 @@ async (page) => {
     Math.random = () => values[index++] ?? fallback();
   });
 
-  await page.getByRole('button', { name: 'vs AI' }).click();
+  await page.click('#ai-btn');
+  await page.click('#difficulty-screen [data-difficulty="normal"]');
   await setDayMode(true);
   await page.waitForTimeout(100);
 }
