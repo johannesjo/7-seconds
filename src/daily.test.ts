@@ -45,6 +45,12 @@ describe('daily challenge', () => {
     expect(getDailyStreak('2026-10-26')).toBe(0);
   });
 
+  it('breaks the streak as soon as today is lost', () => {
+    recordDailyResult(day('2026-10-23', true));
+    recordDailyResult(day('2026-10-24', false));
+    expect(getDailyStreak('2026-10-24')).toBe(0);
+  });
+
   it('formats a spoiler-free share text', () => {
     const challenge = getDailyChallenge(new Date(2026, 9, 24));
     const text = formatDailyShare(challenge, { date: challenge.date, won: true, rounds: 1, survivors: 3, total: 5 }, 'https://x.test/');

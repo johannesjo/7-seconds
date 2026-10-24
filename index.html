@@ -432,8 +432,6 @@
     #result-screen {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
-      align-items: center;
-      justify-content: center;
       padding: calc(16px + var(--sat)) 16px calc(16px + var(--sab));
       background: var(--color-overlay-medium);
       backdrop-filter: blur(3px);
@@ -447,6 +445,8 @@
       align-items: center;
       gap: 12px;
       width: min(440px, 100%);
+      /* Centred, but scrolls from the top when taller than a short screen */
+      margin: auto;
       padding: 28px 24px 22px;
       text-align: center;
       background: var(--color-card-bg);
@@ -620,11 +620,13 @@
       .upgrade-card .card-label { font-size: 15px; }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-      #round-banner.show { animation: none; opacity: 1; }
+    /* Set from the "Reduce motion" setting, which defaults to the system preference.
+       The loading spinner keeps turning: it shows that something is happening. */
+    body.reduced-motion *:not(#online-spinner), body.reduced-motion *::before, body.reduced-motion *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
     }
-    body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     body.reduced-motion #round-banner.show { animation: none; opacity: 1; }
 
     .replay-btn-upgrade { background: transparent; color: inherit; border: 1px solid var(--color-btn-border); opacity: 0.6; }
@@ -766,7 +768,7 @@
       <button type="button" class="setting-toggle" data-setting="music" aria-pressed="true">Music</button>
       <button type="button" class="setting-toggle" data-setting="haptics" aria-pressed="true">Vibration</button>
       <button type="button" class="setting-toggle" data-setting="reducedMotion" aria-pressed="false" title="Turn off screen shake, slow motion and zoom">Reduce motion</button>
-      <button type="button" id="theme-toggle" class="setting-toggle" aria-label="Switch theme">Paper</button>
+      <button type="button" id="theme-toggle" class="setting-toggle" title="Switch between the paper and night themes">Paper theme</button>
     </div>
     <div class="legal-links">
       <a href="privacy-policy.html" rel="noopener">Privacy Policy</a>

@@ -10,8 +10,8 @@ export type FeedbackCue =
   | { type: 'shot'; heavy: boolean }
   | { type: 'launch'; weapon: 'shell' | 'rocket' }
   | { type: 'hit'; damage: number }
-  | { type: 'kill'; pos: Vec2 }
-  | { type: 'explosion'; pos: Vec2; radius: number }
+  | { type: 'kill' }
+  | { type: 'explosion'; radius: number }
   | { type: 'shield-break' };
 
 /** Damage at or above which a bullet reads as a heavy (sniper) shot. */
@@ -523,7 +523,7 @@ export class EffectsManager {
   addKillText(pos: Vec2, team: Team): void {
     const color = team === 'blue' ? this.theme.blueKill : this.theme.redKill;
     this.effects.push(new KillText(this.container, pos, color));
-    this.onCue?.({ type: 'kill', pos });
+    this.onCue?.({ type: 'kill' });
   }
 
   addFlankCue(pos: Vec2, projectileAngle: number, targetId?: string): void {
@@ -559,7 +559,7 @@ export class EffectsManager {
       this.theme.bomber,
       this.theme.muzzleCore,
     ));
-    this.onCue?.({ type: 'explosion', pos, radius });
+    this.onCue?.({ type: 'explosion', radius });
   }
 
   addBloodSpray(pos: Vec2, angle: number, team: Team, damage: number): void {

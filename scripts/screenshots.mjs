@@ -3,14 +3,25 @@
 // before a release: npm run screenshots  →  output/screenshots/*.png
 // Needs Playwright with Chromium (`npm i -g playwright && npx playwright install chromium`).
 // Exits non-zero if the page logs an uncaught error.
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { join } from 'node:path';
 
-const require = createRequire(import.meta.url);
+/** Playwright from the project if present, else from the global npm root
+ *  (Node doesn't search global installs on its own). */
+function loadPlaywright() {
+  try {
+    return createRequire(import.meta.url)('playwright');
+  } catch {
+    const globalRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
+    return createRequire(join(globalRoot, 'noop.js'))('playwright');
+  }
+}
+
 let chromium;
 try {
-  ({ chromium } = require('playwright'));
+  ({ chromium } = loadPlaywright());
 } catch {
   console.error('Playwright is not installed. Run: npm i -g playwright && npx playwright install chromium');
   process.exit(1);

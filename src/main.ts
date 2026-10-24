@@ -27,7 +27,7 @@ import { pulse, setHapticsEnabled } from './haptics';
 import { getSettings, updateSettings, onSettingsChange, type Settings } from './settings';
 import { getDailyChallenge, getDailyResult, recordDailyResult, getDailyStreak, formatDailyShare, type DailyChallenge } from './daily';
 import { getAiRecord, recordAiResult } from './stats';
-import { canRecordClips, startClipRecording, deliverClip, type ClipRecording } from './clip';
+import { canRecordClips, startClipRecording, canShareClip, shareClip, downloadClip, type ClipRecording } from './clip';
 import type { FeedbackCue } from './effects';
 
 // DOM elements
@@ -207,6 +207,11 @@ let currentRound = 1;
 let roundStartCounts: { blue: number; red: number } | null = null;
 let lastTickSecond: number | null = null;
 let clipRecording: ClipRecording | null = null;
+/** A recorded clip waiting for a tap on "Share clip" (sharing needs a fresh gesture). */
+let readyClip: Blob | null = null;
+/** A vs-AI or daily battle whose first fight has started but has no recorded
+ *  result yet. Leaving it counts as a loss, so quitting can't dodge one. */
+let trackedBattleLive = false;
 
 const DIFFICULTY_KEY = '7s-difficulty';
 const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
@@ -268,7 +273,11 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
   document.body.classList.toggle('screen-prompt', screen === 'prompt');
   if (screen !== 'battle') audio.setMood('calm');
   if (screen === 'prompt') refreshMenuMeta();
-  if (screen === 'result') clipBtn.style.display = lastReplayData && canRecordClips() ? '' : 'none';
+  if (screen === 'battle') readyClip = null;
+  if (screen === 'result') {
+    clipBtn.style.display = lastReplayData && canRecordClips() ? '' : 'none';
+    clipBtn.textContent = readyClip ? 'Share recorded clip' : 'Share clip';
+  }
   promptScreen.classList.toggle('active', screen === 'prompt');
   battleScreen.classList.add('active'); // always visible once initialized
   resultScreen.classList.toggle('active', screen === 'result');
@@ -337,7 +346,7 @@ function showRoundBanner(round: number, before: { blue: number; red: number }, a
   const parts: string[] = [];
   if (blueLost > 0) parts.push(`${vsComputer ? 'You' : 'Blue'} lost ${blueLost}`);
   if (redLost > 0) parts.push(`${vsComputer ? 'Enemy' : 'Red'} lost ${redLost}`);
-  roundBannerTitle.textContent = `Round ${round}`;
+  roundBannerTitle.textContent = `Round ${round - 1} over`;
   roundBannerDetail.textContent = parts.length > 0 ? parts.join(' · ') : 'No casualties';
   roundBanner.classList.remove('show');
   void roundBanner.offsetWidth; // restart the animation
@@ -417,6 +426,7 @@ function onGameEvent(
       roundCounterEl.textContent = `Round ${data.round}`;
     }
     if (data.phase === 'playing') {
+      if (aiMode && tutorialLesson === null && !playingRetry && !ctfActive && !hordeActive) trackedBattleLive = true;
       roundStartCounts = engine?.getAliveCount() ?? null;
       lastTickSecond = null;
       hideRoundBanner();
@@ -536,8 +546,9 @@ function onGameEvent(
     ];
     resultStatsEl.innerHTML = statsLines.join('<br>');
 
+    trackedBattleLive = false;
     if (dailyChallenge) {
-      const counts = recordDailyResult({
+      const counts = !playingRetry && recordDailyResult({
         date: dailyChallenge.date, won, rounds, survivors: result.blueAlive, total: result.blueTotal,
       });
       const practice = !counts;
@@ -693,13 +704,43 @@ async function finishClip(): Promise<void> {
   clipRecording = null;
   if (!recording) return;
   const blob = await recording.finish();
-  stopReplay();
   if (!blob) {
+    stopReplay();
     showToast('Could not record the clip');
     return;
   }
-  const outcome = await deliverClip(blob);
+  if (canShareClip(blob)) {
+    // The share sheet needs a fresh tap, so hand it to the button.
+    readyClip = blob;
+    stopReplay();
+    showToast('Clip ready — tap “Share recorded clip”');
+  } else {
+    stopReplay();
+    downloadClip(blob);
+    showToast('Clip saved to your downloads');
+  }
+}
+
+async function onClipButton(): Promise<void> {
+  if (!readyClip) {
+    recordClip();
+    return;
+  }
+  const outcome = await shareClip(readyClip);
   if (outcome === 'downloaded') showToast('Clip saved to your downloads');
+}
+
+/** Leaving a vs-AI or daily battle mid-fight records it as a loss. */
+function forfeitTrackedBattle(): void {
+  if (!trackedBattleLive || !engine) return;
+  trackedBattleLive = false;
+  const alive = engine.getAliveCount();
+  if (dailyChallenge) {
+    const total = engine.getUnits().filter(u => u.team === 'blue').length;
+    recordDailyResult({ date: dailyChallenge.date, won: false, rounds: currentRound, survivors: alive.blue, total });
+  } else {
+    recordAiResult(difficulty, false);
+  }
 }
 
 function stopReplay(): void {
@@ -863,14 +904,26 @@ function setDifficulty(next: Difficulty): void {
   try { localStorage.setItem(DIFFICULTY_KEY, next); } catch { /* unavailable */ }
   refreshMenuMeta();
 }
-for (const btn of difficultyButtons) {
+for (const [index, btn] of difficultyButtons.entries()) {
   btn.addEventListener('click', () => setDifficulty(btn.dataset.difficulty as Difficulty));
+  // Radio-group keyboard pattern: arrows move and select, one tab stop.
+  btn.addEventListener('keydown', event => {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+      : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const next = difficultyButtons[(index + step + difficultyButtons.length) % difficultyButtons.length];
+    setDifficulty(next.dataset.difficulty as Difficulty);
+    next.focus();
+  });
 }
 
 /** Refresh the menu's record line, difficulty picker and daily badge. */
 function refreshMenuMeta(): void {
   for (const btn of difficultyButtons) {
-    btn.setAttribute('aria-checked', String(btn.dataset.difficulty === difficulty));
+    const checked = btn.dataset.difficulty === difficulty;
+    btn.setAttribute('aria-checked', String(checked));
+    btn.tabIndex = checked ? 0 : -1;
   }
   const record = getAiRecord(difficulty);
   aiRecordEl.textContent = record.wins + record.losses > 0
@@ -930,7 +983,7 @@ dailyBtn.addEventListener('click', async () => {
 });
 
 shareResultBtn.addEventListener('click', () => { void shareDailyResult(); });
-clipBtn.addEventListener('click', recordClip);
+clipBtn.addEventListener('click', () => { void onClipButton(); });
 
 tutorialBtn.addEventListener('click', async () => {
   await initRenderer();
@@ -1022,6 +1075,7 @@ newBattleBtn.addEventListener('click', () => {
   const reopenMatches = returnToMatches;
   returnToMatches = false;
   recorderMod?.cancelIfRecording();
+  forfeitTrackedBattle();
   engine?.stop();
   engine = null;
   planningOverlay.classList.remove('active');
@@ -1116,6 +1170,7 @@ replaySpeedToggle.addEventListener('click', () => {
  *  round (shared teardown for the async match playback). */
 function stopPlaybackEngine(): void {
   cancelCountIn(); // drop any pending count-in so it can't start a torn-down round
+  audio.setMood('calm');
   if (playbackEngine) {
     playbackEngine.stop();
     playbackEngine = null;
@@ -1713,6 +1768,12 @@ window.addEventListener('beforeunload', () => {
 
 // A local notification tap uses the same entry route and age gate as an invite.
 void initializeTurnNotifications(id => { window.location.assign(getAsyncShareUrl(id)); });
+
+document.addEventListener('visibilitychange', () => {
+  audio.setPageHidden(document.visibilityState === 'hidden');
+});
+// Closing the page mid-fight counts the same as pressing Exit.
+window.addEventListener('pagehide', forfeitTrackedBattle);
 
 // Browsers only allow audio after a user gesture; every button also clicks.
 document.addEventListener('pointerdown', () => audio.unlock(), { capture: true });

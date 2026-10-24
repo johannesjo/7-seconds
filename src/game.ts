@@ -692,7 +692,11 @@ export class GameEngine {
           this.recordExplosion({ pos: { ...deadUnit.pos }, radius: 80, team: deadUnit.team });
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
-            if (eh.killed) this.noteKill(eh.pos);
+            if (eh.killed) {
+              // Matches what a replay shows for the same kill event.
+              this.renderer?.effects?.addKillText(eh.pos, deadUnit.team);
+              this.noteKill(eh.pos);
+            }
             this.replayEvents.push({
               frame: this.replayFrames.length,
               type: eh.killed ? 'kill' : 'hit',

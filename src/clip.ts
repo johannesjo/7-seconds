@@ -41,11 +41,14 @@ export function startClipRecording(
   recorder.start(250);
   const limitTimer = setTimeout(onLimit, MAX_MS);
 
-  const stop = (): Promise<void> => new Promise(resolve => {
+  const stop = (): Promise<void> => new Promise<void>(resolve => {
     clearTimeout(limitTimer);
     if (recorder.state === 'inactive') { resolve(); return; }
     recorder.onstop = () => resolve();
     recorder.stop();
+  }).then(() => {
+    // Only the canvas track: the audio track belongs to the shared game mix.
+    for (const track of stream.getVideoTracks()) track.stop();
   });
 
   return {
@@ -60,20 +63,31 @@ export function startClipRecording(
   };
 }
 
-/** Hand the clip to the share sheet when the browser can share files,
- *  otherwise download it. Returns how it was delivered. */
-export async function deliverClip(blob: Blob): Promise<'shared' | 'downloaded' | 'cancelled'> {
+function clipFile(blob: Blob): File {
   const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
-  const file = new File([blob], `7-seconds-battle.${ext}`, { type: blob.type });
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: '7 Seconds battle' });
-      return 'shared';
-    } catch (err) {
-      if ((err as Error)?.name === 'AbortError') return 'cancelled';
-      // Fall through to a download when sharing fails for other reasons.
-    }
+  return new File([blob], `7-seconds-battle.${ext}`, { type: blob.type });
+}
+
+/** Whether the share sheet accepts the clip. Sharing needs a fresh tap, so
+ *  callers must call shareClip from a click handler, not after an await. */
+export function canShareClip(blob: Blob): boolean {
+  return navigator.canShare?.({ files: [clipFile(blob)] }) ?? false;
+}
+
+/** Open the share sheet; falls back to a download if sharing fails. */
+export async function shareClip(blob: Blob): Promise<'shared' | 'downloaded' | 'cancelled'> {
+  try {
+    await navigator.share({ files: [clipFile(blob)], title: '7 Seconds battle' });
+    return 'shared';
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') return 'cancelled';
+    downloadClip(blob);
+    return 'downloaded';
   }
+}
+
+export function downloadClip(blob: Blob): void {
+  const file = clipFile(blob);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -82,5 +96,4 @@ export async function deliverClip(blob: Blob): Promise<'shared' | 'downloaded' |
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  return 'downloaded';
 }

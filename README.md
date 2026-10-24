@@ -80,7 +80,7 @@ npm run screenshots  # capture every main screen at phone and desktop size into 
 
 ## Recording
 
-After a battle, **Share clip** on the result screen plays the replay while recording it (with sound) and opens the share sheet, or downloads the video where sharing files isn't supported. It's hidden in the Android app, whose WebView can't share or download the recording.
+After a battle, **Share clip** on the result screen plays the replay while recording it (with sound). When it's done, a second tap on **Share recorded clip** opens the share sheet (browsers only allow sharing straight after a tap); where sharing files isn't supported the video downloads instead. It's hidden in the Android app, whose WebView can't share or download the recording.
 
 Append `?record` to the URL to enable the built-in screen recorder. Press **R** during battle or replay to capture a WebM clip (max 15 seconds).
 

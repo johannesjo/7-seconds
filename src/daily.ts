@@ -90,11 +90,12 @@ export function recordDailyResult(result: DailyResult): boolean {
   return true;
 }
 
-/** Consecutive days won, ending today (or yesterday if today isn't won yet). */
+/** Consecutive days won, ending today (or yesterday while today is unplayed). */
 export function getDailyStreak(today: string): number {
-  const won = new Set(load().results.filter(r => r.won).map(r => dayIndex(r.date)));
+  const results = load().results;
+  const won = new Set(results.filter(r => r.won).map(r => dayIndex(r.date)));
   let day = dayIndex(today);
-  if (!won.has(day)) day--;
+  if (!results.some(r => r.date === today)) day--;
   let streak = 0;
   while (won.has(day)) {
     streak++;

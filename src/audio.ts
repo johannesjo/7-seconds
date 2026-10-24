@@ -79,8 +79,17 @@ class AudioEngine {
   }
 
   setMusicEnabled(on: boolean): void {
+    if (on === this.musicEnabled) return;
     this.musicEnabled = on;
     this.fade(this.musicBus, on ? MUSIC_VOLUME : 0);
+    this.applyMood();
+  }
+
+  /** Pause all audio while the page is hidden (backgrounded tab or app). */
+  setPageHidden(hidden: boolean): void {
+    if (!this.ctx) return;
+    if (hidden) void this.ctx.suspend().catch(() => {});
+    else void this.ctx.resume().catch(() => {});
   }
 
   /** Audio of everything the game plays, for recording replay clips. */
@@ -198,7 +207,7 @@ class AudioEngine {
     src.stop(start + duration + 0.02);
   }
 
-  /** Calm: a soft two-note pad. Tense: the pad plus a heartbeat pulse that
+  /** Calm: a soft three-note pad. Tense: the pad plus a heartbeat pulse that
    *  fits the 7-second rounds. Stopped entirely when the mood is 'off'. */
   private applyMood(): void {
     const ctx = this.ctx;
@@ -210,7 +219,7 @@ class AudioEngine {
     this.musicNodes = [];
     window.clearInterval(this.musicTimer);
     this.musicTimer = undefined;
-    if (this.mood === 'off') return;
+    if (this.mood === 'off' || !this.musicEnabled) return;
 
     const tense = this.mood === 'tense';
     const padGain = ctx.createGain();
