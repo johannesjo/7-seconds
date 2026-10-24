@@ -171,6 +171,15 @@ let aiMode = false;
 let tutorialLesson: number | null = null;
 let tutorialPassed = false;
 let tutorialFinished = false;
+const TUTORIAL_SEEN_KEY = '7s-tutorial-seen';
+
+function tutorialSeen(): boolean {
+  try { return localStorage.getItem(TUTORIAL_SEEN_KEY) !== null; } catch { return true; }
+}
+
+function markTutorialSeen(): void {
+  try { localStorage.setItem(TUTORIAL_SEEN_KEY, '1'); } catch { /* storage unavailable */ }
+}
 let retryEncounter: { state: OnlineGameState; seed: number } | null = null;
 let canRetryEncounter = false;
 
@@ -634,11 +643,13 @@ aiBtn.addEventListener('click', async () => {
   startGame();
 });
 
-tutorialBtn.addEventListener('click', async () => {
+async function startTutorial(): Promise<void> {
   await initRenderer();
   tutorialLesson = 0;
   startGame();
-});
+}
+
+tutorialBtn.addEventListener('click', () => void startTutorial());
 
 skipTutorialBtn.addEventListener('click', () => newBattleBtn.click());
 
@@ -698,6 +709,7 @@ rematchBtn.addEventListener('click', async () => {
   if (tutorialLesson !== null) {
     if (tutorialPassed) tutorialLesson++;
     if (tutorialLesson === TUTORIAL_LESSONS.length) {
+      markTutorialSeen();
       tutorialLesson = null;
       aiMode = true;
     }
@@ -728,6 +740,7 @@ newBattleBtn.addEventListener('click', () => {
   coverScreen.classList.remove('active');
   roundTimerEl.textContent = '';
   lastReplayData = null;
+  if (tutorialLesson !== null) markTutorialSeen();
   tutorialLesson = null;
   retryEncounter = null;
   canRetryEncounter = false;
@@ -1430,5 +1443,14 @@ void initializeTurnNotifications(id => { window.location.assign(getAsyncShareUrl
       sessionStorage.setItem('7s-pending-async-join', asyncJoinId);
     }
     return;
+  }
+
+  // First launch: walk new players through the tutorial (once the age gate is passed).
+  if (!tutorialSeen() && !new URLSearchParams(location.search).has('record')) {
+    if (localStorage.getItem('7s-age-verified')) {
+      void startTutorial();
+    } else {
+      window.addEventListener('age-verified', () => void startTutorial(), { once: true });
+    }
   }
 })();
