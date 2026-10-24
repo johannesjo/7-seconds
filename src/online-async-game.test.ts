@@ -103,6 +103,14 @@ class FakeReferee {
         this.notify();
         return this.ok();
       },
+      cancel: async () => {
+        this.calls.push('cancel');
+        if (this.match.status === 'open' && !this.match.guestPlayer) {
+          this.match = { ...this.match, status: 'abandoned', finishReason: 'cancelled' };
+          this.notify();
+        }
+        return this.ok();
+      },
       forfeit: async () => {
         this.calls.push('forfeit');
         if (this.match.status === 'open' || this.match.status === 'active') {
@@ -382,13 +390,13 @@ describe('AsyncGameController', () => {
     expect(host.errors).toEqual(['Reload or update the app.']);
   });
 
-  it('refuses a match on other rules, offering a forfeit', async () => {
+  it('refuses a match on newer rules without offering a forfeit', async () => {
     const backend = new FakeReferee('m1', 'host', { rules: RULES_VERSION + 1 });
     backend.seat('guest');
     const host = makeHooks();
     await controller(backend, 'host', host).start();
     expect(host.errors[0]).toMatch(/newer version/);
-    expect(host.forfeitable).toEqual([true]);
+    expect(host.forfeitable).toEqual([false]);
     expect(host.planTurns).toEqual([]);
   });
 
@@ -441,6 +449,98 @@ describe('AsyncGameController', () => {
     env.tick(); await flush();
     env.tick(); await flush();
     expect(host.errors).toHaveLength(1);
+  });
+});
+
+describe('AsyncGameController after review', () => {
+  function outdatedSpy() {
+    const spy = makeHooks();
+    const outdated: string[] = [];
+    spy.hooks.onOutdated = msg => { outdated.push(msg); };
+    return { spy, outdated };
+  }
+
+  it('withdrawing an invite never concedes a match a friend has joined', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    const host = makeHooks();
+    const hc = controller(backend, 'host', host);
+    await hc.start();
+    backend.seat('guest'); // the friend joins while the invite is on screen
+    expect(await hc.withdraw()).toBeNull();
+    expect(backend.match.status).toBe('active');
+    expect(backend.calls).toEqual(['cancel']);
+  });
+
+  it('withdraws an invite nobody joined', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    const host = makeHooks();
+    const hc = controller(backend, 'host', host);
+    await hc.start();
+    await hc.withdraw();
+    await settle();
+    expect(host.gameOver).toEqual([{ status: 'abandoned', reason: 'cancelled' }]);
+  });
+
+  it('reports every failed forfeit, not just the first', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    const host = makeHooks();
+    const io = { ...backend.ioFor('host'), forfeit: async () => ({ ok: false as const, status: 0, message: 'offline' }) };
+    const hc = new AsyncGameController('m1', host.hooks, { io, watched: memWatch(), pollEnv: null });
+    await hc.start();
+    await hc.forfeit();
+    await hc.forfeit();
+    expect(host.errors).toEqual(['offline', 'offline']);
+  });
+
+  it('stops for good when the server says this app is outdated', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    const { spy, outdated } = outdatedSpy();
+    const hc = controller(backend, 'host', spy);
+    await hc.start();
+    backend.failNextSubmit = { ok: false, status: 426, message: 'Reload or update the app.' };
+    await hc.submitPlan(plan('b1'));
+    await settle();
+    expect(outdated).toEqual(['Reload or update the app.']);
+    expect(spy.planTurns).toEqual([1]); // no fresh "your turn" prompt
+  });
+
+  it('a match on newer rules waits for an update, with no forfeit on offer', async () => {
+    const backend = new FakeReferee('m1', 'host', { rules: RULES_VERSION + 1 });
+    backend.seat('guest');
+    const { spy, outdated } = outdatedSpy();
+    await controller(backend, 'host', spy).start();
+    expect(outdated[0]).toMatch(/newer version/);
+    expect(spy.forfeitable).toEqual([]);
+    expect(backend.calls).not.toContain('forfeit');
+  });
+
+  it('asks the referee to end a match on older rules, instead of conceding it', async () => {
+    const backend = new FakeReferee('m1', 'host', { rules: RULES_VERSION - 1 });
+    backend.seat('guest');
+    const io = { ...backend.ioFor('host'), advance: async () => {
+      backend.match = { ...backend.match, status: 'abandoned', finishReason: 'version' };
+      return { ok: false as const, status: 409, message: 'older version', match: { ...backend.match } };
+    } };
+    const spy = makeHooks();
+    await new AsyncGameController('m1', spy.hooks, { io, watched: memWatch(), pollEnv: null }).start();
+    await settle();
+    expect(spy.gameOver).toEqual([{ status: 'abandoned', reason: 'version' }]);
+  });
+
+  it('collapses a burst of realtime events into one extra reload', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    let loads = 0;
+    const base = backend.ioFor('host');
+    const io = { ...base, loadMatch: async (id: string) => { loads++; await flush(); return base.loadMatch(id); } };
+    const hc = new AsyncGameController('m1', makeHooks().hooks, { io, watched: memWatch(), pollEnv: null });
+    await hc.start();
+    loads = 0;
+    for (let i = 0; i < 9; i++) backend.listeners.forEach(l => l());
+    await settle();
+    expect(loads).toBe(2);
   });
 });
 

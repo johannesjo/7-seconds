@@ -43,6 +43,9 @@ export interface AsyncGameHooks {
    *  forfeit(). The same error is not re-emitted by the safety-net poll until
    *  some other state is shown. */
   onError(message: string, canForfeit?: boolean): void;
+  /** This client runs other rules than the server: nothing more can be done
+   *  here until the app is reloaded or updated. */
+  onOutdated?(message: string): void;
   /** The match record changed (an opponent joined, a name changed, ...). */
   onMatch?(match: MatchRecord): void;
 }
@@ -75,11 +78,17 @@ export interface AsyncIO {
   submit(id: string, round: number, paths: PathList): Promise<RefereeResult>;
   advance(id: string): Promise<RefereeResult>;
   forfeit(id: string): Promise<RefereeResult>;
+  /** Withdraw an invite or search nobody joined; never concedes a joined match. */
+  cancel(id: string): Promise<RefereeResult>;
   subscribe(id: string, onChange: () => void): () => void;
 }
 
 /** Upper bound for one backend call before it counts as failed. */
 export const IO_TIMEOUT_MS = 25_000;
+/** Referee calls retry transient failures themselves (3 attempts of up to
+ *  20 s each, with backoff), so their timeout covers that whole budget:
+ *  giving up earlier would let a late retry land after the player redrew. */
+export const REFEREE_TIMEOUT_MS = 75_000;
 
 /** Resolve a call that hasn't settled within IO_TIMEOUT_MS to its failure value.
  *  A request that never settles would otherwise keep evaluate() busy forever,
@@ -88,9 +97,10 @@ export const IO_TIMEOUT_MS = 25_000;
 export function withTimeout<A extends unknown[], R>(
   fn: (...args: A) => Promise<R>,
   failure: R,
+  ms = IO_TIMEOUT_MS,
 ): (...args: A) => Promise<R> {
   return (...args) => new Promise<R>((resolve, reject) => {
-    const timer = setTimeout(() => resolve(failure), IO_TIMEOUT_MS);
+    const timer = setTimeout(() => resolve(failure), ms);
     fn(...args).then(
       value => { clearTimeout(timer); resolve(value); },
       error => { clearTimeout(timer); reject(error); },
@@ -108,11 +118,13 @@ export function sessionIO(session: OnlineSession, name: () => string | null = ()
     // share link is signed in anonymously before start() gates on the user id.
     getUserId: withTimeout(() => session.ensureUser(), null),
     loadMatch: withTimeout(id => loadMatch(session, id), { kind: 'error' }),
-    joinMatch: withTimeout(id => referee.join(session, id, name()), TIMED_OUT),
+    joinMatch: withTimeout(id => referee.join(session, id, name()), TIMED_OUT, REFEREE_TIMEOUT_MS),
     fetchTurns: withTimeout(id => fetchTurns(session, id), null),
-    submit: withTimeout((id, round, paths) => referee.submit(session, id, round, paths, name()), TIMED_OUT),
-    advance: withTimeout(id => referee.advance(session, id), TIMED_OUT),
-    forfeit: withTimeout(id => referee.forfeit(session, id), TIMED_OUT),
+    // An empty name (cleared by the player) removes it from the match.
+    submit: withTimeout((id, round, paths) => referee.submit(session, id, round, paths, session.ranked ? null : name() ?? ''), TIMED_OUT, REFEREE_TIMEOUT_MS),
+    advance: withTimeout(id => referee.advance(session, id), TIMED_OUT, REFEREE_TIMEOUT_MS),
+    forfeit: withTimeout(id => referee.forfeit(session, id), TIMED_OUT, REFEREE_TIMEOUT_MS),
+    cancel: withTimeout(id => referee.cancel(session, id), TIMED_OUT, REFEREE_TIMEOUT_MS),
     subscribe: (id, onChange) => subscribeMatch(session, id, onChange),
   };
 }
@@ -212,6 +224,13 @@ export class AsyncGameController {
   private lastShownMatch: MatchRecord | null = null;
   /** onGameOver has been reported. */
   private over = false;
+  /** The server runs other rules: stop until the app is reloaded. */
+  private outdated = false;
+  /** A refresh is running; `refreshAgain` asks for one more after it. */
+  private refreshing = false;
+  private refreshAgain = false;
+  /** An older-rules match was handed to the referee to end. */
+  private voidRequested = false;
 
   constructor(id: string, hooks: AsyncGameHooks, opts: AsyncGameOptions = {}) {
     this.id = id;
@@ -314,8 +333,12 @@ export class AsyncGameController {
       return;
     }
     if (result.match) this.setMatch(result.match);
-    if (result.status === 426 || result.status === 409) {
-      // Permanent: other rules, or the match moved on (finished, expired).
+    if (result.status === 426) {
+      this.markOutdated(result.message);
+      return;
+    }
+    if (result.status === 409) {
+      // Permanent: the match moved on (finished, expired).
       this.showError(result.message);
     } else {
       this.showError('Could not submit your turn. Try again.');
@@ -342,6 +365,14 @@ export class AsyncGameController {
     this.watchStore.set(this.id, round);
   }
 
+  private markOutdated(message: string): void {
+    if (this.outdated) return;
+    this.outdated = true;
+    this.stopPoll();
+    if (this.hooks.onOutdated) this.hooks.onOutdated(message);
+    else this.hooks.onError(message);
+  }
+
   private showError(message: string, canForfeit?: boolean): void {
     if (message === this.lastError) return;
     this.lastError = message;
@@ -358,15 +389,26 @@ export class AsyncGameController {
     }
   }
 
-  /** Reload the match from the backend, then re-evaluate. */
+  /** Reload the match from the backend, then re-evaluate. A burst of
+   *  Realtime events (one round brings several) collapses into at most one
+   *  more reload after the running one. */
   private async refresh(): Promise<void> {
     if (this.destroyed) return;
-    const loaded = await this.io.loadMatch(this.id);
-    if (this.destroyed) return;
-    if (loaded.kind === 'ok') this.setMatch(loaded.match);
-    else if (loaded.kind === 'missing') {
-      this.showError('This match no longer exists.');
-      return;
+    if (this.refreshing) { this.refreshAgain = true; return; }
+    this.refreshing = true;
+    try {
+      do {
+        this.refreshAgain = false;
+        const loaded = await this.io.loadMatch(this.id);
+        if (this.destroyed) return;
+        if (loaded.kind === 'ok') this.setMatch(loaded.match);
+        else if (loaded.kind === 'missing') {
+          this.showError('This match no longer exists.');
+          return;
+        }
+      } while (this.refreshAgain);
+    } finally {
+      this.refreshing = false;
     }
     await this.evaluate();
   }
@@ -380,7 +422,8 @@ export class AsyncGameController {
     const result = await this.io.advance(this.id);
     if (this.destroyed) return;
     if (result.match) this.setMatch(result.match);
-    if (!result.ok && (result.status === 426 || result.status === 409)) this.showError(result.message);
+    if (!result.ok && result.status === 426) this.markOutdated(result.message);
+    else if (!result.ok && result.status === 409 && !result.match) this.showError(result.message);
     if (result.match) this.dirty = true;
   }
 
@@ -399,18 +442,31 @@ export class AsyncGameController {
   }
 
   private async step(): Promise<void> {
-    if (this.destroyed || !this.match || this.playingRound != null) return;
+    if (this.destroyed || !this.match || this.playingRound != null || this.outdated) return;
     const match = this.match;
 
     if (match.rules !== RULES_VERSION && !isTerminalStatus(match.status)) {
-      this.showError(versionMessage(match), true);
+      // Newer rules: this app is outdated, and the match can go on after an
+      // update. Older rules: the referee ends it with no winner.
+      if (match.rules > RULES_VERSION) {
+        this.markOutdated(versionMessage(match));
+        return;
+      }
+      if (!this.voidRequested) {
+        this.voidRequested = true;
+        this.lastAdvanceAt = -Infinity;
+        await this.catchUp();
+        if (this.match !== match) return;
+      }
+      this.showError(versionMessage(match));
       return;
     }
 
     // A round played since this device last looked: show it first.
     const last = match.currentRound - 1;
     if (last >= 1 && this.watched < last) {
-      if (match.prevState && match.prevSeed != null && isPlausibleGameState(match.prevState)) {
+      // Only replay with the rules the round was played under.
+      if (match.rules === RULES_VERSION && match.prevState && match.prevSeed != null && isPlausibleGameState(match.prevState)) {
         const allTurns = await this.io.fetchTurns(this.id);
         // A newer record arrived meanwhile: its own evaluation takes over.
         if (this.destroyed || allTurns == null || this.match !== match) return;
@@ -506,6 +562,8 @@ export class AsyncGameController {
    *  search nobody joined is just withdrawn). Idempotent on the server. */
   async forfeit(): Promise<void> {
     if (this.destroyed || !this.match) return;
+    // Each attempt reports its own failure, even when it reads like the last one.
+    this.lastError = null;
     const result = await this.io.forfeit(this.id);
     if (this.destroyed) return;
     if (result.match) this.setMatch(result.match);
@@ -515,6 +573,20 @@ export class AsyncGameController {
     }
     this.lastError = null;
     await this.evaluate();
+  }
+
+  /** Withdraw an invite or search nobody has joined. Never concedes: if
+   *  someone joined meanwhile, the match simply goes on. Resolves to an error
+   *  message, or null once the match was withdrawn or goes on. */
+  async withdraw(): Promise<string | null> {
+    if (this.destroyed || !this.match) return null;
+    const result = await this.io.cancel(this.id);
+    if (this.destroyed) return null;
+    if (result.match) this.setMatch(result.match);
+    if (!result.ok) return result.message;
+    this.lastError = null;
+    await this.evaluate();
+    return null;
   }
 
   destroy(): void {

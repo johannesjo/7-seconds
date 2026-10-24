@@ -765,7 +765,7 @@ newBattleBtn.addEventListener('click', () => {
   showPreview();
   showScreen('prompt');
   if (reopen === 'matches') void openMatchesList();
-  if (reopen === 'ranked') void rankedScreen.open();
+  if (reopen === 'ranked') openRankedScreen();
 });
 
 // Exit game button (in battle HUD)
@@ -864,6 +864,8 @@ function destroyAsync(): void {
   asyncNotify.style.display = 'none';
   asyncFirstMoveBtn.style.display = 'none';
   asyncForfeitBtn.style.display = 'none';
+  setForfeitMode('forfeit');
+  onlineReloadBtn.style.display = 'none';
   asyncBackBtn.style.display = 'none';
 }
 
@@ -883,13 +885,39 @@ asyncFirstMoveBtn.addEventListener('click', () => {
 });
 
 // Forfeit: concede the match (or withdraw an invite nobody joined).
-asyncForfeitBtn.addEventListener('click', () => {
-  const ranked = asyncSession.ranked && asyncController?.record?.status === 'active';
-  if (ranked && !confirm('Concede this ranked match? It counts as a loss.')) return;
+/** The lobby's forfeit button either withdraws an invite nobody joined
+ *  (never a concession) or concedes the match. */
+function setForfeitMode(mode: 'withdraw' | 'forfeit'): void {
+  asyncForfeitBtn.dataset.mode = mode;
+  asyncForfeitBtn.textContent = mode === 'withdraw' ? 'Withdraw invite' : 'Forfeit match';
+}
+
+asyncForfeitBtn.addEventListener('click', async () => {
+  const controller = asyncController;
+  if (!controller) return;
+  if (asyncForfeitBtn.dataset.mode === 'withdraw') {
+    const status = onlineStatus.textContent ?? '';
+    asyncForfeitBtn.style.display = 'none';
+    setOnlineStatus('Withdrawing…', true);
+    const error = await controller.withdraw();
+    if (error && controller === asyncController) {
+      showToast(error);
+      setOnlineStatus(status);
+      asyncForfeitBtn.style.display = '';
+    }
+    return;
+  }
+  if (controller.record?.status === 'active') {
+    const question = controller.record.ranked ? 'Concede this ranked match? It counts as a loss.' : `Concede this match? ${opponentName()[0].toUpperCase()}${opponentName().slice(1)} wins.`;
+    if (!confirm(question)) return;
+  }
   asyncForfeitBtn.style.display = 'none';
   setOnlineStatus('Forfeiting…', true);
-  void asyncController?.forfeit();
+  void controller.forfeit();
 });
+
+const onlineReloadBtn = document.getElementById('online-reload-btn')!;
+onlineReloadBtn.addEventListener('click', () => { window.location.reload(); });
 
 /** The opponent's name as this player should read it. */
 function opponentName(match: MatchRecord | null = asyncController?.record ?? null): string {
@@ -1092,7 +1120,7 @@ function asyncHooks(): AsyncGameHooks {
         onlineShareContainer.style.display = '';
         asyncNotify.style.display = 'flex';
         // Withdrawing an invite nobody joined frees a slot under the match limit.
-        asyncForfeitBtn.textContent = 'Withdraw invite';
+        setForfeitMode('withdraw');
         asyncForfeitBtn.style.display = '';
         asyncFirstMoveBtn.style.display = '';
         setOnlineStatus('Share this link so a friend can join — or plan your first move now.', false);
@@ -1111,7 +1139,8 @@ function asyncHooks(): AsyncGameHooks {
       // Without server-sent alerts, Android can still show a local one if this
       // running match gets a turn update while its WebView is backgrounded.
       const matchId = asyncController?.matchId;
-      if (matchId) void closedAppAlerts().then(serverAlerts => { if (!serverAlerts) void notifyLocalTurn(matchId, round); });
+      const ranked = asyncSession.ranked;
+      if (matchId) void closedAppAlerts().then(serverAlerts => { if (!serverAlerts) void notifyLocalTurn(matchId, round, ranked); });
     },
 
     onAwaitOpponent(round, awaitingGuest, playing) {
@@ -1126,7 +1155,7 @@ function asyncHooks(): AsyncGameHooks {
         // invite visible so a friend can join and start the match.
         onlineShareContainer.style.display = '';
         asyncNotify.style.display = 'flex';
-        asyncForfeitBtn.textContent = 'Withdraw invite';
+        setForfeitMode('withdraw');
         asyncForfeitBtn.style.display = '';
         setOnlineStatus('First move locked in! Share the link — the match begins when a friend joins.', true);
       } else {
@@ -1200,7 +1229,7 @@ function asyncHooks(): AsyncGameHooks {
       onlineShareContainer.style.display = 'none';
       asyncFirstMoveBtn.style.display = 'none';
       setOnlineStatus(message);
-      asyncForfeitBtn.textContent = 'Forfeit match';
+      setForfeitMode('forfeit');
       asyncForfeitBtn.style.display = canForfeit ? '' : 'none';
       onlineLobby.style.display = 'flex';
       showScreen('battle');
@@ -1209,6 +1238,30 @@ function asyncHooks(): AsyncGameHooks {
     onMatch(match) {
       updateBattleNote();
       if (match.ranked) void refreshRankedView(match.id);
+      // A friend joined while the invite was up: no more link or withdrawing.
+      if (match.status === 'active' && asyncForfeitBtn.dataset.mode === 'withdraw') {
+        setForfeitMode('forfeit');
+        asyncForfeitBtn.style.display = 'none';
+        onlineShareContainer.style.display = 'none';
+        const joined = `${opponentName(match)[0].toUpperCase()}${opponentName(match).slice(1)} joined!`;
+        if (asyncFirstMoveBtn.style.display !== 'none') setOnlineStatus(`${joined} Plan your first move.`);
+        else if (onlineLobby.style.display === 'none') showToast(joined);
+      }
+    },
+
+    onOutdated(message) {
+      playbackPathDrawer?.destroy();
+      playbackPathDrawer = null;
+      planningOverlay.classList.remove('active');
+      confirmBtn.classList.remove('active');
+      onlineShareContainer.style.display = 'none';
+      asyncFirstMoveBtn.style.display = 'none';
+      asyncForfeitBtn.style.display = 'none';
+      asyncNotify.style.display = 'none';
+      setOnlineStatus(message);
+      onlineReloadBtn.style.display = '';
+      onlineLobby.style.display = 'flex';
+      showScreen('battle');
     },
   };
 }
@@ -1297,6 +1350,8 @@ interface Search {
   botAttempts: number;
   /** No more automatic AI request (it was refused); the player can still ask. */
   botRefused: boolean;
+  /** Why the last AI request failed, shown until the next one. */
+  notice: string | null;
   lastPoll: number;
 }
 let search: Search | null = null;
@@ -1325,7 +1380,7 @@ async function startSearch(ranked: boolean): Promise<void> {
   if (version !== searchVersion) return;
   showSearchLobby(ranked);
   setOnlineStatus('Looking for an opponent…', true);
-  search = { session, id: null, deadline: Infinity, timer: null, unsubscribe: null, callingBot: false, botAttempts: 0, botRefused: false, lastPoll: 0 };
+  search = { session, id: null, deadline: Infinity, timer: null, unsubscribe: null, callingBot: false, botAttempts: 0, botRefused: false, notice: null, lastPoll: 0 };
 
   const result: RefereeResult = ranked ? await findRankedMatch() : await referee.matchmake(casualSession, getPlayerName());
   if (version !== searchVersion) {
@@ -1349,9 +1404,11 @@ function resumeSearch(match: MatchRecord, ranked: boolean): void {
   returnTo = ranked ? 'ranked' : 'matches';
   closeMatchesList();
   rankedScreen.hide();
+  const version = searchVersion;
   void initRenderer().then(() => {
+    if (version !== searchVersion) return; // left meanwhile
     showSearchLobby(ranked);
-    search = { session: ranked ? rankedSession : casualSession, id: null, deadline: Infinity, timer: null, unsubscribe: null, callingBot: false, botAttempts: 0, botRefused: false, lastPoll: 0 };
+    search = { session: ranked ? rankedSession : casualSession, id: null, deadline: Infinity, timer: null, unsubscribe: null, callingBot: false, botAttempts: 0, botRefused: false, notice: null, lastPoll: 0 };
     handleSearchMatch(match);
   });
 }
@@ -1399,7 +1456,9 @@ async function tickSearch(): Promise<void> {
   if (!current || current.id === null) return;
   const left = Math.ceil((current.deadline - Date.now()) / 1000);
   if (current.callingBot) return;
-  if (current.botRefused) {
+  if (current.notice) {
+    searchCountdown.textContent = current.notice;
+  } else if (current.botRefused) {
     searchCountdown.textContent = current.session.ranked
       ? 'Still searching. You already have three ranked matches against AI commanders, so this one waits for a player.'
       : 'Still searching for a player.';
@@ -1433,6 +1492,7 @@ async function callSearchBot(difficulty?: 'recruit' | 'veteran'): Promise<void> 
   const current = search;
   if (!current || current.id === null || current.callingBot) return;
   current.callingBot = true;
+  current.notice = null;
   searchBotEasyBtn.disabled = true;
   searchBotHardBtn.disabled = true;
   searchCountdown.textContent = 'An AI commander is taking the seat…';
@@ -1449,7 +1509,7 @@ async function callSearchBot(difficulty?: 'recruit' | 'veteran'): Promise<void> 
   // searching, and ask once more a little later.
   if (difficulty === undefined && ++current.botAttempts < 2) current.deadline = Date.now() + 30_000;
   else current.botRefused = true;
-  if (!result.ok && result.status !== 409) searchCountdown.textContent = result.message;
+  current.notice = !result.ok && result.status !== 409 ? result.message : null;
   void tickSearch();
 }
 
@@ -1537,10 +1597,7 @@ matchesScreen.addEventListener('keydown', event => {
 
 // --- Ranked ---------------------------------------------------------------
 
-const rankedScreen = new (class extends RankedScreen {
-  /** Close without the "closed" side effects (another screen takes over). */
-  hide(): void { if (this.isOpen) super.close(); }
-})(document.getElementById('ranked-screen')!, {
+const rankedScreen = new RankedScreen(document.getElementById('ranked-screen')!, {
   openMatch: (id, searching) => {
     if (!searching) { void startAsyncGame(id, { ranked: true }); return; }
     void loadMatch(rankedSession, id).then(loaded => {
@@ -1549,17 +1606,21 @@ const rankedScreen = new (class extends RankedScreen {
     });
   },
   findOpponent: () => { void startSearch(true); },
-  closed: () => {
+  closed: restoreFocus => {
     promptScreen.inert = false;
     battleScreen.inert = false;
+    if (restoreFocus && rankedBtn.offsetParent) rankedBtn.focus();
   },
 });
 
-rankedBtn.addEventListener('click', () => {
+/** Ranked is a modal dialog over the menu: what's behind it is inert. */
+function openRankedScreen(): void {
   promptScreen.inert = true;
   battleScreen.inert = true;
   void rankedScreen.open();
-});
+}
+
+rankedBtn.addEventListener('click', openRankedScreen);
 
 // The Ranked button appears only in the Android app with Play Games configured.
 void rankedAvailable().then(available => { rankedBtn.style.display = available ? '' : 'none'; });
@@ -1600,7 +1661,11 @@ asyncNotifyCb.addEventListener('change', async () => {
   asyncNotifyCb.disabled = false;
   asyncNotifyCb.checked = ok ? enabled : !enabled;
   if (!ok) {
-    asyncNotifyHint.textContent = 'Could not turn on notifications. Check your connection and notification permissions, then try again.';
+    const status = await getTurnNotificationStatus().catch(() => null);
+    if (version !== asyncStartVersion) return;
+    asyncNotifyHint.textContent = status?.blocked
+      ? 'Notifications are off for 7 Seconds in Android settings. Tap here to allow them.'
+      : 'Could not turn on notifications. Check your connection and notification permissions, then try again.';
     return;
   }
   const serverAlerts = await closedAppAlerts();
@@ -1637,9 +1702,7 @@ onlineCancelBtn.addEventListener('click', () => {
  *  sign-in; without it, the Ranked screen asks for it. */
 async function openLinkedMatch(id: string, ranked: boolean): Promise<void> {
   if (ranked && !await rankedSignedIn()) {
-    promptScreen.inert = true;
-    battleScreen.inert = true;
-    void rankedScreen.open();
+    openRankedScreen();
     return;
   }
   void startAsyncGame(id, { ranked });

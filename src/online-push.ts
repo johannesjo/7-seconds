@@ -28,7 +28,7 @@ export async function initializeTurnNotifications(
 ): Promise<void> {
   if (Capacitor.isNativePlatform()) {
     if (await turnAlertsAvailable()) await setupTurnAlerts(alert => openMatch(alert.match, alert.ranked), onAlert);
-    else await initializeLocalTurnNotifications(id => openMatch(id, false));
+    else await initializeLocalTurnNotifications(openMatch);
     return;
   }
   try {
@@ -149,7 +149,10 @@ export async function setTurnNotifications(enabled: boolean): Promise<boolean> {
     if (!webPush) return false;
     row.web_push = webPush;
   } else {
+    // Off means off: also an email address left from older versions.
     row.web_push = null;
+    row.notify_email = false;
+    row.email = null;
   }
   const { error } = await getSupabaseClient().from('players').upsert(row);
   if (error) {

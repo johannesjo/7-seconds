@@ -498,9 +498,10 @@ begin
     insert into public.turns(match_id, round, team, player) values (m_id, p_round, t, actor)
       on conflict (match_id, round, team) do nothing;
   end if;
+  -- The player's current name ('' when they cleared it).
   if p_name is not null and not m.ranked then
-    if t = 'blue' then update public.matches set host_name = p_name where id = m_id and host_name is distinct from p_name;
-    else update public.matches set guest_name = p_name where id = m_id and guest_name is distinct from p_name; end if;
+    if t = 'blue' then update public.matches set host_name = nullif(p_name, '') where id = m_id and host_name is distinct from nullif(p_name, '');
+    else update public.matches set guest_name = nullif(p_name, '') where id = m_id and guest_name is distinct from nullif(p_name, ''); end if;
   end if;
   select * into m from public.matches where id = m_id;
   return jsonb_build_object('match', to_jsonb(m), 'inserted', inserted,

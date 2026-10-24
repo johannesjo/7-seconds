@@ -12,8 +12,8 @@ export interface RankedScreenActions {
   openMatch(id: string, searching: boolean): void;
   /** Start a ranked search. */
   findOpponent(): void;
-  /** The screen was closed. */
-  closed(): void;
+  /** The screen was closed; `restoreFocus` is false when another screen takes over. */
+  closed(restoreFocus: boolean): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> & { className?: string } = {}, ...children: (Node | string | null)[]): HTMLElementTagNameMap[K] {
@@ -44,10 +44,15 @@ export class RankedScreen {
 
   get isOpen(): boolean { return this.root.style.display === 'block'; }
 
-  close(): void {
+  close(restoreFocus = true): void {
     this.loadVersion++;
     this.root.style.display = 'none';
-    this.actions.closed();
+    this.actions.closed(restoreFocus);
+  }
+
+  /** Close for another screen (a match, a search): no focus change. */
+  hide(): void {
+    if (this.isOpen) this.close(false);
   }
 
   async open(): Promise<void> {

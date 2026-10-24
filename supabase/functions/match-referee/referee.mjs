@@ -2461,11 +2461,12 @@ var Referee = class {
     const plan = sanitizePlan(this.body.paths, board, team);
     if (!plan) throw new RequestError("Invalid orders", 400);
     const result = await this.store.rpc("seven_submit_plan", {
+      // '' clears the name; anything else is cleaned (null: leave it as it is).
       actor: this.user.id,
       m_id: current.id,
       p_round: round,
       p_paths: plan,
-      p_name: current.ranked ? null : cleanName(this.body.name)
+      p_name: current.ranked ? null : this.body.name === "" ? "" : cleanName(this.body.name)
     });
     if (result.expired) {
       this.alertTimeout(current, result.match, team);
