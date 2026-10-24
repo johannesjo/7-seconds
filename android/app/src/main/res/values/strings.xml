@@ -4,4 +4,6 @@
     <string name="title_activity_main">7 Seconds</string>
     <string name="package_name">io.github.johannesjo.sevenseconds</string>
     <string name="custom_url_scheme">io.github.johannesjo.sevenseconds</string>
+    <string name="turn_alerts_channel">Your turn</string>
+    <string name="turn_alerts_channel_description">When an online match is waiting on you</string>
 </resources>
