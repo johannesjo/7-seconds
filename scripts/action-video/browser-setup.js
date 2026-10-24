@@ -1,9 +1,21 @@
 async (page) => {
+  // First launch auto-starts the tutorial; mark it seen and reload so the
+  // capture starts from the menu.
+  const tutorialSeen = await page.evaluate(() => localStorage.getItem('7s-tutorial-seen') !== null);
+  if (!tutorialSeen) {
+    await page.evaluate(() => localStorage.setItem('7s-tutorial-seen', '1'));
+    await page.reload();
+  }
   const ageButton = page.getByRole('button', { name: "I'm 13 or older" });
   if (await ageButton.isVisible()) await ageButton.click();
 
-  const dayModeCheckbox = page.locator('#day-mode-cb');
-  await dayModeCheckbox.uncheck();
+  // Night theme while the battle is generated: the paper theme's noise texture
+  // draws from Math.random and would shift the seeded values below.
+  const setDayMode = (day) => page.evaluate((wanted) => {
+    const toggle = document.getElementById('theme-toggle');
+    if (document.body.classList.contains('day-mode') !== wanted) toggle.click();
+  }, day);
+  await setDayMode(false);
   await page.evaluate(() => {
     const values = [
       0.123,
@@ -20,9 +32,6 @@ async (page) => {
   });
 
   await page.getByRole('button', { name: 'vs AI' }).click();
-  await dayModeCheckbox.evaluate((checkbox) => {
-    checkbox.checked = true;
-    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  await setDayMode(true);
   await page.waitForTimeout(100);
 }

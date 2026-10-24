@@ -23,6 +23,10 @@ export class Renderer {
   private lastObstacles: Obstacle[] = [];
   private flagGraphics: Container | null = null;
   private baseZoneGraphics: Graphics | null = null;
+  /** Called whenever any path drawer finishes a path. */
+  onPathDrawn: (() => void) | null = null;
+  /** Camera: zoom eases toward its target around `focus`; shake decays. */
+  private camera = { zoom: 1, targetZoom: 1, focus: { x: 0, y: 0 }, shake: 0, active: false };
 
 
   constructor() {
@@ -49,6 +53,53 @@ export class Renderer {
     canvas.style.height = `${MAP_HEIGHT * scale}px`;
     this.drawBackground();
     this._effects = new EffectsManager(this.app.stage, this.app.renderer);
+    this.app.ticker.add(this.updateCamera, this);
+  }
+
+  /** Jolt the view; strength is in map pixels and stacks up to a cap. */
+  shake(strength: number): void {
+    this.camera.shake = Math.min(14, this.camera.shake + strength);
+    this.camera.active = true;
+  }
+
+  /** Ease the camera in on a point (e.g. the final kill). */
+  focusCamera(pos: Vec2, zoom: number): void {
+    this.camera.focus = { x: pos.x, y: pos.y };
+    this.camera.targetZoom = zoom;
+    this.camera.active = true;
+  }
+
+  /** Snap back to the full, unshaken map (planning needs exact coordinates). */
+  resetCamera(): void {
+    const cam = this.camera;
+    if (!cam.active) return;
+    cam.zoom = 1;
+    cam.targetZoom = 1;
+    cam.shake = 0;
+    cam.active = false;
+    this.app.stage.scale.set(1);
+    this.app.stage.position.set(0, 0);
+  }
+
+  private updateCamera(ticker: { deltaMS: number }): void {
+    const cam = this.camera;
+    if (!cam.active) return;
+    const dt = Math.min(0.05, ticker.deltaMS / 1000);
+    cam.zoom += (cam.targetZoom - cam.zoom) * Math.min(1, dt * 6);
+    cam.shake = Math.max(0, cam.shake - dt * 40);
+    if (cam.shake === 0 && cam.targetZoom === 1 && Math.abs(cam.zoom - 1) < 0.002) {
+      this.resetCamera();
+      return;
+    }
+    // Zoom about the focus point, clamped so the map always fills the view.
+    const z = cam.zoom;
+    let x = Math.min(0, Math.max(MAP_WIDTH * (1 - z), MAP_WIDTH / 2 - cam.focus.x * z));
+    let y = Math.min(0, Math.max(MAP_HEIGHT * (1 - z), MAP_HEIGHT / 2 - cam.focus.y * z));
+    if (z === 1) { x = 0; y = 0; }
+    x += (Math.random() - 0.5) * 2 * cam.shake;
+    y += (Math.random() - 0.5) * 2 * cam.shake;
+    this.app.stage.scale.set(z);
+    this.app.stage.position.set(x, y);
   }
 
   private drawBackground(): void {
@@ -708,6 +759,7 @@ export class Renderer {
   createPathDrawer(onZoneHighlight?: (pos: Vec2 | null) => void): PathDrawer {
     const drawer = new PathDrawer(this.app.stage, this.app.canvas, onZoneHighlight);
     drawer.theme = this.currentTheme;
+    drawer.onPathDrawn = () => this.onPathDrawn?.();
     return drawer;
   }
 
@@ -740,6 +792,7 @@ export class Renderer {
 
     // Reset stage transform — no internal scaling needed since renderer
     // now matches the remote map dimensions exactly
+    this.resetCamera();
     this.app.stage.scale.set(1);
     this.app.stage.position.set(0, 0);
 

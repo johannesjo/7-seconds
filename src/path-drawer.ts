@@ -108,6 +108,8 @@ export class PathDrawer {
   private hoverLabel: Text;
   private onZoneHighlight: ((pos: Vec2 | null) => void) | null = null;
   onInspectUnit: ((unit: Unit | null) => void) | null = null;
+  /** A movement or rocket path was just finished (for UI feedback). */
+  onPathDrawn: (() => void) | null = null;
   private inspectedUnit: Unit | null = null;
   private predictionCache = new WeakMap<Unit, {
     points: Vec2[];
@@ -798,6 +800,7 @@ export class PathDrawer {
       this.rocketUnit = null;
       this.rawRocket = [];
       this.renderPaths();
+      if (unit.rocketPath.length > 0) this.onPathDrawn?.();
       return;
     }
     if (!this.selectedUnit) return;
@@ -805,6 +808,7 @@ export class PathDrawer {
     const waypoints = samplePath(this.rawPoints, PATH_SAMPLE_DISTANCE);
     // Skip the first point (unit's current position)
     this.selectedUnit.waypoints = waypoints.slice(1);
+    if (this.selectedUnit.waypoints.length > 0) this.onPathDrawn?.();
 
     this.hoveredUnit = this.selectedUnit;
     this.selectedUnit = null;

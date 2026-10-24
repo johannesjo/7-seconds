@@ -229,7 +229,7 @@ function flankScore(attackerPos, targetPos, targetGunAngle) {
   if (diff < -Math.PI) diff += 2 * Math.PI;
   return Math.abs(diff) / Math.PI;
 }
-function generateRandomComposition() {
+function generateRandomComposition(random = Math.random) {
   const pool = [
     { type: "soldier", weight: 2.5 },
     { type: "sniper", weight: 1 },
@@ -238,10 +238,10 @@ function generateRandomComposition() {
     { type: "rocketeer", weight: 0.5 }
   ];
   const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
-  const unitCount = 3 + Math.floor(Math.random() * 3);
+  const unitCount = 3 + Math.floor(random() * 3);
   const counts = /* @__PURE__ */ new Map();
   for (let i = 0; i < unitCount; i++) {
-    let roll = Math.random() * totalWeight;
+    let roll = random() * totalWeight;
     for (const { type, weight } of pool) {
       roll -= weight;
       if (roll <= 0) {
@@ -926,6 +926,7 @@ var STANDARD_LAYOUTS = [
     elevationZones: [[0.22, 0.32, 100, 65], [0.78, 0.42, 100, 65]]
   }
 ];
+var BATTLEFIELD_LAYOUT_COUNT = STANDARD_LAYOUTS.length;
 function generateBattlefield(layoutIndex = Math.floor(Math.random() * STANDARD_LAYOUTS.length)) {
   const layout = STANDARD_LAYOUTS[layoutIndex];
   if (!layout) throw new RangeError(`Unknown battlefield layout: ${layoutIndex}`);
@@ -1382,6 +1383,9 @@ function createRng(seed) {
 
 // src/game.ts
 var FIXED_DT = 1 / 60;
+var HIT_STOP = { scale: 0.15, seconds: 0.06 };
+var FINAL_KILL = { scale: 0.35, delay: 1.5, zoom: 1.3 };
+var END_DELAY_S = 0.6;
 var GameEngine = class _GameEngine {
   units = [];
   obstacles = [];
@@ -1420,6 +1424,14 @@ var GameEngine = class _GameEngine {
   practice;
   initialState;
   onInspectUnit;
+  cinematic = false;
+  difficulty = "normal";
+  layoutIndex;
+  composition;
+  slowMoTimer = 0;
+  slowMoScale = 1;
+  finalSlowMo = false;
+  lastKillPos = null;
   constructor(renderer, onEvent, opts) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -1434,6 +1446,10 @@ var GameEngine = class _GameEngine {
     this.practice = opts?.practice;
     this.initialState = opts?.initialState;
     this.onInspectUnit = opts?.onInspectUnit;
+    this.cinematic = opts?.cinematic ?? false;
+    this.difficulty = opts?.difficulty ?? "normal";
+    this.layoutIndex = opts?.layoutIndex;
+    this.composition = opts?.composition;
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
   get phase() {
@@ -1464,7 +1480,7 @@ var GameEngine = class _GameEngine {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
     } else {
-      const battlefield = generateBattlefield();
+      const battlefield = generateBattlefield(this.layoutIndex);
       this.obstacles = battlefield.obstacles;
       this.elevationZones = battlefield.elevationZones;
     }
@@ -1478,8 +1494,9 @@ var GameEngine = class _GameEngine {
         }
         this.units = [...this.hordeBlueUnits, ...redUnits];
       } else {
-        const composition = generateRandomComposition();
-        this.units = [...createArmy("blue", composition), ...createArmy("red", composition)];
+        const composition = this.composition ?? generateRandomComposition();
+        const redComposition = this.aiMode ? adjustForDifficulty(composition, this.difficulty) : composition;
+        this.units = [...createArmy("blue", composition), ...createArmy("red", redComposition)];
       }
     }
     this.projectiles = [];
@@ -1529,6 +1546,7 @@ var GameEngine = class _GameEngine {
   setPhase(phase) {
     this._phase = phase;
     if (phase === "blue-planning") {
+      this.renderer?.resetCamera();
       for (const u of this.units) {
         u.rocketFired = false;
         if (u.team === "blue") u.rocketPath = [];
@@ -1572,8 +1590,11 @@ var GameEngine = class _GameEngine {
   /** Generate AI paths for red units using position-scoring system. Zombies,
    *  shielders, and bombers are left to the real-time chase AI. */
   generateAiPaths() {
+    const easy = this.difficulty === "easy" && this.aiMode && !this.hordeMode;
+    const aiRng = createRng(this.seed * 31 + this.roundNumber);
     const plans = planTeamOrders(this.units, this.obstacles, this.elevationZones, "red", {
-      ctfState: this.ctfState ?? void 0
+      ctfState: this.ctfState ?? void 0,
+      ...easy ? { choose: (clearCount) => Math.floor(aiRng() * clearCount) } : {}
     });
     for (const unit of this.units) {
       const plan = plans.get(unit.id);
@@ -1588,7 +1609,9 @@ var GameEngine = class _GameEngine {
   tick = (ticker) => {
     if (!this.running) return;
     const rawDt = ticker.deltaMS / 1e3;
-    this.renderer?.renderUnits(this.units, rawDt, this.ctfState ?? void 0, this._phase === "playing");
+    const timeScale = this.consumeSlowMo(rawDt);
+    const animDt = rawDt * (this.endingBattle && this.finalSlowMo ? FINAL_KILL.scale : 1);
+    this.renderer?.renderUnits(this.units, animDt, this.ctfState ?? void 0, this._phase === "playing");
     if (this.ctfState) {
       this.renderer?.renderFlags(this.ctfState);
     }
@@ -1596,20 +1619,20 @@ var GameEngine = class _GameEngine {
     if (this._phase !== "playing") return;
     if (this.endingBattle) {
       this.endDelayTimer -= rawDt;
-      this.renderer?.effects?.update(rawDt);
+      this.renderer?.effects?.update(animDt);
       if (this.endDelayTimer <= 0) {
         this.endBattle(this.pendingWinner);
       }
       return;
     }
-    this.accumulator += rawDt * this.speedMultiplier;
+    this.accumulator += rawDt * this.speedMultiplier * timeScale;
     while (this.accumulator >= FIXED_DT) {
       this.simulationStep(FIXED_DT);
       this.accumulator -= FIXED_DT;
       if (!this.running || this._phase !== "playing" || this.endingBattle) break;
     }
     this.renderer?.renderProjectiles(this.projectiles);
-    this.renderer?.effects?.update(rawDt);
+    this.renderer?.effects?.update(rawDt * timeScale);
     this.onEvent("update", { phase: "playing", timeLeft: Math.max(0, this.roundTimer) });
   };
   /** Run one fixed-timestep simulation step. */
@@ -1677,7 +1700,17 @@ var GameEngine = class _GameEngine {
           updateGunAngle(unit, desired, dt);
         }
         const aoeHits = bladeAoeAttack(unit, this.units, dt);
+        const fx = this.renderer?.effects ?? null;
         for (const hit of aoeHits) {
+          const victimTeam = hit.team === "blue" ? "red" : "blue";
+          const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
+          if (unitGfx) fx?.addHitFlash(unitGfx);
+          fx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+          if (hit.killed) {
+            fx?.addKillText(hit.pos, hit.team);
+            fx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+            this.noteKill(hit.pos);
+          }
           this.replayEvents.push({
             frame: this.replayFrames.length,
             type: hit.killed ? "kill" : "hit",
@@ -1698,7 +1731,7 @@ var GameEngine = class _GameEngine {
         const projectiles = tryFireProjectile(unit, target, dt, this.elevationZones);
         if (projectiles.length > 0) {
           this.projectiles.push(...projectiles);
-          this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
+          this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, projectiles[0].damage);
           this.replayEvents.push({
             frame: this.replayFrames.length,
             type: "fire",
@@ -1738,8 +1771,8 @@ var GameEngine = class _GameEngine {
     const shells = fireMortar(unit, target, dt);
     if (shells.length === 0) return;
     this.projectiles.push(...shells);
-    this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
-    this.recordFire(unit, shells[0].damage);
+    this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, shells[0].damage, "shell");
+    this.recordFire(unit, shells[0].damage, "shell");
   }
   /** Rocketeer: face the nearest enemy; launch its drawn rocket on arrival. */
   updateRocketeer(unit, dt) {
@@ -1747,14 +1780,14 @@ var GameEngine = class _GameEngine {
       const rocket = launchRocket(unit);
       if (!rocket) return;
       this.projectiles.push(rocket);
-      this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
-      this.recordFire(unit, rocket.damage);
+      this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, rocket.damage, "rocket");
+      this.recordFire(unit, rocket.damage, "rocket");
       return;
     }
     const target = findTarget(unit, this.units, null, this.obstacles);
     if (target) updateGunAngle(unit, Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x), dt);
   }
-  recordFire(unit, damage) {
+  recordFire(unit, damage, weapon) {
     this.replayEvents.push({
       frame: this.replayFrames.length,
       type: "fire",
@@ -1762,7 +1795,8 @@ var GameEngine = class _GameEngine {
       angle: unit.gunAngle,
       damage,
       flanked: false,
-      team: unit.team
+      team: unit.team,
+      weapon
     });
   }
   recordExplosion(e) {
@@ -1821,6 +1855,7 @@ var GameEngine = class _GameEngine {
       if (hit.killed) {
         fx?.addKillText(hit.pos, hit.team);
         fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
+        this.noteKill(hit.pos);
       }
     }
   }
@@ -1833,6 +1868,10 @@ var GameEngine = class _GameEngine {
           this.recordExplosion({ pos: { ...deadUnit.pos }, radius: 80, team: deadUnit.team });
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
+            if (eh.killed) {
+              this.renderer?.effects?.addKillText(eh.pos, deadUnit.team);
+              this.noteKill(eh.pos);
+            }
             this.replayEvents.push({
               frame: this.replayFrames.length,
               type: eh.killed ? "kill" : "hit",
@@ -1862,7 +1901,7 @@ var GameEngine = class _GameEngine {
     if (capturer) {
       this.ctfState.winner = capturer;
       this.endingBattle = true;
-      this.endDelayTimer = 0.6;
+      this.endDelayTimer = END_DELAY_S;
       this.pendingWinner = capturer;
       this.projectiles = [];
       this.renderer?.renderProjectiles([]);
@@ -1886,10 +1925,11 @@ var GameEngine = class _GameEngine {
         return true;
       }
       this.endingBattle = true;
-      this.endDelayTimer = 0.6;
+      this.endDelayTimer = END_DELAY_S;
       this.pendingWinner = blueAlive2 === 0 ? "red" : "blue";
       this.projectiles = [];
       this.renderer?.renderProjectiles([]);
+      this.startFinalKillMoment();
       return true;
     }
     return false;
@@ -1990,6 +2030,7 @@ var GameEngine = class _GameEngine {
     this.pathDrawer?.disable();
     this.pathDrawer?.clearGraphics();
     this.renderer?.effects?.clear();
+    this.renderer?.resetCamera();
     const blueAlive2 = this.units.filter((u) => u.alive && u.team === "blue").length;
     const redAlive2 = this.units.filter((u) => u.alive && u.team === "red").length;
     const blueTotal = this.units.filter((u) => u.team === "blue").length;
@@ -2000,6 +2041,8 @@ var GameEngine = class _GameEngine {
       redAlive: redAlive2,
       blueKilled: redTotal - redAlive2,
       redKilled: blueTotal - blueAlive2,
+      blueTotal,
+      redTotal,
       duration: this.elapsedTime
     });
   }
@@ -2152,8 +2195,43 @@ var GameEngine = class _GameEngine {
     this.pathDrawer = null;
     this.renderer?.effects?.clear();
     this.renderer?.clearCtfGraphics();
+    this.renderer?.resetCamera();
+  }
+  /** Remember where the latest kill happened and briefly freeze the action. */
+  noteKill(pos) {
+    this.lastKillPos = { x: pos.x, y: pos.y };
+    if (!this.cinematic || !this.renderer || this.lockstepMode) return;
+    this.slowMoScale = HIT_STOP.scale;
+    this.slowMoTimer = HIT_STOP.seconds;
+  }
+  /** Slow the battle's last moment down and push the camera in on it. */
+  startFinalKillMoment() {
+    if (!this.cinematic || !this.renderer || this.lockstepMode || !this.lastKillPos) return;
+    this.finalSlowMo = true;
+    this.endDelayTimer = FINAL_KILL.delay;
+    this.renderer.focusCamera(this.lastKillPos, FINAL_KILL.zoom);
+  }
+  consumeSlowMo(rawDt) {
+    if (this.slowMoTimer <= 0) return 1;
+    this.slowMoTimer -= rawDt;
+    return this.slowMoScale;
   }
 };
+function adjustForDifficulty(composition, difficulty) {
+  const adjusted = composition.map((c) => ({ ...c }));
+  const total = adjusted.reduce((sum, c) => sum + c.count, 0);
+  if (difficulty === "easy" && total > 2) {
+    const largest = adjusted.reduce((a, b) => b.count > a.count ? b : a);
+    largest.count--;
+    return adjusted.filter((c) => c.count > 0);
+  }
+  if (difficulty === "hard") {
+    const soldiers = adjusted.find((c) => c.type === "soldier");
+    if (soldiers) soldiers.count++;
+    else adjusted.push({ type: "soldier", count: 1 });
+  }
+  return adjusted;
+}
 
 // src/online-plan.ts
 var RULES_VERSION = 2;

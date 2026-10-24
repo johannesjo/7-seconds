@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { GameEngine } from './game';
+import { GameEngine, adjustForDifficulty, type Difficulty } from './game';
 import type { OnlineGameState } from './online-types';
+import type { Renderer } from './renderer';
 
 // Regression: shielders (and other chase-type red units) must follow the paths a
 // HUMAN player drew. The chase AI is for AI opponents only — when it ran in online
@@ -191,5 +192,106 @@ describe('horde mutual wipe', () => {
     expect(events.some(e => e.event === 'wave-clear')).toBe(false);
     const end = events.find(e => e.event === 'end');
     expect(end?.data).toMatchObject({ winner: 'red' });
+  });
+});
+
+describe('difficulty', () => {
+  const comp = [{ type: 'soldier' as const, count: 2 }, { type: 'sniper' as const, count: 1 }];
+
+  it('removes a unit from the largest group on easy and adds a soldier on hard', () => {
+    expect(adjustForDifficulty(comp, 'easy')).toEqual([{ type: 'soldier', count: 1 }, { type: 'sniper', count: 1 }]);
+    expect(adjustForDifficulty(comp, 'normal')).toEqual(comp);
+    expect(adjustForDifficulty(comp, 'hard')).toEqual([{ type: 'soldier', count: 3 }, { type: 'sniper', count: 1 }]);
+    expect(adjustForDifficulty([{ type: 'sniper', count: 3 }], 'hard'))
+      .toEqual([{ type: 'sniper', count: 3 }, { type: 'soldier', count: 1 }]);
+    expect(comp).toEqual([{ type: 'soldier', count: 2 }, { type: 'sniper', count: 1 }]); // not mutated
+  });
+
+  it('never shrinks an army below two units', () => {
+    expect(adjustForDifficulty([{ type: 'soldier', count: 2 }], 'easy')).toEqual([{ type: 'soldier', count: 2 }]);
+  });
+
+  it('only changes the AI side, and only against the AI', () => {
+    const count = (difficulty: Difficulty, aiMode: boolean) => {
+      const eng = new GameEngine(null, () => {}, { aiMode, seed: 3, difficulty, composition: comp, layoutIndex: 0 });
+      eng.startBattle();
+      const units = eng.getUnits();
+      eng.stop();
+      return { blue: units.filter(u => u.team === 'blue').length, red: units.filter(u => u.team === 'red').length };
+    };
+    expect(count('easy', true)).toEqual({ blue: 3, red: 2 });
+    expect(count('hard', true)).toEqual({ blue: 3, red: 4 });
+    expect(count('hard', false)).toEqual({ blue: 3, red: 3 });
+  });
+});
+
+describe('fixed encounters (daily challenge)', () => {
+  it('builds the same armies and map from the same layout, composition and seed', () => {
+    const comp = [{ type: 'soldier' as const, count: 4 }, { type: 'mortar' as const, count: 1 }];
+    const build = () => {
+      const eng = new GameEngine(null, () => {}, { aiMode: true, seed: 9, layoutIndex: 1, composition: comp });
+      eng.startBattle();
+      const state = eng.getOnlineGameState();
+      eng.stop();
+      return state;
+    };
+    expect(build()).toEqual(build());
+  });
+
+  // Regression: the result screen derived army sizes from the default
+  // composition, showing e.g. "5/4" survivors for a five-unit army.
+  it('reports each side’s starting army size with the result', () => {
+    let result: unknown;
+    const comp = [{ type: 'soldier' as const, count: 5 }];
+    const eng = new GameEngine(null, (event, data) => { if (event === 'end') result = data; }, {
+      aiMode: true, seed: 2, layoutIndex: 0, composition: comp, difficulty: 'easy',
+    });
+    eng.startBattle();
+    eng.confirmPlan();
+    for (const u of eng.getUnits()) if (u.team === 'red') u.alive = false;
+    for (let i = 0; i < 60; i++) eng.externalTick(1000 / 60);
+    expect(result).toMatchObject({ winner: 'blue', blueAlive: 5, blueTotal: 5, redAlive: 0, redTotal: 4 });
+  });
+});
+
+/** Renderer stand-in: every property is a no-op function, and calls are logged. */
+function stubRenderer(calls: string[]): Renderer {
+  const make = (path: string): unknown => new Proxy(function () {}, {
+    get: (_t, prop) => (prop === 'then' ? undefined : make(`${path}.${String(prop)}`)),
+    apply: () => { calls.push(path); return make(`${path}()`); },
+  });
+  return make('renderer') as Renderer;
+}
+
+describe('cinematic final kill', () => {
+  const endAfter = (cinematic: boolean) => {
+    const calls: string[] = [];
+    let endedAtFrame = -1;
+    let winner: unknown;
+    const eng = new GameEngine(stubRenderer(calls), (event, data) => {
+      if (event === 'end') winner = (data as { winner: string }).winner;
+    }, { aiMode: true, seed: 1, cinematic });
+    eng.startBattle();
+    eng.loadOnlineGameState(snapshot());
+    eng.confirmPlan();
+    const red = eng.getUnits().find(u => u.team === 'red')!;
+    red.hp = 1;
+    (eng as unknown as { noteKill(p: { x: number; y: number }): void }).noteKill(red.pos);
+    red.alive = false;
+    for (let frame = 0; frame < 200 && winner === undefined; frame++) {
+      eng.externalTick(1000 / 60);
+      if (winner !== undefined) endedAtFrame = frame;
+    }
+    return { calls, endedAtFrame, winner };
+  };
+
+  it('holds the last kill in slow motion with the camera pushed in, without changing the outcome', () => {
+    const plain = endAfter(false);
+    const cinematic = endAfter(true);
+    expect(cinematic.winner).toBe(plain.winner);
+    expect(cinematic.endedAtFrame).toBeGreaterThan(plain.endedAtFrame + 30);
+    expect(cinematic.calls).toContain('renderer.focusCamera');
+    expect(plain.calls).not.toContain('renderer.focusCamera');
+    expect(cinematic.calls).toContain('renderer.resetCamera');
   });
 });

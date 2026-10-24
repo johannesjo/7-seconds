@@ -26,6 +26,8 @@ const STANDARD_LAYOUTS: ReadonlyArray<{ obstacles: readonly LayoutRect[]; elevat
   },
 ];
 
+export const BATTLEFIELD_LAYOUT_COUNT = STANDARD_LAYOUTS.length;
+
 /** A coherent standard battlefield, mirrored so each team has the same routes. */
 export function generateBattlefield(layoutIndex = Math.floor(Math.random() * STANDARD_LAYOUTS.length)):
   { obstacles: Obstacle[]; elevationZones: ElevationZone[] } {

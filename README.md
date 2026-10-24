@@ -20,7 +20,8 @@ Terrain matters: elevation grants range bonuses, obstacles block movement and li
 
 ## Game Modes
 
-- **vs AI** — Single player against AI opponents
+- **vs AI** — Single player against AI opponents, on Easy, Normal or Hard (Easy gives the AI one unit fewer and looser planning; Hard gives it an extra soldier). Your win/loss record and streak are kept per difficulty.
+- **Daily challenge** — The same map, armies and battle seed for everyone each day. Your first finished attempt counts; share the result as a spoiler-free emoji summary.
 - **Horde** — Survive 10 waves of increasingly difficult enemies, choosing upgrades between waves
 - **Play a Stranger** — Matched with a random opponent; if nobody is searching, an AI commander takes the seat
 - **Play a Friend** — Share a link and play against a friend, at your own pace
@@ -64,6 +65,8 @@ Terrain matters: elevation grants range bonuses, obstacles block movement and li
 
 Zero runtime CSS frameworks. Two themes (paper day mode, dark night mode) via CSS custom properties.
 
+Sound effects and music are synthesized at runtime with WebAudio (no audio assets). Phones vibrate on kills and explosions (Capacitor Haptics on Android, the Vibration API on the web). Sound, music, vibration, reduced motion and theme are toggled from the main menu and saved locally; reduced motion follows the system setting by default.
+
 ## Development
 
 ```bash
@@ -72,7 +75,10 @@ npm run dev        # start dev server
 npm run build      # production build
 npm run test:run   # run tests
 npm run typecheck  # app and integration-test types
+npm run screenshots  # capture every main screen at phone and desktop size into output/screenshots/
 ```
+
+`npm run screenshots` needs Playwright with Chromium installed globally (`npm i -g playwright && npx playwright install chromium`) and fails if the page throws an error.
 
 Online play talks to the shared Supabase project. To develop against a local
 stack instead, set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for
@@ -82,6 +88,8 @@ After changing the engine or the referee, run `npm run referee:bundle` and
 commit `supabase/functions/match-referee/referee.mjs`. Deployment: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Recording
+
+After a battle, **Share clip** on the result screen plays the replay while recording it (with sound). When it's done, a second tap on **Share recorded clip** opens the share sheet (browsers only allow sharing straight after a tap); where sharing files isn't supported the video downloads instead. It's hidden in the Android app, whose WebView can't share or download the recording.
 
 Append `?record` to the URL to enable the built-in screen recorder. Press **R** during battle or replay to capture a WebM clip (max 15 seconds).
 
