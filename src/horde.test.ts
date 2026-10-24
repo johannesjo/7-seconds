@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, ALL_UNIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { createUnit } from './units';
-import { MAP_HEIGHT, HORDE_MAX_WAVES } from './constants';
+import { MAP_HEIGHT, HORDE_MAX_WAVES, SHIELD_MAX_HITS } from './constants';
 import { Unit } from './types';
 
 describe('HORDE_WAVES', () => {
@@ -85,6 +85,20 @@ describe('healAllBlue', () => {
 
     expect(units[0].hp).toBe(units[0].maxHp);
     expect(units[1].hp).toBe(10); // red untouched
+  });
+
+  it('restores broken shields on blue shielders', () => {
+    const units = [
+      createUnit('blue_shielder_0', 'shielder', 'blue', { x: 400, y: 600 }),
+      createUnit('red_shielder_0', 'shielder', 'red', { x: 400, y: 200 }),
+    ];
+    units[0].shieldHits = SHIELD_MAX_HITS;
+    units[1].shieldHits = SHIELD_MAX_HITS;
+
+    healAllBlue(units);
+
+    expect(units[0].shieldHits).toBe(0);
+    expect(units[1].shieldHits).toBe(SHIELD_MAX_HITS); // red untouched
   });
 
   it('does not heal dead blue units', () => {

@@ -53,6 +53,7 @@ try {
     page.on('pageerror', err => errors.push(`${name}: ${err.message}`));
     await page.addInitScript(() => {
       localStorage.setItem('7s-age-verified', '1');
+      localStorage.setItem('7s-tutorial-seen', '1');
       // Silence audio so captures don't depend on an audio device.
       localStorage.setItem('7s-settings', JSON.stringify({ sound: false, music: false }));
     });

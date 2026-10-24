@@ -280,11 +280,12 @@ export function applyUpgradesToUnit(unit: Unit, appliedCounts: Map<string, numbe
   }
 }
 
-/** Restore all blue units to max HP. */
+/** Restore all blue units to max HP and repair shielder shields. */
 export function healAllBlue(units: Unit[]): void {
   for (const u of units) {
     if (u.team === 'blue' && u.alive) {
       u.hp = u.maxHp;
+      if (u.type === 'shielder') u.shieldHits = 0;
     }
   }
 }

@@ -717,6 +717,7 @@
         document.getElementById('age-gate-yes').onclick = function() {
           localStorage.setItem('7s-age-verified', '1');
           gate.style.display = 'none';
+          window.dispatchEvent(new Event('age-verified'));
           // If an async match link was deferred, trigger it now
           var pendingAsync = sessionStorage.getItem('7s-pending-async-join');
           if (pendingAsync) {

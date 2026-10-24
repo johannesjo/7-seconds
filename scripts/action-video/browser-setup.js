@@ -1,4 +1,11 @@
 async (page) => {
+  // First launch auto-starts the tutorial; mark it seen and reload so the
+  // capture starts from the menu.
+  const tutorialSeen = await page.evaluate(() => localStorage.getItem('7s-tutorial-seen') !== null);
+  if (!tutorialSeen) {
+    await page.evaluate(() => localStorage.setItem('7s-tutorial-seen', '1'));
+    await page.reload();
+  }
   const ageButton = page.getByRole('button', { name: "I'm 13 or older" });
   if (await ageButton.isVisible()) await ageButton.click();
 
