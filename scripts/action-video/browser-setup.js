@@ -32,6 +32,7 @@ async (page) => {
   });
 
   await page.getByRole('button', { name: 'vs AI' }).click();
+  await page.click('#difficulty-screen [data-difficulty="normal"]');
   await setDayMode(true);
   await page.waitForTimeout(100);
 }
