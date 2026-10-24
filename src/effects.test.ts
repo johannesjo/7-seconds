@@ -1,8 +1,14 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
 import { Container, Graphics, Sprite } from 'pixi.js';
 import type { Renderer, RenderOptions } from 'pixi.js';
 import { EffectsManager } from './effects';
 import { setMapSize, MAP_WIDTH, MAP_HEIGHT } from './constants';
+
+// Pixi checks the browser user agent during import; Node 20 has no navigator.
+vi.hoisted(() => {
+  vi.stubGlobal('navigator', { userAgent: 'node' });
+});
+afterAll(() => vi.unstubAllGlobals());
 
 interface Bake { stains: number; target: unknown; clear: unknown }
 
