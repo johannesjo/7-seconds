@@ -26,8 +26,9 @@ jobs:
     services:
       postgres:
         image: postgres:16-alpine
+        # A throwaway database for the tests: no password at all.
         env:
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
@@ -42,7 +43,7 @@ jobs:
       - run: npm run referee:check
       - name: Unit and database tests
         env:
-          SEVEN_PG_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          SEVEN_PG_URL: postgresql://postgres@localhost:5432/postgres
         run: npx vitest run
 
   deploy:
