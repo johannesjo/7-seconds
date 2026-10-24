@@ -86,6 +86,7 @@ const upgradeReplayBtn = document.getElementById('upgrade-replay-btn') as HTMLBu
 const dailyBtn = document.getElementById('daily-btn')!;
 const dailyBadge = document.getElementById('daily-badge')!;
 const difficultyScreen = document.getElementById('difficulty-screen')!;
+const settingsScreen = document.getElementById('settings-screen')!;
 const difficultyButtons = [...difficultyScreen.querySelectorAll<HTMLButtonElement>('[data-difficulty]')];
 const settingToggles = [...document.querySelectorAll<HTMLButtonElement>('.setting-toggle[data-setting]')];
 const themeToggle = document.getElementById('theme-toggle')!;
@@ -287,6 +288,7 @@ function showScreen(screen: 'prompt' | 'battle' | 'result' | 'horde-upgrade') {
   document.body.classList.toggle('screen-prompt', screen === 'prompt');
   if (screen !== 'battle') audio.setMood('calm');
   if (screen === 'prompt') refreshMenuMeta();
+  else closeMenuDialogs();
   if (screen === 'battle') readyClip = null;
   if (screen === 'result') {
     clipBtn.style.display = lastReplayData && canRecordClips() ? '' : 'none';
@@ -415,7 +417,7 @@ function finishTutorialRound(): void {
   audio.play(tutorialPassed ? 'victory' : 'defeat');
   resultStatsEl.textContent = tutorialPassed ? lesson.success : lesson.retry;
   rematchBtn.textContent = !tutorialPassed ? 'Retry lesson'
-    : tutorialLesson === TUTORIAL_LESSONS.length - 1 ? 'Play vs AI' : 'Next lesson';
+    : tutorialLesson === TUTORIAL_LESSONS.length - 1 ? `Play vs AI (${DIFFICULTY_LABELS[difficulty]})` : 'Next lesson';
   replayBtn.style.display = lastReplayData ? '' : 'none';
   returnToScreen = 'result';
   showScreen('result');
@@ -913,7 +915,6 @@ themeToggle.addEventListener('click', () => {
 onSettingsChange(syncSettingsUi);
 syncSettingsUi(getSettings());
 
-const settingsScreen = document.getElementById('settings-screen')!;
 const settingsBtn = document.getElementById('settings-btn')!;
 
 function openSettings(): void {
@@ -925,16 +926,27 @@ function openSettings(): void {
 }
 
 function closeSettings(): void {
+  closeMenuDialogs();
+  settingsBtn.focus();
+}
+
+/** Hide the menu's settings and difficulty dialogs, e.g. when a game or an
+ *  online flow takes over while one is still open. */
+function closeMenuDialogs(): void {
+  if (settingsScreen.style.display !== 'block' && difficultyScreen.style.display !== 'block') return;
   settingsScreen.style.display = 'none';
+  difficultyScreen.style.display = 'none';
   promptScreen.inert = false;
   battleScreen.inert = false;
-  settingsBtn.focus();
 }
 
 settingsBtn.addEventListener('click', openSettings);
 document.getElementById('settings-back-btn')!.addEventListener('click', closeSettings);
-settingsScreen.addEventListener('keydown', event => {
-  if (event.key === 'Escape') closeSettings();
+// On the document, so Escape still works after a click moves focus to <body>.
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  if (settingsScreen.style.display === 'block') closeSettings();
+  else if (difficultyScreen.style.display === 'block') closeDifficulty();
 });
 
 function openDifficulty(): void {
@@ -948,23 +960,16 @@ function openDifficulty(): void {
 }
 
 function closeDifficulty(): void {
-  difficultyScreen.style.display = 'none';
-  promptScreen.inert = false;
-  battleScreen.inert = false;
+  closeMenuDialogs();
+  aiBtn.focus();
 }
 
-document.getElementById('difficulty-back-btn')!.addEventListener('click', () => {
-  closeDifficulty();
-  aiBtn.focus();
-});
-difficultyScreen.addEventListener('keydown', event => {
-  if (event.key === 'Escape') document.getElementById('difficulty-back-btn')!.click();
-});
+document.getElementById('difficulty-back-btn')!.addEventListener('click', closeDifficulty);
 for (const btn of difficultyButtons) {
   btn.addEventListener('click', async () => {
     difficulty = btn.dataset.difficulty as Difficulty;
     try { localStorage.setItem(DIFFICULTY_KEY, difficulty); } catch { /* unavailable */ }
-    closeDifficulty();
+    closeMenuDialogs();
     aiMode = true;
     dailyChallenge = null;
     await initRenderer();
@@ -1695,6 +1700,7 @@ async function startAsyncGame(roomId: string | null, opts: { matchmade?: boolean
   asyncBackBtn.textContent = opts.ranked ? '← Ranked' : '← Matches';
   asyncBackBtn.style.display = 'block';
   closeMatchesList();
+  closeMenuDialogs();
   rankedScreen.hide();
   showScreen('battle');
   onlineLobbyTitle.textContent = opts.ranked ? 'Ranked' : 'Online';
@@ -1786,6 +1792,7 @@ async function startSearch(ranked: boolean): Promise<void> {
   onlineActive = true;
   returnTo = ranked ? 'ranked' : null;
   closeMatchesList();
+  closeMenuDialogs();
   rankedScreen.hide();
   await initRenderer();
   if (version !== searchVersion) return;
@@ -1814,6 +1821,7 @@ function resumeSearch(match: MatchRecord, ranked: boolean): void {
   onlineActive = true;
   returnTo = ranked ? 'ranked' : 'matches';
   closeMatchesList();
+  closeMenuDialogs();
   rankedScreen.hide();
   const version = searchVersion;
   void initRenderer().then(() => {

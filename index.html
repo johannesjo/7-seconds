@@ -162,14 +162,14 @@
     .menu-link:hover { opacity: 1; }
     .difficulty-list { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
     #difficulty-screen .difficulty-option { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; min-height: 64px; text-align: left; }
-    #difficulty-screen .difficulty-option[aria-current="true"] { border: 2px solid var(--color-btn-green-border); }
+    #difficulty-screen .difficulty-option[aria-current="true"] { border-color: var(--color-btn-green-border); box-shadow: inset 0 0 0 1px var(--color-btn-green-border); }
     .difficulty-option strong { font-size: 17px; }
     .difficulty-detail, .difficulty-record { font-size: 13px; color: var(--color-online-status); }
     .difficulty-record:empty { display: none; }
     .settings-list { display: flex; flex-direction: column; gap: 10px; margin: 20px 0 28px; }
     #settings-screen .setting-toggle { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 48px; text-align: left; font-size: 15px; }
-    #settings-screen .setting-toggle[aria-pressed]::after { content: 'Off'; font-size: 13px; opacity: 0.6; }
-    #settings-screen .setting-toggle[aria-pressed="true"]::after { content: 'On'; opacity: 1; font-weight: bold; color: var(--color-btn-green-text); }
+    #settings-screen .setting-toggle[aria-pressed]::after { content: 'Off' / ''; font-size: 13px; opacity: 0.6; }
+    #settings-screen .setting-toggle[aria-pressed="true"]::after { content: 'On' / ''; opacity: 1; font-weight: bold; color: var(--color-btn-green-text); }
     #settings-screen #theme-toggle::after { content: attr(data-value); font-size: 13px; font-weight: bold; }
     #settings-screen .setting-toggle[hidden] { display: none; }
     .legal-links { font-size: 12px; opacity: 0.6; display: flex; gap: 12px; }
