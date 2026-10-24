@@ -235,11 +235,15 @@ describeDb('referee with the database', () => {
     const view = (await call(CY, { action: 'view', id: waiting.id })).body as { battle: { stakes: { win: number; loss: number } } };
     expect(view.battle.stakes).toEqual({ win: 20, loss: -20 });
 
+    // Two real rounds, then Dee concedes: a random board needn't end in any
+    // number of rounds (two lone shielders never do), and the rating is the same.
     let match = paired;
-    for (let round = 1; match.status === 'active' && round <= 40; round++) {
+    for (let round = 1; match.status === 'active' && round <= 2; round++) {
       await ok(CY, { action: 'submit', id: match.id, round, paths: plan(match, 'blue', round) });
       match = await ok(DEE, { action: 'submit', id: match.id, round, paths: plan(match, 'red', round + 50) });
+      if (match.status === 'active') expect(match.current_round).toBe(round + 1);
     }
+    if (match.status === 'active') await ok(DEE, { action: 'forfeit', id: match.id });
     const me = (await call(CY, { action: 'me' })).body as { profile: { games: number; rating: number }; history: { won: boolean; delta: number }[] };
     expect(me.profile.games).toBe(1);
     expect(me.history[0].delta).toBe(me.history[0].won ? 20 : -20);
