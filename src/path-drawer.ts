@@ -5,6 +5,7 @@ import { samplePath, clampPathLength } from './path-orders';
 import { getElevationLevel, mortarCanReach } from './units';
 import { Theme, NIGHT_THEME } from './theme';
 import { MAX_PREDICTION_TIME_S, predictPath, type PathPrediction } from './path-preview';
+import { PinchZoom } from './plan-zoom';
 
 function polylineLength(points: Vec2[]): number {
   let length = 0;
@@ -85,6 +86,17 @@ function resetOrders(unit: Unit): void {
   unit.rocketFired = false;
 }
 
+type Orders = Pick<Unit, 'waypoints' | 'moveTarget' | 'rocketPath' | 'rocketFired'>;
+
+function copyOrders(unit: Unit): Orders {
+  return {
+    waypoints: [...unit.waypoints],
+    moveTarget: unit.moveTarget,
+    rocketPath: unit.rocketPath && [...unit.rocketPath],
+    rocketFired: unit.rocketFired,
+  };
+}
+
 export class PathDrawer {
   private stage: Container;
   private units: Unit[] = [];
@@ -110,6 +122,12 @@ export class PathDrawer {
   onInspectUnit: ((unit: Unit | null) => void) | null = null;
   /** A movement or rocket path was just finished (for UI feedback). */
   onPathDrawn: (() => void) | null = null;
+  /** Pinch zoom became available for this planning phase (map shown small). */
+  onZoomAvailable: (() => void) | null = null;
+  private zoom: PinchZoom | null = null;
+  /** The pointer drawing the current stroke, and the orders it replaced. */
+  private strokePointer: number | null = null;
+  private strokeBackup: { unit: Unit; orders: Orders } | null = null;
   private inspectedUnit: Unit | null = null;
   private predictionCache = new WeakMap<Unit, {
     points: Vec2[];
@@ -144,6 +162,10 @@ export class PathDrawer {
     if (canvas) {
       this.canvas = canvas;
       this.canvas.addEventListener('contextmenu', this.onContextMenu);
+      this.zoom = new PinchZoom(canvas, stage);
+      this.zoom.onAvailable = () => this.onZoomAvailable?.();
+      this.zoom.onGestureStart = this.cancelStroke;
+      window.addEventListener('pointercancel', this.onPointerCancel);
     }
 
     // Make stage interactive for canvas-wide pointer events
@@ -376,12 +398,18 @@ export class PathDrawer {
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rawPoints = [];
+    this.strokePointer = null;
+    this.strokeBackup = null;
     this.predictionCache = new WeakMap();
+    this.zoom?.attach();
     this.renderPaths();
   }
 
   disable(): void {
     this.enabled = false;
+    this.zoom?.detach();
+    this.strokePointer = null;
+    this.strokeBackup = null;
     this.team = null;
     this.selectedUnit = null;
     this.hoveredUnit = null;
@@ -662,6 +690,7 @@ export class PathDrawer {
 
   destroy(): void {
     this.enabled = false;
+    this.zoom?.detach();
     this.inspectedUnit = null;
     this.onInspectUnit?.(null);
     this.stage.off('pointerdown', this.onPointerDown);
@@ -671,6 +700,7 @@ export class PathDrawer {
     this.stage.off('rightdown', this.onRightDown);
     if (this.canvas) {
       this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+      window.removeEventListener('pointercancel', this.onPointerCancel);
     }
     this.stage.removeChild(this.gfx);
     this.stage.removeChild(this.hoverGfx);
@@ -723,10 +753,39 @@ export class PathDrawer {
     return this.stage.toLocal(global);
   }
 
-  private onPointerDown = (e: { global: { x: number; y: number }; button?: number }): void => {
+  /** A second finger landed mid-stroke (a pinch): drop the stroke and give
+   *  the unit back the orders it had before. */
+  private cancelStroke = (): void => {
+    const backup = this.strokeBackup;
+    if (backup) Object.assign(backup.unit, backup.orders);
+    this.strokeBackup = null;
+    this.strokePointer = null;
+    this.selectedUnit = null;
+    this.hoveredUnit = null;
+    this.hoveredEnemy = null;
+    this.rocketUnit = null;
+    this.rawPoints = [];
+    this.rawRocket = [];
+    this.renderPaths();
+  };
+
+  /** The OS took the drawing finger away (e.g. a system gesture). */
+  private onPointerCancel = (e: PointerEvent): void => {
+    if (this.enabled && e.pointerId === this.strokePointer) this.cancelStroke();
+  };
+
+  /** Pointer input the drawer should skip: a pinch, or another finger than
+   *  the one drawing. */
+  private ignorePointer(pointerId: number | undefined): boolean {
+    if (this.zoom?.gesturing) return true;
+    return this.strokePointer !== null && pointerId !== this.strokePointer;
+  }
+
+  private onPointerDown = (e: { global: { x: number; y: number }; button?: number; pointerId?: number }): void => {
     if (!this.enabled || !this.team) return;
     // Ignore right clicks for path drawing
     if (e.button === 2) return;
+    if (this.ignorePointer(e.pointerId)) return;
     const pos = this.toLocal(e.global);
 
     const rocketeer = this.findRocketHandle(pos.x, pos.y);
@@ -734,6 +793,8 @@ export class PathDrawer {
       this.hoveredEnemy = null;
       this.hoveredUnit = rocketeer;
       this.rocketUnit = rocketeer;
+      this.strokePointer = e.pointerId ?? null;
+      this.strokeBackup = { unit: rocketeer, orders: copyOrders(rocketeer) };
       rocketeer.rocketPath = [];
       rocketeer.rocketFired = false;
       this.rawRocket = [{ ...launchPoint(rocketeer) }];
@@ -746,6 +807,8 @@ export class PathDrawer {
       this.hoveredEnemy = null;
       this.hoveredUnit = closest;
       this.selectedUnit = closest;
+      this.strokePointer = e.pointerId ?? null;
+      this.strokeBackup = { unit: closest, orders: copyOrders(closest) };
       resetOrders(closest);
       this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
       this.renderPaths();
@@ -759,8 +822,9 @@ export class PathDrawer {
     this.renderHoverLayer();
   };
 
-  private onPointerMove = (e: { global: { x: number; y: number } }): void => {
+  private onPointerMove = (e: { global: { x: number; y: number }; pointerId?: number }): void => {
     if (!this.enabled) return;
+    if (this.ignorePointer(e.pointerId)) return;
     const pos = this.toLocal(e.global);
 
     // Update hover state
@@ -790,8 +854,11 @@ export class PathDrawer {
     }
   };
 
-  private onPointerUp = (): void => {
+  private onPointerUp = (e: { pointerId?: number }): void => {
     if (!this.enabled) return;
+    if (this.strokePointer !== null && e.pointerId !== this.strokePointer) return;
+    this.strokePointer = null;
+    this.strokeBackup = null;
     if (this.rocketUnit) {
       const unit = this.rocketUnit;
       const sampled = samplePath(this.rawRocket, PATH_SAMPLE_DISTANCE).slice(1);

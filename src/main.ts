@@ -212,6 +212,17 @@ function tutorialSeen(): boolean {
 function markTutorialSeen(): void {
   try { localStorage.setItem(TUTORIAL_SEEN_KEY, '1'); } catch { /* storage unavailable */ }
 }
+
+const ZOOM_HINT_KEY = '7s-zoom-hint-seen';
+
+/** The first time a map is shown small enough for pinch zoom, say so. */
+function showZoomHint(): void {
+  try {
+    if (localStorage.getItem(ZOOM_HINT_KEY) !== null) return;
+    localStorage.setItem(ZOOM_HINT_KEY, '1');
+  } catch { return; }
+  showToast('Pinch with two fingers to zoom in');
+}
 let retryEncounter: { state: OnlineGameState; seed: number } | null = null;
 let canRetryEncounter = false;
 /** The current vs-AI battle is a retry of an earlier one: practice, not stats. */
@@ -595,6 +606,7 @@ async function initRenderer(): Promise<void> {
   await renderer.init(pixiContainer);
   renderer.effects!.onCue = handleFeedbackCue;
   renderer.onPathDrawn = () => audio.play('draw');
+  renderer.onZoomAvailable = showZoomHint;
 }
 
 function showPreview(): void {
@@ -1475,6 +1487,7 @@ function asyncHooks(): AsyncGameHooks {
       playbackPathDrawer = new PathDrawer(renderer!.stage, renderer!.canvas);
       playbackPathDrawer.onInspectUnit = showUnitInfo;
       playbackPathDrawer.onPathDrawn = () => audio.play('draw');
+      playbackPathDrawer.onZoomAvailable = showZoomHint;
       playbackPathDrawer.enable(myTeam, playbackUnits, playbackElevationZones);
 
       planningLabel.textContent = 'Your Planning';

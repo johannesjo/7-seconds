@@ -25,6 +25,7 @@ export class Renderer {
   private baseZoneGraphics: Graphics | null = null;
   /** Called whenever any path drawer finishes a path. */
   onPathDrawn: (() => void) | null = null;
+  onZoomAvailable: (() => void) | null = null;
   /** Camera: zoom eases toward its target around `focus`; shake decays. */
   private camera = { zoom: 1, targetZoom: 1, focus: { x: 0, y: 0 }, shake: 0, active: false };
 
@@ -760,6 +761,7 @@ export class Renderer {
     const drawer = new PathDrawer(this.app.stage, this.app.canvas, onZoneHighlight);
     drawer.theme = this.currentTheme;
     drawer.onPathDrawn = () => this.onPathDrawn?.();
+    drawer.onZoomAvailable = () => this.onZoomAvailable?.();
     return drawer;
   }
 
