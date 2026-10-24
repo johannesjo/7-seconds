@@ -2,10 +2,10 @@
 // order, each in a single transaction together with its history row. Usage:
 //   SUPABASE_DB_URL=postgresql://… node scripts/apply-migrations.mjs [--dry-run]
 //
-// Why not `supabase db push`: the project is shared with Imperial Battleground,
-// whose migrations the CLI would see as unknown remote versions, and 0001–0003
-// were applied by hand before any history existed. This runner keeps its own
-// history in a schema the Data API doesn't expose (seven_private), and treats a
+// Why not `supabase db push`: this project originally shared a database with
+// Imperial Battleground, and 0001–0003 were applied by hand before any history
+// existed. Preserve that history after separating the projects. This runner keeps
+// its own history in a schema the Data API doesn't expose (seven_private), and treats a
 // changed file that was already applied as an error: applied migrations are
 // immutable, so add a new one instead. Needs psql; uses Node built-ins only.
 import { createHash } from 'node:crypto';

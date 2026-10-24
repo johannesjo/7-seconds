@@ -2,8 +2,8 @@
 
 The web game is published to GitHub Pages; the Android app is a Capacitor
 shell that loads that site (`capacitor.config.ts`, `server.url`). Online play
-runs on the Supabase project `puoxmqovckvfoqyihasl`, shared with Imperial
-Battleground (whose objects are all prefixed `ib_`).
+runs on its dedicated Supabase project `puoxmqovckvfoqyihasl`. Imperial
+Battleground uses a separate project and separate deployment credentials.
 
 ## On every push to `main`
 
@@ -30,7 +30,8 @@ row in `seven_private.schema_migrations`. On first run it records 0001–0003
 as already applied (they were applied by hand, and are detected by the
 objects they created), then applies 0004. Applied migrations are immutable:
 editing one fails the run; add a new one instead. `supabase db push` is not
-used, because the CLI would trip over Imperial Battleground's history.
+used: this project's existing migration history is maintained by the custom
+runner, including migrations originally applied by hand.
 
 Run it by hand: `SUPABASE_DB_URL=… npm run db:migrate -- --dry-run`, then
 without `--dry-run`. Or start "Deploy Supabase backend" from the Actions tab
@@ -47,7 +48,7 @@ and the site is not updated.
 
    | Secret | Value |
    | --- | --- |
-   | `SUPABASE_DB_URL` | Dashboard → **Connect** → **Session pooler** connection string, with the database password. GitHub runners have no IPv6, so the direct `db.<ref>.supabase.co` host does not work. The same value Imperial Battleground uses. |
+   | `SUPABASE_DB_URL` | This project's Dashboard → **Connect** → **Session pooler** connection string, with the database password percent-encoded. GitHub runners have no IPv6, so the direct `db.<ref>.supabase.co` host does not work. Do not use Imperial Battleground's connection string. |
    | `SUPABASE_ACCESS_TOKEN` | A personal access token from Supabase **Account → Access Tokens**. |
 
    Restrict the `supabase-production` environment's deployment branches to
