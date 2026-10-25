@@ -33,7 +33,7 @@ android {
         applicationId "io.github.johannesjo.sevenseconds"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 6
+        versionCode 8
         versionName "1.5.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resValue 'string', 'ranked_google_web_client_id', rankedGoogleWebClientId
