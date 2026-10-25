@@ -78,6 +78,14 @@ export function generateHordeElevationZones(): ElevationZone[] {
   const spawnY = randomInRange(spawnYMin, Math.max(spawnYMin + 1, spawnYMax));
   zones.push({ x: spawnX, y: spawnY, w: spawnW, h: spawnH });
 
+  // A hill up in the horde's half (y: 0.06–0.20), far enough from blue's
+  // spawn for the sniper nest modifier to dig in on it
+  const nestW = randomInRange(90, 140);
+  const nestH = randomInRange(50, 70);
+  const nestX = randomInRange(50, MAP_WIDTH - 50 - nestW);
+  const nestY = randomInRange(Math.round(MAP_HEIGHT * 0.06), Math.round(MAP_HEIGHT * 0.20) - nestH);
+  zones.push({ x: nestX, y: nestY, w: nestW, h: nestH });
+
   // 1-3 additional zones further up (y: 0.30–0.70)
   const extra = randomInRange(1, 4); // 1-3
   for (let i = 0; i < extra; i++) {

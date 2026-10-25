@@ -212,6 +212,14 @@ function createUnitFromState(s) {
   return unit;
 }
 function nudgeOutOfBlocks(pos, blocks, padding = 4) {
+  for (let pass = 0; pass < 4; pass++) {
+    const next = nudgeOutOfFirstBlock(pos, blocks, padding);
+    if (next === pos) break;
+    pos = next;
+  }
+  return pos;
+}
+function nudgeOutOfFirstBlock(pos, blocks, padding) {
   for (const b of blocks) {
     const left = b.x - padding;
     const right = b.x + b.w + padding;

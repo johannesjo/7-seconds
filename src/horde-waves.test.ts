@@ -4,7 +4,8 @@ import {
   waveComposition, waveScore, describePlan, spawnHordeWave, type HordeWavePlan, type WaveModifierId,
 } from './horde-waves';
 import { HORDE_WAVES } from './horde';
-import { HORDE_MAX_WAVES, MAP_WIDTH, MAP_HEIGHT, UNIT_STATS, setMapSize } from './constants';
+import { HORDE_MAX_WAVES, MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, UNIT_STATS, setMapSize } from './constants';
+import { generateHordeElevationZones, generateHordeObstacles } from './battlefield';
 import { createRng } from './rng';
 
 const count = (comp: { type: string; count: number }[], type: string) =>
@@ -166,6 +167,17 @@ describe('spawnHordeWave', () => {
     const onHill = units.filter(u => u.type === 'sniper'
       && u.pos.x >= hill.x && u.pos.x <= hill.x + hill.w && u.pos.y >= hill.y && u.pos.y <= hill.y + hill.h);
     expect(onHill).toHaveLength(2);
+  });
+
+  it('finds a nest hill on every generated map of the standard size', () => {
+    setMapSize(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
+    for (let i = 0; i < 50; i++) {
+      const zones = generateHordeElevationZones();
+      const units = spawnHordeWave(plan(6, ['sniper_nest']), generateHordeObstacles(), zones);
+      const nested = units.filter(u => u.type === 'sniper'
+        && zones.some(z => u.pos.x >= z.x && u.pos.x <= z.x + z.w && u.pos.y >= z.y && u.pos.y <= z.y + z.h));
+      expect(nested).toHaveLength(2);
+    }
   });
 
   it('applies armored and frenzy to enemy stats', () => {

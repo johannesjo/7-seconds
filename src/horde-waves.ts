@@ -198,6 +198,8 @@ const FLANK_COLUMN_GAP = 28;
 const FLANK_MAX_ROWS = 12;
 /** Flank columns stay within this share of the map width on each side. */
 const FLANK_MAX_WIDTH = 0.3;
+/** Flank bands end at least this far above blue's front spawn row. */
+const FLANK_SPAWN_CLEARANCE = 170;
 
 /** Line units up in columns along the left and right edges within a band of the map. */
 function placeOnFlanks(units: Unit[], yMinFrac: number, yMaxFrac: number, blocks: Obstacle[]): void {
@@ -280,9 +282,11 @@ export function spawnHordeWave(plan: HordeWavePlan, blocks: Obstacle[], elevatio
     : [];
   placeSniperNest(nest, elevationZones, blocks, blueCount);
   const movable = units.filter(u => !nest.includes(u));
-  if (mods.has('flank')) placeOnFlanks(movable, 0.2, 0.65, blocks);
+  // Flankers stop short of a big squad's forward rows, as they do of a single row.
+  const bandEnd = Math.min(0.65, (blueSpawnFrontY(blueCount) - FLANK_SPAWN_CLEARANCE) / MAP_HEIGHT);
+  if (mods.has('flank')) placeOnFlanks(movable, 0.2, Math.max(0.3, bandEnd), blocks);
   // Only melee units ambush, so nobody can shoot blue before it has moved.
-  if (mods.has('ambush')) placeOnFlanks(movable.filter(u => MELEE_TYPES.has(u.type)).filter((_, i) => i % 2 === 1), 0.45, 0.65, blocks);
+  if (mods.has('ambush')) placeOnFlanks(movable.filter(u => MELEE_TYPES.has(u.type)).filter((_, i) => i % 2 === 1), bandEnd - 0.2, bandEnd, blocks);
 
   if (plan.boss) units.push(createBoss(plan.boss, plan.wave, blocks));
   applyEnemyStats(units, plan);

@@ -167,11 +167,11 @@ describe('generateHordeObstacles', () => {
 });
 
 describe('generateHordeElevationZones', () => {
-  it('generates 2-4 zones', () => {
+  it('generates 3-5 zones', () => {
     for (let i = 0; i < 20; i++) {
       const zones = generateHordeElevationZones();
-      expect(zones.length).toBeGreaterThanOrEqual(2);
-      expect(zones.length).toBeLessThanOrEqual(4);
+      expect(zones.length).toBeGreaterThanOrEqual(3);
+      expect(zones.length).toBeLessThanOrEqual(5);
     }
   });
 
@@ -189,9 +189,15 @@ describe('generateHordeElevationZones', () => {
       for (const z of zones) {
         expect(z.x).toBeGreaterThanOrEqual(50);
         expect(z.x + z.w).toBeLessThanOrEqual(MAP_WIDTH - 50);
-        expect(z.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.30);
+        expect(z.y).toBeGreaterThanOrEqual(MAP_HEIGHT * 0.06);
         expect(z.y + z.h).toBeLessThanOrEqual(MAP_HEIGHT * 0.85);
       }
+    }
+  });
+
+  it('always has a hill up in the horde\'s half (y + h <= MAP_HEIGHT * 0.20)', () => {
+    for (let i = 0; i < 20; i++) {
+      expect(generateHordeElevationZones().some(z => z.y + z.h <= MAP_HEIGHT * 0.20)).toBe(true);
     }
   });
 });
