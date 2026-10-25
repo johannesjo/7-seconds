@@ -1,14 +1,27 @@
 -- Stand-ins for what a Supabase project provides, so the migrations and
 -- supabase/tests/referee.sql can run against a plain PostgreSQL 16 database.
--- Used only by src/referee-sql.test.ts.
+-- Loaded into each test database by tests/pg.ts.
 
--- Roles belong to the whole cluster, so an earlier test database may have made them.
-do $$ begin
-  if not exists (select from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select from pg_roles where rolname = 'service_role') then create role service_role nologin bypassrls; end if;
+-- Roles belong to the whole cluster, so an earlier test database may have made
+-- them, or a test file running in parallel may be making them right now: both
+-- can pass the exists check, and the loser then fails with a unique violation.
+do $$
+declare
+  r record;
+begin
+  for r in select * from (values ('anon', 'nologin'), ('authenticated', 'nologin'), ('service_role', 'nologin bypassrls')) as t(name, options) loop
+    begin
+      if not exists (select from pg_roles where rolname = r.name) then
+        execute format('create role %I %s', r.name, r.options);
+      end if;
+    exception when duplicate_object or unique_violation then null;
+    end;
+    begin
+      execute format('grant %I to current_user', r.name);
+    exception when unique_violation then null;
+    end;
+  end loop;
 end $$;
-grant anon, authenticated, service_role to current_user;
 
 create schema auth;
 grant usage on schema auth to anon, authenticated, service_role;
