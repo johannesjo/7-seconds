@@ -312,4 +312,33 @@ describe('cinematic final kill', () => {
     expect(plain.calls).not.toContain('renderer.focusCamera');
     expect(cinematic.calls).toContain('renderer.resetCamera');
   });
+
+  it('plays the last kill of a horde wave in slow motion before the wave clears', () => {
+    const clearAfter = (cinematic: boolean) => {
+      const calls: string[] = [];
+      let clearedAtFrame = -1;
+      let frame = 0;
+      const eng = new GameEngine(stubRenderer(calls), (event) => {
+        if (event === 'wave-clear' && clearedAtFrame < 0) clearedAtFrame = frame;
+      }, {
+        aiMode: true, horde: true, seed: 1, cinematic,
+        hordeBlueUnits: [createUnit('blue_soldier_0', 'soldier', 'blue', { x: 300, y: 700 })],
+        hordeRedUnits: [createUnit('red_zombie_0', 'zombie', 'red', { x: 300, y: 100 })],
+        hordeMap: { obstacles: [], elevationZones: [] },
+      });
+      eng.startBattle();
+      eng.confirmPlan();
+      const red = eng.getUnits().find(u => u.team === 'red')!;
+      (eng as unknown as { noteKill(p: { x: number; y: number }): void }).noteKill(red.pos);
+      red.alive = false;
+      for (; frame < 200 && clearedAtFrame < 0; frame++) eng.externalTick(1000 / 60);
+      return { calls, clearedAtFrame };
+    };
+    const plain = clearAfter(false);
+    const cinematic = clearAfter(true);
+    expect(plain.clearedAtFrame).toBeGreaterThanOrEqual(0);
+    expect(cinematic.clearedAtFrame).toBeGreaterThan(plain.clearedAtFrame + 30);
+    expect(cinematic.calls).toContain('renderer.focusCamera');
+    expect(cinematic.calls).toContain('renderer.resetCamera');
+  });
 });
