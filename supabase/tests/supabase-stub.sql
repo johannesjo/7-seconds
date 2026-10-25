@@ -7,17 +7,18 @@
 -- can pass the exists check, and the loser then fails with a unique violation.
 do $$
 declare
-  r record;
+  role_name text;
 begin
-  for r in select * from (values ('anon', 'nologin'), ('authenticated', 'nologin'), ('service_role', 'nologin bypassrls')) as t(name, options) loop
+  foreach role_name in array array['anon', 'authenticated', 'service_role'] loop
     begin
-      if not exists (select from pg_roles where rolname = r.name) then
-        execute format('create role %I %s', r.name, r.options);
+      if not exists (select from pg_roles where rolname = role_name) then
+        execute format('create role %I nologin', role_name)
+          || case when role_name = 'service_role' then ' bypassrls' else '' end;
       end if;
     exception when duplicate_object or unique_violation then null;
     end;
     begin
-      execute format('grant %I to current_user', r.name);
+      execute format('grant %I to current_user', role_name);
     exception when unique_violation then null;
     end;
   end loop;
