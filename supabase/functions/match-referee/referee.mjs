@@ -1367,6 +1367,8 @@ var GameEngine = class _GameEngine {
   endingBattle = false;
   endDelayTimer = 0;
   pendingWinner = null;
+  /** Horde: the wave is cleared and waits for the final-kill moment to finish. */
+  pendingWaveClear = false;
   hordeMode = false;
   hordeStartDelay = 0;
   hordeBlueUnits = null;
@@ -1587,7 +1589,8 @@ var GameEngine = class _GameEngine {
       this.endDelayTimer -= rawDt;
       this.renderer?.effects?.update(animDt);
       if (this.endDelayTimer <= 0) {
-        this.endBattle(this.pendingWinner);
+        if (this.pendingWaveClear) this.finishWaveClear();
+        else this.endBattle(this.pendingWinner);
       }
       return;
     }
@@ -1881,13 +1884,14 @@ var GameEngine = class _GameEngine {
     const redAlive2 = this.units.filter((u) => u.alive && u.team === "red").length;
     if (blueAlive2 === 0 || redAlive2 === 0) {
       if (redAlive2 === 0 && blueAlive2 > 0 && this.hordeMode) {
-        this.running = false;
-        this.renderer?.ticker.remove(this.tick, this);
         this.projectiles = [];
         this.renderer?.renderProjectiles([]);
-        this.pathDrawer?.disable();
-        this.pathDrawer?.clearGraphics();
-        this.onEvent("wave-clear");
+        if (this.startFinalKillMoment()) {
+          this.endingBattle = true;
+          this.pendingWaveClear = true;
+        } else {
+          this.finishWaveClear();
+        }
         return true;
       }
       this.endingBattle = true;
@@ -2174,10 +2178,21 @@ var GameEngine = class _GameEngine {
   }
   /** Slow the battle's last moment down and push the camera in on it. */
   startFinalKillMoment() {
-    if (!this.cinematic || !this.renderer || this.lockstepMode || !this.lastKillPos) return;
+    if (!this.cinematic || !this.renderer || this.lockstepMode || !this.lastKillPos) return false;
     this.finalSlowMo = true;
     this.endDelayTimer = FINAL_KILL.delay;
     this.renderer.focusCamera(this.lastKillPos, FINAL_KILL.zoom);
+    return true;
+  }
+  finishWaveClear() {
+    this.running = false;
+    this.endingBattle = false;
+    this.pendingWaveClear = false;
+    this.renderer?.ticker.remove(this.tick, this);
+    this.pathDrawer?.disable();
+    this.pathDrawer?.clearGraphics();
+    this.renderer?.resetCamera();
+    this.onEvent("wave-clear");
   }
   consumeSlowMo(rawDt) {
     if (this.slowMoTimer <= 0) return 1;

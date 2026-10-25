@@ -32,6 +32,7 @@ export class Renderer {
   onZoomAvailable: (() => void) | null = null;
   /** Camera: zoom eases toward its target around `focus`; shake decays. */
   private camera = { zoom: 1, targetZoom: 1, focus: { x: 0, y: 0 }, shake: 0, active: false };
+  private resizeObserver: ResizeObserver | null = null;
 
 
   constructor() {
@@ -51,7 +52,10 @@ export class Renderer {
     });
     container.appendChild(this.app.canvas);
     this.fitToContainer();
-    window.addEventListener('resize', this.onWindowResize);
+    // Watch the container, not the window: it also changes size when its
+    // screen is first shown or the layout around it shifts.
+    this.resizeObserver = new ResizeObserver(this.onContainerResize);
+    this.resizeObserver.observe(container);
     this.drawBackground();
     this._effects = new EffectsManager(this.app.stage, this.app.renderer);
     this.app.ticker.add(this.updateCamera, this);
@@ -74,7 +78,7 @@ export class Renderer {
     canvas.style.height = `${MAP_HEIGHT * scale}px`;
   }
 
-  private onWindowResize = (): void => {
+  private onContainerResize = (): void => {
     // Skip while the container has no size (not laid out yet)
     if (this.app.canvas.parentElement?.clientWidth) this.fitToContainer();
   };
@@ -819,7 +823,7 @@ export class Renderer {
   }
 
   destroy(): void {
-    window.removeEventListener('resize', this.onWindowResize);
+    this.resizeObserver?.disconnect();
     this.unitGraphics.clear();
     this.bladeSpinAngles.clear();
     this.app.destroy(true);
