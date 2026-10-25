@@ -1,5 +1,5 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
-import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, ROCKET_MAX_PATH } from './constants';
+import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, ROCKET_MAX_PATH } from './constants';
 import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELEVATION_ZONES } from './online-types';
 import { createArmy, generateRandomComposition, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateBattlefield, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
@@ -140,6 +140,13 @@ export class GameEngine {
   }
 
   startBattle(): void {
+
+    // New battles are fought on the standard map, even after an online match
+    // recorded on another size
+    if (!this.initialState && (MAP_WIDTH !== STANDARD_MAP_WIDTH || MAP_HEIGHT !== STANDARD_MAP_HEIGHT)) {
+      setMapSize(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
+      this.renderer?.adaptToRemoteMap(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
+    }
 
     // Load map before spawning units so we can avoid placing them inside blocks
     if (this.initialState) {
@@ -880,6 +887,9 @@ export class GameEngine {
   /** Load full game state from an OnlineGameState snapshot (for guest sync).
    *  Caps array sizes defensively — the snapshot comes from an untrusted peer. */
   loadOnlineGameState(state: OnlineGameState): void {
+    // The simulation runs on the map the state was recorded on (the referee
+    // has no screen and resolves matches of any size)
+    setMapSize(state.mapWidth, state.mapHeight);
     this.obstacles = state.obstacles.slice(0, MAX_ONLINE_OBSTACLES);
     this.elevationZones = state.elevationZones.slice(0, MAX_ONLINE_ELEVATION_ZONES);
     this.units = state.units.slice(0, MAX_ONLINE_UNITS).map(u => createUnitFromState(u));

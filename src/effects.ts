@@ -636,8 +636,10 @@ export class EffectsManager {
   private bakeStains(): void {
     if (!this.pixiRenderer || this.groundStains.context.instructions.length === 0) return;
     let tex = this.stainTexture;
-    // Map size can change between battles (online map adaptation)
-    if (!tex || tex.width !== MAP_WIDTH || tex.height !== MAP_HEIGHT) {
+    // Map size can change between battles (online map adaptation), and the
+    // render resolution with the window size
+    if (!tex || tex.width !== MAP_WIDTH || tex.height !== MAP_HEIGHT
+      || tex.source.resolution !== this.pixiRenderer.resolution) {
       this.resetStainTexture();
       // No MSAA: it would resolve the whole map-sized buffer on every bake,
       // and soft low-alpha stains don't visibly need it.

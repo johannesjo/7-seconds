@@ -5,9 +5,16 @@ const MIN_MAP_HEIGHT = 620;
 const MAX_MAP_WIDTH = 1000;
 const MAX_MAP_HEIGHT = 1000;
 
-export let MAP_WIDTH = MAX_MAP_WIDTH;
-export let MAP_HEIGHT = MAX_MAP_HEIGHT;
+/** Every battle is fought on this map, whatever the screen: the renderer scales
+ *  it to fit, so ranges, speeds and layouts play the same on every device. */
+export const STANDARD_MAP_WIDTH = 450;
+export const STANDARD_MAP_HEIGHT = 800;
 
+export let MAP_WIDTH = STANDARD_MAP_WIDTH;
+export let MAP_HEIGHT = STANDARD_MAP_HEIGHT;
+
+/** Switch to another map size, for a match recorded on one (online state
+ *  carries its own size). */
 export function setMapSize(w: number, h: number): void {
   MAP_WIDTH = Math.max(MIN_MAP_WIDTH, Math.min(MAX_MAP_WIDTH, w));
   MAP_HEIGHT = Math.max(MIN_MAP_HEIGHT, Math.min(MAX_MAP_HEIGHT, h));

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { MAP_HEIGHT, MAP_WIDTH, setMapSize } from './constants';
+import { MAP_HEIGHT, MAP_WIDTH, STANDARD_MAP_HEIGHT, STANDARD_MAP_WIDTH, setMapSize } from './constants';
 import { GameEngine } from './game';
 import { createTutorialEncounter, tutorialObjectiveMet } from './tutorial';
 import type { PathList } from './online-async-core';
@@ -60,9 +60,9 @@ function playLesson(lesson: number, width: number, height: number, planned: bool
   return outcome;
 }
 
+// Battles are always on the standard map now, whatever the screen
 describe.each([
-  [360, 620],
-  [1000, 1000],
+  [STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT],
 ])('tutorial encounter at %ix%i', (width, height) => {
   it.each([0, 1, 2, 3])('lesson %i succeeds with its intended plan and stationary red opponents', lesson => {
     const result = playLesson(lesson, width, height, true);

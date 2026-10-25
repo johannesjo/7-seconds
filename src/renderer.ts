@@ -1,10 +1,14 @@
 import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
 import { PathDrawer } from './path-drawer';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS, MORTAR_BLAST_RADIUS } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS, MORTAR_BLAST_RADIUS } from './constants';
 import { EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
+
+/** Highest render resolution (device pixels per map pixel): sharp on phones
+ *  without a huge canvas to draw and record on big screens. */
+const MAX_RESOLUTION = 2;
 
 export class Renderer {
   private app: Application;
@@ -35,9 +39,7 @@ export class Renderer {
   }
 
   async init(container: HTMLElement): Promise<void> {
-    const containerW = container.clientWidth || window.innerWidth;
-    const containerH = container.clientHeight || window.innerHeight;
-    setMapSize(Math.min(containerW, 1000), Math.min(containerH, 1000));
+    setMapSize(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
 
     await this.app.init({
       width: MAP_WIDTH,
@@ -48,14 +50,34 @@ export class Renderer {
       preference: 'webgl',
     });
     container.appendChild(this.app.canvas);
-    const scale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
-    const canvas = this.app.canvas;
-    canvas.style.width = `${MAP_WIDTH * scale}px`;
-    canvas.style.height = `${MAP_HEIGHT * scale}px`;
+    this.fitToContainer();
+    window.addEventListener('resize', this.onWindowResize);
     this.drawBackground();
     this._effects = new EffectsManager(this.app.stage, this.app.renderer);
     this.app.ticker.add(this.updateCamera, this);
   }
+
+  /**
+   * Show the whole map as large as the container allows, keeping its shape
+   * (the container's leftover space stays empty). The map keeps its logical
+   * size; only the pixel density follows the screen so it stays sharp.
+   */
+  fitToContainer(): void {
+    const canvas = this.app.canvas;
+    const container = canvas.parentElement;
+    const containerW = container?.clientWidth || window.innerWidth;
+    const containerH = container?.clientHeight || window.innerHeight;
+    const scale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
+    const resolution = Math.min(MAX_RESOLUTION, Math.max(1, scale * (window.devicePixelRatio || 1)));
+    this.app.renderer.resize(MAP_WIDTH, MAP_HEIGHT, resolution);
+    canvas.style.width = `${MAP_WIDTH * scale}px`;
+    canvas.style.height = `${MAP_HEIGHT * scale}px`;
+  }
+
+  private onWindowResize = (): void => {
+    // A hidden battle screen has no size to fit; it refits when shown.
+    if (this.app.canvas.parentElement?.clientWidth) this.fitToContainer();
+  };
 
   /** Jolt the view; strength is in map pixels and stacks up to a cap. */
   shake(strength: number): void {
@@ -779,36 +801,19 @@ export class Renderer {
     return this.app.ticker;
   }
 
-  /**
-   * Adapt the renderer to display a remote map size (e.g. host's map on guest's screen).
-   * Scales the stage to fit the remote map, centers it, and shows black bars for extra space.
-   */
+  /** Switch to the map size a match was recorded on (online state carries
+   *  its own) and refit the canvas to it. */
   adaptToRemoteMap(remoteWidth: number, remoteHeight: number): void {
-    // Update logical map dimensions first
     setMapSize(remoteWidth, remoteHeight);
-
-    // Resize the renderer to match the remote map (1:1 internal pixels)
-    this.app.renderer.resize(MAP_WIDTH, MAP_HEIGHT);
-
-    // Fit the canvas CSS size within the container without stretching
-    const container = this.app.canvas.parentElement;
-    const containerW = container?.clientWidth || window.innerWidth;
-    const containerH = container?.clientHeight || window.innerHeight;
-    const cssScale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
-    this.app.canvas.style.width = `${MAP_WIDTH * cssScale}px`;
-    this.app.canvas.style.height = `${MAP_HEIGHT * cssScale}px`;
-
-    // Reset stage transform — no internal scaling needed since renderer
-    // now matches the remote map dimensions exactly
+    this.fitToContainer();
     this.resetCamera();
     this.app.stage.scale.set(1);
     this.app.stage.position.set(0, 0);
-
-    this.app.renderer.background.color = 0x000000;
     this.drawBackground();
   }
 
   destroy(): void {
+    window.removeEventListener('resize', this.onWindowResize);
     this.unitGraphics.clear();
     this.bladeSpinAngles.clear();
     this.app.destroy(true);

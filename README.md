@@ -18,6 +18,8 @@
 
 Terrain matters: elevation grants range bonuses, obstacles block movement and line of sight, and flanking deals extra damage.
 
+Every battle is fought on the same 450×800 map, whatever the device; the board is scaled to fit the screen, so ranges and distances play the same everywhere.
+
 ## Game Modes
 
 - **Play vs AI** — Single player against AI opponents; pick Easy, Normal or Hard after tapping Play (Easy gives the AI one unit fewer and looser planning; Hard gives it an extra soldier). Your win/loss record and streak are kept per difficulty.
