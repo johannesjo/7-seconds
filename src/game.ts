@@ -52,6 +52,8 @@ export class GameEngine {
   private endingBattle = false;
   private endDelayTimer = 0;
   private pendingWinner: Team | null = null;
+  /** Horde: the wave is cleared and waits for the final-kill moment to finish. */
+  private pendingWaveClear = false;
   private hordeMode = false;
   private hordeStartDelay = 0;
   private hordeBlueUnits: Unit[] | null = null;
@@ -343,7 +345,8 @@ export class GameEngine {
       this.endDelayTimer -= rawDt;
       this.renderer?.effects?.update(animDt);
       if (this.endDelayTimer <= 0) {
-        this.endBattle(this.pendingWinner!);
+        if (this.pendingWaveClear) this.finishWaveClear();
+        else this.endBattle(this.pendingWinner!);
       }
       return;
     }
@@ -678,14 +681,16 @@ export class GameEngine {
     if (blueAlive === 0 || redAlive === 0) {
       // Wave cleared only if blue survived — a mutual wipe is a horde defeat
       if (redAlive === 0 && blueAlive > 0 && this.hordeMode) {
-        // Wave cleared — don't end the battle, emit wave-clear event
-        this.running = false;
-        this.renderer?.ticker.remove(this.tick, this);
+        // Wave cleared — don't end the battle; play the final kill out, then
+        // emit wave-clear
         this.projectiles = [];
         this.renderer?.renderProjectiles([]);
-        this.pathDrawer?.disable();
-        this.pathDrawer?.clearGraphics();
-        this.onEvent('wave-clear');
+        if (this.startFinalKillMoment()) {
+          this.endingBattle = true;
+          this.pendingWaveClear = true;
+        } else {
+          this.finishWaveClear();
+        }
         return true;
       }
       this.endingBattle = true;
@@ -1008,11 +1013,23 @@ export class GameEngine {
   }
 
   /** Slow the battle's last moment down and push the camera in on it. */
-  private startFinalKillMoment(): void {
-    if (!this.cinematic || !this.renderer || this.lockstepMode || !this.lastKillPos) return;
+  private startFinalKillMoment(): boolean {
+    if (!this.cinematic || !this.renderer || this.lockstepMode || !this.lastKillPos) return false;
     this.finalSlowMo = true;
     this.endDelayTimer = FINAL_KILL.delay;
     this.renderer.focusCamera(this.lastKillPos, FINAL_KILL.zoom);
+    return true;
+  }
+
+  private finishWaveClear(): void {
+    this.running = false;
+    this.endingBattle = false;
+    this.pendingWaveClear = false;
+    this.renderer?.ticker.remove(this.tick, this);
+    this.pathDrawer?.disable();
+    this.pathDrawer?.clearGraphics();
+    this.renderer?.resetCamera();
+    this.onEvent('wave-clear');
   }
 
   private consumeSlowMo(rawDt: number): number {
