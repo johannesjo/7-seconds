@@ -143,7 +143,7 @@ function makeRecruitUpgrade(type: UnitType, rarity: UpgradeRarity = 'common'): H
     rarity,
     apply(units: Unit[], blocks?: Obstacle[]): Unit[] {
       const tag = recruitCounter++;
-      let pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.92 };
+      let pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * BLUE_SPAWN_Y };
       if (blocks) pos = nudgeOutOfBlocks(pos, blocks);
       const newUnit = createUnit(`blue_${type}_r${tag}`, type, 'blue', pos);
       return [...units, newUnit];
@@ -316,17 +316,44 @@ export function healAllBlue(units: Unit[]): void {
   }
 }
 
-/** Reposition blue units in spawn zone, clear movement state. */
+const BLUE_SPACING = 60;
+/** Squads that would need more than BLUE_WIDE_ROWS rows close up to this spacing
+ *  first, so a big squad doesn't stack halfway up the map. */
+const BLUE_TIGHT_SPACING = 36;
+const BLUE_WIDE_ROWS = 2;
+const BLUE_ROW_GAP = 45;
+/** Keeps the outermost unit of a spawn row clear of the map edge. */
+const BLUE_EDGE_MARGIN = 30;
+/** Blue's spawn line, as a share of the map height. */
+export const BLUE_SPAWN_Y = 0.92;
+
+function blueSpawnLayout(count: number): { spacing: number; cols: number; rows: number } {
+  const fit = (spacing: number) => Math.max(1, Math.floor((MAP_WIDTH - 2 * BLUE_EDGE_MARGIN) / spacing) + 1);
+  let spacing = BLUE_SPACING;
+  if (Math.ceil(count / fit(spacing)) > BLUE_WIDE_ROWS) spacing = BLUE_TIGHT_SPACING;
+  const rows = Math.max(1, Math.ceil(count / fit(spacing)));
+  // Spread units evenly over the rows so the last one isn't a lone straggler.
+  return { spacing, cols: Math.max(1, Math.ceil(count / rows)), rows };
+}
+
+/** The y of the spawn row furthest up the map for a squad of this size. */
+export function blueSpawnFrontY(count: number): number {
+  return MAP_HEIGHT * BLUE_SPAWN_Y - BLUE_ROW_GAP * (blueSpawnLayout(count).rows - 1);
+}
+
+/** Reposition blue units in spawn zone, clear movement state. A squad too wide
+ *  for the map wraps into extra rows stacked up from the spawn line. */
 export function repositionBlueUnits(units: Unit[], blocks?: Obstacle[]): void {
   const blueAlive = units.filter(u => u.team === 'blue' && u.alive);
-  const spacing = 60;
-  const groupWidth = spacing * (blueAlive.length - 1);
-  const startX = (MAP_WIDTH - groupWidth) / 2;
-  const baseY = MAP_HEIGHT * 0.92;
+  const { spacing, cols } = blueSpawnLayout(blueAlive.length);
+  const baseY = MAP_HEIGHT * BLUE_SPAWN_Y;
 
   for (let i = 0; i < blueAlive.length; i++) {
     const u = blueAlive[i];
-    let pos = { x: startX + spacing * i, y: baseY };
+    const row = Math.floor(i / cols);
+    const inRow = Math.min(cols, blueAlive.length - row * cols);
+    const startX = (MAP_WIDTH - spacing * (inRow - 1)) / 2;
+    let pos = { x: startX + spacing * (i % cols), y: baseY - BLUE_ROW_GAP * row };
     if (blocks) pos = nudgeOutOfBlocks(pos, blocks);
     u.pos = pos;
     u.waypoints = [];

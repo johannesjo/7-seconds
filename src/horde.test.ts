@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, ALL_UNIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
+import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, ALL_UNIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits, blueSpawnFrontY, BLUE_SPAWN_Y, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { createUnit } from './units';
-import { MAP_HEIGHT, HORDE_MAX_WAVES, SHIELD_MAX_HITS } from './constants';
+import { MAP_HEIGHT, MAP_WIDTH, HORDE_MAX_WAVES, SHIELD_MAX_HITS, setMapSize } from './constants';
 import { Unit } from './types';
 
 describe('HORDE_WAVES', () => {
@@ -144,6 +144,42 @@ describe('repositionBlueUnits', () => {
     expect(units[0].waypoints).toEqual([]);
     expect(units[0].vel).toEqual({ x: 0, y: 0 });
     expect(units[0].moveTarget).toBeNull();
+  });
+
+  it('wraps a big squad into rows that stay on a narrow map', () => {
+    setMapSize(360, 620);
+    try {
+      for (const n of [7, 14, 40]) {
+        const units = Array.from({ length: n }, (_, i) =>
+          createUnit(`blue_soldier_${i}`, 'soldier', 'blue', { x: 0, y: 0 }));
+        repositionBlueUnits(units);
+        for (const u of units) {
+          expect(u.pos.x).toBeGreaterThanOrEqual(u.radius);
+          expect(u.pos.x).toBeLessThanOrEqual(MAP_WIDTH - u.radius);
+          expect(u.pos.y).toBeLessThanOrEqual(MAP_HEIGHT * BLUE_SPAWN_Y);
+          expect(u.pos.y).toBeGreaterThanOrEqual(blueSpawnFrontY(n));
+        }
+        for (let a = 0; a < n; a++) {
+          for (let b = a + 1; b < n; b++) {
+            const d = Math.hypot(units[a].pos.x - units[b].pos.x, units[a].pos.y - units[b].pos.y);
+            expect(d).toBeGreaterThan(units[a].radius + units[b].radius);
+          }
+        }
+      }
+    } finally {
+      setMapSize(1000, 1000);
+    }
+  });
+
+  it('closes up before stacking a big squad deep into the map', () => {
+    setMapSize(360, 620);
+    try {
+      // 6 fit a row at full spacing; 14 would need 3 rows, so they close up into 2.
+      expect(blueSpawnFrontY(6)).toBe(MAP_HEIGHT * BLUE_SPAWN_Y);
+      expect(blueSpawnFrontY(14)).toBe(MAP_HEIGHT * BLUE_SPAWN_Y - 45);
+    } finally {
+      setMapSize(1000, 1000);
+    }
   });
 });
 

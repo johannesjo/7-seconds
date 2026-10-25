@@ -146,6 +146,20 @@ describe('spawnHordeWave', () => {
     }
   });
 
+  it('keeps the nest out of range of a big squad\'s front row', () => {
+    setMapSize(360, 800);
+    try {
+      const hill = { x: 100, y: 200, w: 150, h: 80 };
+      const sniperOnHill = (blueCount: number) => spawnHordeWave(plan(6, ['sniper_nest']), [], [hill], blueCount)
+        .some(u => u.type === 'sniper' && u.pos.y >= hill.y && u.pos.y <= hill.y + hill.h);
+      expect(sniperOnHill(1)).toBe(true);
+      // 40 units stack several rows deep, bringing the hill into range.
+      expect(sniperOnHill(40)).toBe(false);
+    } finally {
+      setMapSize(1000, 1000);
+    }
+  });
+
   it('digs the nest snipers in on the furthest hill up the map', () => {
     const hill = { x: 300, y: 350, w: 200, h: 80 };
     const units = spawnHordeWave(plan(6, ['sniper_nest']), [], [{ x: 100, y: 800, w: 150, h: 60 }, hill]);

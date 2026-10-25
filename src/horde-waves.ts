@@ -1,7 +1,7 @@
 /** Horde wave building: wave modifiers, boss waves, endless waves and pacts. */
 import type { BossId, ElevationZone, Obstacle, Unit, UnitType } from './types';
 import { ELEVATION_RANGE_BONUS, HORDE_MAX_WAVES, MAP_HEIGHT, MAP_WIDTH, UNIT_STATS } from './constants';
-import { HORDE_WAVES } from './horde';
+import { HORDE_WAVES, blueSpawnFrontY } from './horde';
 import { createMissionArmy, createUnit, nudgeOutOfBlocks } from './units';
 
 type Composition = { type: UnitType; count: number }[];
@@ -220,17 +220,16 @@ function placeOnFlanks(units: Unit[], yMinFrac: number, yMaxFrac: number, blocks
   });
 }
 
-/** Blue's spawn line (see repositionBlueUnits). */
-const BLUE_SPAWN_Y = 0.92;
-/** How far a nest must sit from blue's spawn line so its snipers can't open fire
+/** How far a nest must sit from blue's front spawn row so its snipers can't open fire
  *  before blue has moved: a hill-boosted sniper shot plus some slack. */
 const NEST_SAFE_DISTANCE = UNIT_STATS.sniper.range * (1 + ELEVATION_RANGE_BONUS) + 40;
 
 /** Put snipers on the highest hill that is out of range of blue's spawn; on a
  *  map too small for one, they stay with the rest of the horde up top. */
-function placeSniperNest(snipers: Unit[], zones: ElevationZone[], blocks: Obstacle[]): void {
+function placeSniperNest(snipers: Unit[], zones: ElevationZone[], blocks: Obstacle[], blueCount: number): void {
+  const frontY = blueSpawnFrontY(blueCount);
   const hill = zones
-    .filter(z => MAP_HEIGHT * BLUE_SPAWN_Y - z.y - z.h >= NEST_SAFE_DISTANCE)
+    .filter(z => frontY - z.y - z.h >= NEST_SAFE_DISTANCE)
     .sort((a, b) => a.y - b.y)[0];
   if (!hill) return;
   snipers.forEach((u, i) => {
@@ -269,8 +268,9 @@ function applyEnemyStats(units: Unit[], plan: HordeWavePlan): void {
   }
 }
 
-/** Create a wave's enemies — and its boss — with the plan's modifiers applied. */
-export function spawnHordeWave(plan: HordeWavePlan, blocks: Obstacle[], elevationZones: ElevationZone[]): Unit[] {
+/** Create a wave's enemies — and its boss — with the plan's modifiers applied.
+ *  `blueCount` is the size of blue's squad, which sets how deep its spawn rows go. */
+export function spawnHordeWave(plan: HordeWavePlan, blocks: Obstacle[], elevationZones: ElevationZone[], blueCount = 1): Unit[] {
   const mods = new Set(plan.modifiers);
   const units = createMissionArmy('red', waveComposition(plan), blocks);
 
@@ -278,7 +278,7 @@ export function spawnHordeWave(plan: HordeWavePlan, blocks: Obstacle[], elevatio
   const nest = mods.has('sniper_nest')
     ? units.filter(u => u.type === 'sniper').slice(-sniperNestSize(plan.wave))
     : [];
-  placeSniperNest(nest, elevationZones, blocks);
+  placeSniperNest(nest, elevationZones, blocks, blueCount);
   const movable = units.filter(u => !nest.includes(u));
   if (mods.has('flank')) placeOnFlanks(movable, 0.2, 0.65, blocks);
   // Only melee units ambush, so nobody can shoot blue before it has moved.
