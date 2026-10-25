@@ -28,7 +28,7 @@ function admin(command: string): void {
 
 /** Create `name` fresh: Supabase stand-ins, then every migration. `beforeVersion`
  *  runs (as postgres) just before migration `version`, to seed older data. */
-export function createTestDatabase(name: string, seed?: { version: string; sql: string }): TestDatabase {
+export function createTestDatabase(name: string, ...seeds: { version: string; sql: string }[]): TestDatabase {
   const url = new URL(PG_URL!);
   url.pathname = `/${name}`;
   const dbUrl = url.toString();
@@ -36,7 +36,7 @@ export function createTestDatabase(name: string, seed?: { version: string; sql: 
   admin(`create database ${name}`);
   psql(dbUrl, readFileSync('supabase/tests/supabase-stub.sql', 'utf8'));
   for (const file of readdirSync(MIGRATIONS).filter(f => /^\d+_.*\.sql$/.test(f)).sort()) {
-    if (seed && file.startsWith(seed.version)) psql(dbUrl, seed.sql);
+    for (const seed of seeds) if (file.startsWith(seed.version)) psql(dbUrl, seed.sql);
     psql(dbUrl, readFileSync(`${MIGRATIONS}/${file}`, 'utf8'));
   }
   const run = (sql: string, role: Role = 'service_role', uid?: string) => {

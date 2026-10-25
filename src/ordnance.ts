@@ -120,7 +120,8 @@ function explode(pos: Vec2, radius: number, damage: number, edgeDamage: number, 
     const angle = Math.atan2(u.pos.y - pos.y, u.pos.x - pos.x);
     const kbSpeed = 30 / 0.15;
     u.knockbackVel = { x: Math.cos(angle) * kbSpeed, y: Math.sin(angle) * kbSpeed };
-    const dealt = damage * (1 - (1 - edgeDamage) * Math.min(1, d / radius));
+    const reach = radius > 0 ? Math.min(1, d / radius) : 0;
+    const dealt = damage * (1 - (1 - edgeDamage) * reach);
     const before = u.hp;
     applyDamage(u, dealt);
     hits.push({
