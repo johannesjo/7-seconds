@@ -102,6 +102,9 @@ const difficultyButtons = [...difficultyScreen.querySelectorAll<HTMLButtonElemen
 const settingToggles = [...document.querySelectorAll<HTMLButtonElement>('.setting-toggle[data-setting]')];
 const themeToggle = document.getElementById('theme-toggle')!;
 const pixiContainer = document.getElementById('pixi-container')!;
+if (Capacitor.getPlatform() === 'android' && matchMedia('(pointer: coarse)').matches) {
+  document.documentElement.classList.add('edge-guard');
+}
 
 const ctfAiBtn = document.getElementById('ctf-ai-btn')!;
 const ctfPvpBtn = document.getElementById('ctf-pvp-btn')!;

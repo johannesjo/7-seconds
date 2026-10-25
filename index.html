@@ -257,6 +257,9 @@
       min-height: 0;
       overflow: hidden;
     }
+    /* Android app: keep the map out of the back-gesture zone at each edge,
+       so drags on it never start a system back swipe */
+    .edge-guard #pixi-container { width: calc(100% - 48px); }
     #pixi-container canvas {
       max-width: 100%;
       max-height: 100%;
