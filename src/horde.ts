@@ -316,17 +316,27 @@ export function healAllBlue(units: Unit[]): void {
   }
 }
 
-/** Reposition blue units in spawn zone, clear movement state. */
+const BLUE_SPACING = 60;
+const BLUE_ROW_GAP = 45;
+/** Keeps the outermost unit of a spawn row clear of the map edge. */
+const BLUE_EDGE_MARGIN = 30;
+
+/** Reposition blue units in spawn zone, clear movement state. A squad too wide
+ *  for the map wraps into extra rows stacked up from the spawn line. */
 export function repositionBlueUnits(units: Unit[], blocks?: Obstacle[]): void {
   const blueAlive = units.filter(u => u.team === 'blue' && u.alive);
-  const spacing = 60;
-  const groupWidth = spacing * (blueAlive.length - 1);
-  const startX = (MAP_WIDTH - groupWidth) / 2;
+  const maxCols = Math.max(1, Math.floor((MAP_WIDTH - 2 * BLUE_EDGE_MARGIN) / BLUE_SPACING) + 1);
+  const rows = Math.ceil(blueAlive.length / maxCols);
+  // Spread units evenly over the rows so the last one isn't a lone straggler.
+  const cols = Math.ceil(blueAlive.length / Math.max(1, rows));
   const baseY = MAP_HEIGHT * 0.92;
 
   for (let i = 0; i < blueAlive.length; i++) {
     const u = blueAlive[i];
-    let pos = { x: startX + spacing * i, y: baseY };
+    const row = Math.floor(i / cols);
+    const inRow = Math.min(cols, blueAlive.length - row * cols);
+    const startX = (MAP_WIDTH - BLUE_SPACING * (inRow - 1)) / 2;
+    let pos = { x: startX + BLUE_SPACING * (i % cols), y: baseY - BLUE_ROW_GAP * row };
     if (blocks) pos = nudgeOutOfBlocks(pos, blocks);
     u.pos = pos;
     u.waypoints = [];

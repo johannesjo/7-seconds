@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { HORDE_WAVES, ALL_STAT_UPGRADES, ALL_RECRUIT_UPGRADES, ALL_UNIT_UPGRADES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import { createUnit } from './units';
-import { MAP_HEIGHT, HORDE_MAX_WAVES, SHIELD_MAX_HITS } from './constants';
+import { MAP_HEIGHT, MAP_WIDTH, HORDE_MAX_WAVES, SHIELD_MAX_HITS, setMapSize } from './constants';
 import { Unit } from './types';
 
 describe('HORDE_WAVES', () => {
@@ -144,6 +144,23 @@ describe('repositionBlueUnits', () => {
     expect(units[0].waypoints).toEqual([]);
     expect(units[0].vel).toEqual({ x: 0, y: 0 });
     expect(units[0].moveTarget).toBeNull();
+  });
+
+  it('wraps a big squad into rows that stay on a narrow map', () => {
+    setMapSize(360, 640);
+    try {
+      const units = Array.from({ length: 14 }, (_, i) =>
+        createUnit(`blue_soldier_${i}`, 'soldier', 'blue', { x: 0, y: 0 }));
+      repositionBlueUnits(units);
+      for (const u of units) {
+        expect(u.pos.x).toBeGreaterThanOrEqual(u.radius);
+        expect(u.pos.x).toBeLessThanOrEqual(MAP_WIDTH - u.radius);
+        expect(u.pos.y).toBeLessThanOrEqual(MAP_HEIGHT * 0.92);
+      }
+      expect(new Set(units.map(u => u.pos.y)).size).toBeGreaterThan(1);
+    } finally {
+      setMapSize(1000, 1000);
+    }
   });
 });
 
