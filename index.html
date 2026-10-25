@@ -255,6 +255,9 @@
       align-items: center;
       flex: 1;
       min-height: 0;
+      /* Take the screen's full width, not the canvas's: the renderer sizes
+         the canvas from this box, so shrinking to fit it would never grow back. */
+      align-self: stretch;
       overflow: hidden;
     }
     /* Android app: keep the map out of the back-gesture zone at each edge,
