@@ -19,6 +19,7 @@ var UNIT_STATS = {
 };
 var MORTAR_MIN_RANGE = 110;
 var MORTAR_BLAST_RADIUS = 55;
+var MORTAR_EDGE_DAMAGE = 0.4;
 var MORTAR_FLIGHT_S = 1.1;
 var ROCKET_BLAST_RADIUS = 60;
 var ROCKET_MAX_PATH = 650;
@@ -1049,7 +1050,7 @@ function launchRocket(unit) {
     distanceTraveled: 0
   };
 }
-function explode(pos, radius, damage, team, units, hits) {
+function explode(pos, radius, damage, edgeDamage, team, units, hits) {
   for (const u of units) {
     if (!u.alive || u.team === team) continue;
     const d = dist2(pos, u.pos);
@@ -1057,15 +1058,16 @@ function explode(pos, radius, damage, team, units, hits) {
     const angle = Math.atan2(u.pos.y - pos.y, u.pos.x - pos.x);
     const kbSpeed = 30 / 0.15;
     u.knockbackVel = { x: Math.cos(angle) * kbSpeed, y: Math.sin(angle) * kbSpeed };
+    const dealt = damage * (1 - (1 - edgeDamage) * Math.min(1, d / radius));
     const before = u.hp;
-    applyDamage(u, damage);
+    applyDamage(u, dealt);
     hits.push({
       pos: { x: u.pos.x, y: u.pos.y },
       targetId: u.id,
       killed: before > 0 && !u.alive,
       team,
       angle,
-      damage,
+      damage: dealt,
       flanked: false
     });
   }
@@ -1077,7 +1079,7 @@ function updateOrdnance(projectiles, units, dt, obstacles) {
   const burst = (p, at) => {
     const radius = p.blastRadius ?? 0;
     explosions.push({ pos: { x: at.x, y: at.y }, radius, team: p.team });
-    explode(at, radius, p.damage, p.team, units, hits);
+    explode(at, radius, p.damage, p.kind === "shell" ? MORTAR_EDGE_DAMAGE : 1, p.team, units, hits);
   };
   for (const p of projectiles) {
     if (p.kind === "shell") {
@@ -2186,7 +2188,7 @@ function adjustForDifficulty(composition, difficulty) {
 }
 
 // src/online-plan.ts
-var RULES_VERSION = 2;
+var RULES_VERSION = 3;
 var MAX_PLAN_POINTS = 100;
 var MAX_COORD = 1e4;
 function quantize(v) {

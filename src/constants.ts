@@ -29,6 +29,9 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
 /** Mortar can't lob shells at enemies closer than this (centre to centre). */
 export const MORTAR_MIN_RANGE = 110;
 export const MORTAR_BLAST_RADIUS = 55;
+/** Share of a shell's damage dealt at the blast's edge; it falls off linearly
+ *  from full damage at the centre, so a crowd's fringe survives a hit. */
+export const MORTAR_EDGE_DAMAGE = 0.4;
 /** Seconds a shell is in the air — long enough to step out of the blast by moving on. */
 export const MORTAR_FLIGHT_S = 1.1;
 export const ROCKET_BLAST_RADIUS = 60;

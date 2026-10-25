@@ -6,7 +6,7 @@
 import type { ElevationZone, Obstacle, Projectile, Team, Unit, Vec2 } from './types';
 import {
   MAP_WIDTH, MAP_HEIGHT, COLLISION_HITBOX_SCALE,
-  MORTAR_BLAST_RADIUS, MORTAR_FLIGHT_S, ROCKET_BLAST_RADIUS, ROCKET_MAX_PATH,
+  MORTAR_BLAST_RADIUS, MORTAR_EDGE_DAMAGE, MORTAR_FLIGHT_S, ROCKET_BLAST_RADIUS, ROCKET_MAX_PATH,
 } from './constants';
 import { applyDamage, mortarCanReach, segmentHitsRect } from './units';
 
@@ -110,8 +110,9 @@ export function launchRocket(unit: Unit): Projectile | null {
   };
 }
 
-/** Damage and knock back every enemy of `team` within the blast. */
-function explode(pos: Vec2, radius: number, damage: number, team: Team, units: Unit[], hits: OrdnanceHit[]): void {
+/** Damage and knock back every enemy of `team` within the blast. Damage falls
+ *  off linearly from the centre to `edgeDamage` × `damage` at the rim. */
+function explode(pos: Vec2, radius: number, damage: number, edgeDamage: number, team: Team, units: Unit[], hits: OrdnanceHit[]): void {
   for (const u of units) {
     if (!u.alive || u.team === team) continue;
     const d = dist(pos, u.pos);
@@ -119,11 +120,12 @@ function explode(pos: Vec2, radius: number, damage: number, team: Team, units: U
     const angle = Math.atan2(u.pos.y - pos.y, u.pos.x - pos.x);
     const kbSpeed = 30 / 0.15;
     u.knockbackVel = { x: Math.cos(angle) * kbSpeed, y: Math.sin(angle) * kbSpeed };
+    const dealt = damage * (1 - (1 - edgeDamage) * Math.min(1, d / radius));
     const before = u.hp;
-    applyDamage(u, damage);
+    applyDamage(u, dealt);
     hits.push({
       pos: { x: u.pos.x, y: u.pos.y }, targetId: u.id, killed: before > 0 && !u.alive,
-      team, angle, damage, flanked: false,
+      team, angle, damage: dealt, flanked: false,
     });
   }
 }
@@ -141,7 +143,8 @@ export function updateOrdnance(
   const burst = (p: Projectile, at: Vec2) => {
     const radius = p.blastRadius ?? 0;
     explosions.push({ pos: { x: at.x, y: at.y }, radius, team: p.team });
-    explode(at, radius, p.damage, p.team, units, hits);
+    // Rockets are aimed by hand and burst at full strength; shells fall off.
+    explode(at, radius, p.damage, p.kind === 'shell' ? MORTAR_EDGE_DAMAGE : 1, p.team, units, hits);
   };
 
   for (const p of projectiles) {

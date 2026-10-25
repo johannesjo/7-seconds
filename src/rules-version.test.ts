@@ -82,9 +82,9 @@ function outcomes(): string[] {
 }
 
 const GOLDEN: string[] = [
-  "8357245e-4fb68d30-c43eab2e", "8357245e-4fb68d30-c43eab2e", "8357245e-4fb68d30-c43eab2e",
-  "e5bc253f-f729c5d6-d59f48fa", "e5bc253f-f729c5d6-d59f48fa", "e5bc253f-f729c5d6-d59f48fa",
-  "eeacaea5-3ea66c69-2e5bd7eb", "eeacaea5-3ea66c69-2e5bd7eb", "eeacaea5-3ea66c69-2e5bd7eb",
+  "47650fcb-5fb7700d-41f55768", "47650fcb-5fb7700d-41f55768", "47650fcb-5fb7700d-41f55768",
+  "5547cd8e-a85e0e7c-90f18790", "5547cd8e-a85e0e7c-90f18790", "5547cd8e-a85e0e7c-90f18790",
+  "3dc4bfdc-1e4f0e6f-08efe825", "3dc4bfdc-1e4f0e6f-08efe825", "3dc4bfdc-1e4f0e6f-08efe825",
 ];
 
 describe('online rules version', () => {
