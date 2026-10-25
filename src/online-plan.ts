@@ -14,8 +14,10 @@ export type PathList = { unitId: string; waypoints: Vec2[]; rocketPath?: Vec2[] 
  *  each round, and the clients animate the same round locally, so a rules
  *  change would show players a different battle than the one recorded.
  *  Bump it when `rules-version.test.ts` fails (see docs/online-play.md).
- *  1 = the client-resolved protocol before the referee existed. */
-export const RULES_VERSION = 2;
+ *  1 = the client-resolved protocol before the referee existed.
+ *  2 = rounds resolved by the referee.
+ *  3 = mortar blast damage falls off towards the rim. */
+export const RULES_VERSION = 3;
 
 /** Most waypoints (and rocket points) kept per unit; the engine keeps the same. */
 export const MAX_PLAN_POINTS = 100;

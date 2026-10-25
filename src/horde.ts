@@ -133,14 +133,14 @@ export const ALL_UNIT_UPGRADES: HordeUpgrade[] = [
 // recruits are added within the same millisecond (Date.now() could collide).
 let recruitCounter = 0;
 
-function makeRecruitUpgrade(type: UnitType): HordeUpgrade {
+function makeRecruitUpgrade(type: UnitType, rarity: UpgradeRarity = 'common'): HordeUpgrade {
   const label = type.charAt(0).toUpperCase() + type.slice(1);
   return {
     id: `recruit_${type}`,
     label: `Recruit ${label}`,
     description: `Add a ${label} to your squad`,
     category: 'recruit',
-    rarity: 'common',
+    rarity,
     apply(units: Unit[], blocks?: Obstacle[]): Unit[] {
       const tag = recruitCounter++;
       let pos = { x: MAP_WIDTH / 2, y: MAP_HEIGHT * 0.92 };
@@ -155,7 +155,8 @@ export const ALL_RECRUIT_UPGRADES: HordeUpgrade[] = [
   makeRecruitUpgrade('soldier'),
   makeRecruitUpgrade('sniper'),
   makeRecruitUpgrade('shielder'),
-  makeRecruitUpgrade('mortar'),
+  // Its blasts wipe out zombie crowds, so a mortar is a rare find.
+  makeRecruitUpgrade('mortar', 'rare'),
   makeRecruitUpgrade('rocketeer'),
 ];
 
@@ -167,12 +168,35 @@ const RARITY_WEIGHT: Record<UpgradeRarity, number> = {
   epic: 1,
 };
 
+/** Pool copies per rarity weight point. Doubled so a rare recruit can weigh
+ *  half as much as a common one. */
+const POOL_SCALE = 2;
+
 /**
  * Expand an upgrade into the pool multiple times according to its rarity weight.
  * This makes common upgrades appear more often and epic upgrades appear rarely.
  */
 function weightedEntries(upgrade: HordeUpgrade): HordeUpgrade[] {
-  return Array(RARITY_WEIGHT[upgrade.rarity]).fill(upgrade);
+  return Array(RARITY_WEIGHT[upgrade.rarity] * POOL_SCALE).fill(upgrade);
+}
+
+/** Pool copies of a recruit: a common one weighs a quarter of a common stat
+ *  upgrade, a rare one half that. */
+const RECRUIT_COPIES: Record<UpgradeRarity, number> = { common: 2, uncommon: 2, rare: 1, epic: 1 };
+
+function recruitEntries(recruit: HordeUpgrade): HordeUpgrade[] {
+  return Array(RECRUIT_COPIES[recruit.rarity]).fill(recruit);
+}
+
+/** Uniform Fisher–Yates shuffle. (Sorting by a random comparator is biased
+ *  by array position, which skews pool weights.) */
+function shuffle<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 /** Pick 3 random upgrades with constraints. */
@@ -190,17 +214,19 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedCounts: Map
   // Determine owned unit types for weighting recruits
   const ownedTypes = new Set(blueUnits.filter(u => u.team === 'blue').map(u => u.type));
 
-  // Build weighted recruit pool: owned types appear twice (on top of rarity weight)
+  // Build weighted recruit pool: owned common types appear twice as often.
+  // Rare recruits get no such boost, so they never snowball.
   const recruitPool: HordeUpgrade[] = [];
   for (const r of ALL_RECRUIT_UPGRADES) {
     const type = r.id.replace('recruit_', '') as UnitType;
-    recruitPool.push(r);
-    if (ownedTypes.has(type)) recruitPool.push(r);
+    const entries = recruitEntries(r);
+    recruitPool.push(...entries);
+    if (r.rarity === 'common' && ownedTypes.has(type)) recruitPool.push(...entries);
   }
 
   // Guarantee at least 1 recruit in waves 1-3
   if (wave <= 3) {
-    const shuffled = [...recruitPool].sort(() => Math.random() - 0.5);
+    const shuffled = shuffle(recruitPool);
     const recruit = shuffled.find(r => !usedIds.has(r.id));
     if (recruit) {
       picks.push(recruit);
@@ -238,7 +264,7 @@ export function pickUpgrades(blueUnits: Unit[], wave: number, appliedCounts: Map
   ];
 
   // Shuffle
-  const shuffled = [...allPool].sort(() => Math.random() - 0.5);
+  const shuffled = shuffle(allPool);
 
   for (const upgrade of shuffled) {
     if (picks.length >= 3) break;
@@ -260,7 +286,7 @@ const HORDE_STARTING_UNIT_POOL: UnitType[] = ['soldier', 'sniper', 'shielder'];
 
 /** Pick 2 random units from the playable pool for the starting army. */
 export function randomHordeStartingArmy(): { type: UnitType; count: number }[] {
-  const pool = [...HORDE_STARTING_UNIT_POOL].sort(() => Math.random() - 0.5);
+  const pool = shuffle(HORDE_STARTING_UNIT_POOL);
   const a = pool[0];
   const b = pool[1];
   // Merge if same type (rare but possible if pool shrinks in future)

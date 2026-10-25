@@ -61,6 +61,19 @@ describe('pickUpgrades', () => {
     expect(seen).toBe(true);
   });
 
+  it('offers the rare mortar recruit less often than common recruits, even when owned', () => {
+    const squad = [...makeBlueSquad(), createUnit('blue_mortar_0', 'mortar', 'blue', { x: 400, y: 600 })];
+    let mortar = 0, sniper = 0;
+    for (let i = 0; i < 4000; i++) {
+      const ids = pickUpgrades(squad, 5).map(p => p.id);
+      if (ids.includes('recruit_mortar')) mortar++;
+      if (ids.includes('recruit_sniper')) sniper++;
+    }
+    expect(ALL_RECRUIT_UPGRADES.find(u => u.id === 'recruit_mortar')!.rarity).toBe('rare');
+    expect(mortar).toBeGreaterThan(0);
+    expect(mortar).toBeLessThan(sniper * 0.75);
+  });
+
   it('guarantees at least 1 recruit in waves 1-3', () => {
     for (let wave = 1; wave <= 3; wave++) {
       for (let i = 0; i < 20; i++) {

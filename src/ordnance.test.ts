@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { GameEngine } from './game';
 import { planRocket } from './ai-planner';
+import { updateOrdnance } from './ordnance';
 import { sanitizePlan, type PathList } from './online-plan';
 import type { OnlineGameState } from './online-types';
 import type { Obstacle, Unit } from './types';
 import { createUnit, segmentHitsRect } from './units';
-import { UNIT_STATS, ROCKET_MAX_PATH } from './constants';
+import { UNIT_STATS, ROCKET_MAX_PATH, MORTAR_BLAST_RADIUS, MORTAR_EDGE_DAMAGE, MORTAR_FLIGHT_S } from './constants';
 
 type UnitSpec = Partial<OnlineGameState['units'][number]> & Pick<OnlineGameState['units'][number], 'id' | 'type' | 'team' | 'x' | 'y'>;
 
@@ -53,6 +54,24 @@ describe('mortar', () => {
       [{ unitId: 'r', waypoints: [{ x: 900, y: 450 }] }]);
     expect(hp(still, 'r')).toBeLessThan(UNIT_STATS.soldier.hp);
     expect(hp(moving, 'r')).toBe(UNIT_STATS.soldier.hp);
+  });
+
+  it('deals full damage at the blast centre, falling off towards the rim', () => {
+    const at = (id: string, x: number) => createUnit(id, 'zombie', 'red', { x, y: 500 });
+    const units = [at('centre', 500), at('mid', 500 + MORTAR_BLAST_RADIUS / 2), at('rim', 500 + MORTAR_BLAST_RADIUS)];
+    const shell = {
+      kind: 'shell' as const, pos: { x: 500, y: 800 }, origin: { x: 500, y: 800 }, target: { x: 500, y: 500 },
+      vel: { x: 0, y: 0 }, age: MORTAR_FLIGHT_S, flightTime: MORTAR_FLIGHT_S, damage: 30, radius: 4,
+      blastRadius: MORTAR_BLAST_RADIUS, team: 'blue' as const, maxRange: Infinity, distanceTraveled: 0,
+    };
+    const { hits } = updateOrdnance([shell], units, 0, []);
+    const dealt = (id: string) => hits.find(h => h.targetId === id)!.damage;
+    expect(dealt('centre')).toBeCloseTo(30);
+    expect(dealt('mid')).toBeCloseTo(30 * (1 + MORTAR_EDGE_DAMAGE) / 2);
+    expect(dealt('rim')).toBeCloseTo(30 * MORTAR_EDGE_DAMAGE);
+    // A zombie at the fringe of a crowd survives the hit.
+    expect(units[2].alive).toBe(true);
+    expect(units[0].alive).toBe(false);
   });
 
   it('keeps a live round going while an unseen enemy is in its firing band', () => {

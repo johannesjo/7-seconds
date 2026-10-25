@@ -40,7 +40,11 @@ describeSql('referee database', () => {
       insert into matches(id, host_player, guest_player, initial_state, latest_state, status) values
       ('legac1', '${A}', '${B}', ${STATE}, ${STATE}, 'active'),
       ('legac2', '${A}', null, ${STATE}, ${STATE}, 'open'),
-      ('legac3', '${A}', '${B}', ${STATE}, ${STATE}, 'host_won');` });
+      ('legac3', '${A}', '${B}', ${STATE}, ${STATE}, 'host_won');` }, { version: '0005', sql: `
+      insert into matches(id, host_player, guest_player, initial_state, latest_state, status, rules) values
+      ('rulev1', '${A}', '${B}', ${STATE}, ${STATE}, 'active', 2),
+      ('rulev2', '${A}', null, ${STATE}, ${STATE}, 'open', 2),
+      ('rulev3', '${A}', '${B}', ${STATE}, ${STATE}, 'host_won', 2);` });
   });
   afterAll(() => db?.drop());
 
@@ -49,8 +53,13 @@ describeSql('referee database', () => {
       'legac1|abandoned|version\nlegac2|abandoned|version\nlegac3|host_won|-');
   });
 
+  it('ends matches still in play on an older rules version', () => {
+    expect(run(`select id, status, coalesce(finish_reason, '-') from matches where id like 'rulev%' order by id;`)).toBe(
+      'rulev1|abandoned|version\nrulev2|abandoned|version\nrulev3|host_won|-');
+  });
+
   it('leaves clients no way to write matches, turns or plans', () => {
-    run(`select seven_create('${A}', 'perm01', 2, ${STATE}, 'Ann');`);
+    run(`select seven_create('${A}', 'perm01', 3, ${STATE}, 'Ann');`);
     expect(failure(`insert into matches(id, host_player, initial_state, latest_state) values ('x', '${A}', ${STATE}, ${STATE});`, 'authenticated', A)).toMatch(/permission denied/);
     expect(failure(`update matches set status = 'host_won' where id = 'perm01';`, 'authenticated', A)).toMatch(/permission denied/);
     expect(failure(`insert into turns(match_id, round, team, player) values ('perm01', 1, 'blue', '${A}');`, 'authenticated', A)).toMatch(/permission denied/);
@@ -62,7 +71,7 @@ describeSql('referee database', () => {
   });
 
   it('shows a match only to its two players', () => {
-    run(`select seven_create('${A}', 'priv01', 2, ${STATE}, null);`);
+    run(`select seven_create('${A}', 'priv01', 3, ${STATE}, null);`);
     expect(run(`select count(*) from matches where id = 'priv01';`, 'authenticated', A)).toBe('1');
     expect(run(`select count(*) from matches where id = 'priv01';`, 'authenticated', B)).toBe('0');
     run(`select seven_join('${B}', 'priv01', 'Bea');`);
@@ -72,7 +81,7 @@ describeSql('referee database', () => {
   });
 
   it('keeps plans secret until both are in, then publishes them with the round', () => {
-    run(`select seven_create('${A}', 'play01', 2, ${STATE}, 'Ann');`);
+    run(`select seven_create('${A}', 'play01', 3, ${STATE}, 'Ann');`);
     // The host may plan round 1 before anyone joins.
     expect(run(`select seven_submit_plan('${A}', 'play01', 1, ${PLAN}, null)->>'both';`)).toBe('false');
     run(`select seven_join('${B}', 'play01', 'Bea');`);
@@ -95,7 +104,7 @@ describeSql('referee database', () => {
   });
 
   it('finishes on elimination, and a finished match stays finished', () => {
-    run(`select seven_create('${A}', 'fini01', 2, ${STATE}, null); select seven_join('${B}', 'fini01', null);
+    run(`select seven_create('${A}', 'fini01', 3, ${STATE}, null); select seven_join('${B}', 'fini01', null);
       select seven_submit_plan('${A}', 'fini01', 1, '[]'::jsonb, null); select seven_submit_plan('${B}', 'fini01', 1, '[]'::jsonb, null);
       select seven_apply_round('fini01', 1, ${STATE}, 1, 'red');`);
     expect(run(`select status, finish_reason, finished_at is not null from matches where id = 'fini01';`)).toBe('guest_won|battle|t');
@@ -104,58 +113,58 @@ describeSql('referee database', () => {
   });
 
   it('forfeits to the opponent and withdraws unjoined invites', () => {
-    run(`select seven_create('${A}', 'forf01', 2, ${STATE}, null); select seven_join('${B}', 'forf01', null);`);
+    run(`select seven_create('${A}', 'forf01', 3, ${STATE}, null); select seven_join('${B}', 'forf01', null);`);
     expect(run(`select (seven_forfeit('${A}', 'forf01')).status;`)).toBe('guest_won');
-    run(`select seven_create('${A}', 'forf02', 2, ${STATE}, null);`);
+    run(`select seven_create('${A}', 'forf02', 3, ${STATE}, null);`);
     expect(run(`select (seven_forfeit('${A}', 'forf02')).finish_reason;`)).toBe('cancelled');
     // Cancel never concedes a match someone joined.
-    run(`select seven_create('${A}', 'canc01', 2, ${STATE}, null); select seven_join('${B}', 'canc01', null);`);
+    run(`select seven_create('${A}', 'canc01', 3, ${STATE}, null); select seven_join('${B}', 'canc01', null);`);
     expect(run(`select (seven_cancel('${A}', 'canc01')).status;`)).toBe('active');
     run(`select seven_forfeit('${B}', 'canc01');`);
   });
 
   it('pairs searchers, reuses a waiting match on retry, and caps unfinished matches', () => {
-    const mm = (who: string, id: string) => run(`select seven_matchmake('${who}', '${id}', false, 2, ${STATE}, null)->'match'->>'id';`);
+    const mm = (who: string, id: string) => run(`select seven_matchmake('${who}', '${id}', false, 3, ${STATE}, null)->'match'->>'id';`);
     expect(mm(A, 'queue1')).toBe('queue1');
     expect(mm(A, 'queue2')).toBe('queue1'); // still waiting: the same match
-    expect(run(`select seven_matchmake('${B}', 'queue3', false, 2, ${STATE}, null)->>'paired';`)).toBe('true'); // paired into A's search
+    expect(run(`select seven_matchmake('${B}', 'queue3', false, 3, ${STATE}, null)->>'paired';`)).toBe('true'); // paired into A's search
     expect(mm(B, 'queue4')).toBe('queue1'); // retry within two minutes, nothing planned yet
-    expect(run(`select seven_matchmake('${B}', 'queue4', false, 2, ${STATE}, null)->>'paired';`)).toBe('false'); // and not news again
+    expect(run(`select seven_matchmake('${B}', 'queue4', false, 3, ${STATE}, null)->>'paired';`)).toBe('false'); // and not news again
     expect(run(`select guest_player = '${B}', status from matches where id = 'queue1';`)).toBe('t|active');
     // Ranked and casual queues and other rules versions never mix.
     expect(run(`select seven_matchmake('${C}', 'queue5', false, 3, ${STATE}, null)->'match'->>'id';`)).toBe('queue5');
-    expect(failure(`select seven_matchmake('${C}', 'queue6', true, 2, ${STATE}, null);`)).toMatch(/Play Games profile required/);
+    expect(failure(`select seven_matchmake('${C}', 'queue6', true, 3, ${STATE}, null);`)).toMatch(/Play Games profile required/);
     run(`select seven_cancel('${C}', 'queue5'); select seven_forfeit('${A}', 'queue1');`);
 
     const live = Number(run(`select seven_live_count('${C}', false);`));
-    for (let i = live; i < 5; i++) run(`select seven_create('${C}', 'cap0${i}', 2, ${STATE}, null);`);
-    expect(failure(`select seven_matchmake('${C}', 'capxx', false, 2, ${STATE}, null);`)).toMatch(/5 unfinished/);
-    expect(failure(`select seven_create('${C}', 'capxy', 2, ${STATE}, null);`)).toMatch(/5 unfinished/);
+    for (let i = live; i < 5; i++) run(`select seven_create('${C}', 'cap0${i}', 3, ${STATE}, null);`);
+    expect(failure(`select seven_matchmake('${C}', 'capxx', false, 3, ${STATE}, null);`)).toMatch(/5 unfinished/);
+    expect(failure(`select seven_create('${C}', 'capxy', 3, ${STATE}, null);`)).toMatch(/5 unfinished/);
     run(`select seven_forfeit('${C}', id) from matches where id like 'cap0%';`);
   });
 
   it('seats an AI commander only after the wait, and never in invites', () => {
     clear(B); clear(C);
-    run(`select seven_matchmake('${C}', 'botq01', false, 2, ${STATE}, null);`);
+    run(`select seven_matchmake('${C}', 'botq01', false, 3, ${STATE}, null);`);
     expect(run(`select (seven_seat_bot('botq01', interval '1 minute')).guest_bot;`)).toBe('f');
     expect(run(`select seven_assign_bots(interval '1 minute');`)).toBe('0');
     backdate(`created_at = now() - interval '5 minutes'`, `id = 'botq01'`);
     expect(run(`select seven_assign_bots(interval '1 minute');`)).toBe('1');
     expect(run(`select guest_bot, status, guest_name like '%(AI)' from matches where id = 'botq01';`)).toBe('t|active|t');
-    run(`select seven_create('${C}', 'botq02', 2, ${STATE}, null);`);
+    run(`select seven_create('${C}', 'botq02', 3, ${STATE}, null);`);
     expect(run(`select (seven_seat_bot('botq02', interval '0')).guest_bot;`)).toBe('f');
     // Asked for by the searcher: a commander of the chosen difficulty.
-    run(`select seven_matchmake('${B}', 'botq03', false, 2, ${STATE}, null);`);
+    run(`select seven_matchmake('${B}', 'botq03', false, 3, ${STATE}, null);`);
     expect(run(`select (seven_seat_bot('botq03', interval '0', 'veteran')).guest_name;`)).toBe('Major Flint (AI)');
     run(`select seven_forfeit('${C}', 'botq01'); select seven_forfeit('${C}', 'botq02'); select seven_forfeit('${B}', 'botq03');`);
   });
 
   it('settles idle matches: the side that planned wins, otherwise nobody', () => {
     clear(A); clear(B);
-    run(`select seven_create('${A}', 'idle01', 2, ${STATE}, null); select seven_join('${B}', 'idle01', null);
+    run(`select seven_create('${A}', 'idle01', 3, ${STATE}, null); select seven_join('${B}', 'idle01', null);
       select seven_submit_plan('${B}', 'idle01', 1, '[]'::jsonb, null);
-      select seven_create('${A}', 'idle02', 2, ${STATE}, null); select seven_join('${B}', 'idle02', null);
-      select seven_create('${A}', 'idle03', 2, ${STATE}, null);`);
+      select seven_create('${A}', 'idle02', 3, ${STATE}, null); select seven_join('${B}', 'idle02', null);
+      select seven_create('${A}', 'idle03', 3, ${STATE}, null);`);
     backdate(`last_move_at = now() - interval '8 days'`, `id like 'idle0%'`);
     // Submitting into an expired match settles it instead.
     expect(run(`select seven_submit_plan('${A}', 'idle02', 1, '[]'::jsonb, null)->>'expired';`)).toBe('true');
@@ -168,8 +177,8 @@ describeSql('referee database', () => {
     run(`select seven_ranked_profile('${A}', 'pgsA', 'Ann', null); select seven_ranked_profile('${B}', 'pgsB', 'Bea', 'https://lh3.googleusercontent.com/a/b');`);
     expect(failure(`select seven_ranked_profile('${A}', 'pgsOther', 'Ann', null);`)).toMatch(/bound to another/);
     expect(failure(`select seven_ranked_profile('${C}', 'pgsC', 'Cy', 'https://evil.example/x.png');`)).toMatch(/avatar_url/);
-    expect(run(`select seven_matchmake('${A}', 'rank01', true, 2, ${STATE}, 'ignored')->'match'->>'host_name';`)).toBe('Ann');
-    expect(run(`select seven_matchmake('${B}', 'rank02', true, 2, ${STATE}, null)->'match'->>'id';`)).toBe('rank01');
+    expect(run(`select seven_matchmake('${A}', 'rank01', true, 3, ${STATE}, 'ignored')->'match'->>'host_name';`)).toBe('Ann');
+    expect(run(`select seven_matchmake('${B}', 'rank02', true, 3, ${STATE}, null)->'match'->>'id';`)).toBe('rank01');
     // Invites are casual only.
     expect(failure(`select seven_join('${C}', 'rank01', null);`)).toMatch(/not found/i);
 
@@ -186,7 +195,7 @@ describeSql('referee database', () => {
     expect(JSON.parse(run(`select seven_ranked_view('${A}', 'rank01');`)).result).toMatchObject({ won: true, delta: 20, rating: 1220, rank: 1 });
 
     // Against an AI commander: the player's rating moves, the commander's doesn't.
-    run(`select seven_matchmake('${A}', 'rank03', true, 2, ${STATE}, null);`);
+    run(`select seven_matchmake('${A}', 'rank03', true, 3, ${STATE}, null);`);
     expect(run(`select (seven_seat_bot('rank03', interval '0')).guest_player;`)).toMatch(/^00000000-0000-4000-8000-000000007a0[12]$/);
     const before = run(`select rating from ranked_profiles r join matches m on m.guest_player = r.player where m.id = 'rank03';`);
     run(`select seven_forfeit('${A}', 'rank03');`);
@@ -196,7 +205,7 @@ describeSql('referee database', () => {
 
   it('caps ranked AI matches at three per player', () => {
     for (let i = 0; i < 4; i++) {
-      run(`select seven_matchmake('${B}', 'rbot0${i}', true, 2, ${STATE}, null);`);
+      run(`select seven_matchmake('${B}', 'rbot0${i}', true, 3, ${STATE}, null);`);
       run(`select seven_seat_bot(id, interval '0') from matches where host_player = '${B}' and status = 'open' and ranked;`);
       // Planned, so the next search opens a new match rather than handing this one back.
       run(`select seven_submit_plan('${B}', id, 1, '[]'::jsonb, null) from matches where host_player = '${B}' and status = 'active' and ranked and current_round = 1
@@ -235,7 +244,7 @@ describeSql('referee database', () => {
 
   it('never hands out a win on time against an AI commander that had no chance to plan', () => {
     clear(A);
-    run(`select seven_matchmake('${A}', 'nobot1', true, 2, ${STATE}, null);`);
+    run(`select seven_matchmake('${A}', 'nobot1', true, 3, ${STATE}, null);`);
     run(`select seven_submit_plan('${A}', 'nobot1', 1, '[]'::jsonb, null);`);
     backdate(`created_at = now() - interval '5 minutes'`, `id = 'nobot1'`);
     expect(run(`select seven_assign_bots();`)).toBe('1'); // seated by the job: no plan
@@ -247,14 +256,14 @@ describeSql('referee database', () => {
   });
 
   it('records a draw when both armies fall together', () => {
-    run(`select seven_create('${A}', 'draw01', 2, ${STATE}, null); select seven_join('${B}', 'draw01', null);
+    run(`select seven_create('${A}', 'draw01', 3, ${STATE}, null); select seven_join('${B}', 'draw01', null);
       select seven_submit_plan('${A}', 'draw01', 1, '[]'::jsonb, null); select seven_submit_plan('${B}', 'draw01', 1, '[]'::jsonb, null);
       select seven_apply_round('draw01', 1, ${STATE}, 1, 'draw');`);
     expect(run(`select status, finish_reason from matches where id = 'draw01';`)).toBe('abandoned|battle');
   });
 
   it('tells a new plan from a repeat, and accepts a repeat after its round was played', () => {
-    run(`select seven_create('${A}', 'rept01', 2, ${STATE}, null); select seven_join('${B}', 'rept01', null);`);
+    run(`select seven_create('${A}', 'rept01', 3, ${STATE}, null); select seven_join('${B}', 'rept01', null);`);
     expect(run(`select seven_submit_plan('${A}', 'rept01', 1, ${PLAN}, null)->>'inserted';`)).toBe('true');
     expect(run(`select seven_submit_plan('${A}', 'rept01', 1, ${PLAN}, null)->>'inserted';`)).toBe('false');
     run(`select seven_submit_plan('${B}', 'rept01', 1, '[]'::jsonb, null); select seven_apply_round('rept01', 1, ${STATE}, 5, 'blue');`);
@@ -266,7 +275,7 @@ describeSql('referee database', () => {
   });
 
   it('settles an expired invite someone tries to join, instead of rolling it back', () => {
-    run(`select seven_create('${A}', 'oldinv', 2, ${STATE}, null);`);
+    run(`select seven_create('${A}', 'oldinv', 3, ${STATE}, null);`);
     backdate(`last_move_at = now() - interval '8 days'`, `id = 'oldinv'`);
     expect(run(`select (seven_join('${C}', 'oldinv', null)).status;`)).toBe('abandoned');
     expect(run(`select guest_player is null from matches where id = 'oldinv';`)).toBe('t');
@@ -274,6 +283,6 @@ describeSql('referee database', () => {
 
   it('never reuses the id of a rated match that was deleted', () => {
     run(`insert into ranked_results(match_id, winner, host_delta, guest_delta, reason, rounds) values ('ghost1', 'blue', 0, 0, 'battle', 1);`);
-    expect(failure(`select seven_create('${C}', 'ghost1', 2, ${STATE}, null);`)).toMatch(/23505|already used/);
+    expect(failure(`select seven_create('${C}', 'ghost1', 3, ${STATE}, null);`)).toMatch(/23505|already used/);
   });
 });
