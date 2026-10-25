@@ -1,12 +1,17 @@
 package io.github.johannesjo.sevenseconds;
 
+import android.os.Build;
 import android.os.Bundle;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.WebViewListener;
 
 public class MainActivity extends BridgeActivity {
 
@@ -38,5 +43,30 @@ public class MainActivity extends BridgeActivity {
 
         // Disable overscroll glow/bounce to prevent pull-to-refresh style gestures
         webView.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
+
+        // Tell the page how wide the back-gesture zones at the screen edges
+        // are, so it can keep the battle map out of them (see .edge-guard in
+        // index.html). Zero with 3-button navigation.
+        webView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> pushGestureInsets(webView));
+        getBridge().addWebViewListener(new WebViewListener() {
+            @Override
+            public void onPageLoaded(WebView view) {
+                pushGestureInsets(view);
+            }
+        });
+    }
+
+    private void pushGestureInsets(WebView webView) {
+        WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(webView);
+        if (insets == null) return;
+        // Before Android 10 there is no back gesture; the compat value would be the nav bar
+        Insets gestures = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                ? insets.getInsets(WindowInsetsCompat.Type.systemGestures())
+                : Insets.NONE;
+        float density = getResources().getDisplayMetrics().density;
+        webView.evaluateJavascript(
+                "document.documentElement.style.setProperty('--gesture-left','" + Math.round(gestures.left / density) + "px');"
+                        + "document.documentElement.style.setProperty('--gesture-right','" + Math.round(gestures.right / density) + "px');",
+                null);
     }
 }
