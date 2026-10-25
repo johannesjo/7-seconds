@@ -70,7 +70,8 @@ export function generateHordeElevationZones(): ElevationZone[] {
 
   // Guaranteed zone near player spawn (bottom area, y: 0.75–0.85)
   const spawnW = randomInRange(100, 180);
-  const spawnH = randomInRange(60, 80);
+  // Never taller than the band, which is only 64px on the standard map
+  const spawnH = Math.min(randomInRange(60, 80), Math.round(MAP_HEIGHT * 0.10));
   const spawnX = randomInRange(50, MAP_WIDTH - 50 - spawnW);
   const spawnYMin = Math.round(MAP_HEIGHT * 0.75);
   const spawnYMax = Math.round(MAP_HEIGHT * 0.85) - spawnH;

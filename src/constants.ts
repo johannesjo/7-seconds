@@ -6,9 +6,10 @@ const MAX_MAP_WIDTH = 1000;
 const MAX_MAP_HEIGHT = 1000;
 
 /** Every battle is fought on this map, whatever the screen: the renderer scales
- *  it to fit, so ranges, speeds and layouts play the same on every device. */
-export const STANDARD_MAP_WIDTH = 450;
-export const STANDARD_MAP_HEIGHT = 800;
+ *  it to fit, so ranges, speeds and layouts play the same on every device.
+ *  Sized to the most common phone width, so phones show it at full size. */
+export const STANDARD_MAP_WIDTH = 360;
+export const STANDARD_MAP_HEIGHT = 640;
 
 export let MAP_WIDTH = STANDARD_MAP_WIDTH;
 export let MAP_HEIGHT = STANDARD_MAP_HEIGHT;
