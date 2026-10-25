@@ -1,6 +1,6 @@
 // The match referee end to end: requests in, the real database functions and
 // engine underneath (tests/pg.ts). Skipped without SEVEN_PG_URL.
-import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { PG_URL, createTestDatabase, type TestDatabase } from './pg';
 import { PsqlStore } from './psql-store';
 import { handleReferee, cleanName, ROUND_TICKS, type MatchRow, type RefereeDeps, type User } from '../src/server/referee';
@@ -96,7 +96,11 @@ describeDb('referee with the database', () => {
     background = [];
     // A different sequence per test: the same one would draw the same match ids.
     rng = createRng(1234 + ++testIndex);
+    // New boards come from Math.random: seed it too, so each test always plays
+    // the same battles (an unlucky board could end in an unrated draw).
+    vi.spyOn(Math, 'random').mockImplementation(createRng(4321 + testIndex));
   });
+  afterEach(() => { vi.restoreAllMocks(); });
 
   it('plays a friend match: invite, join, plans held until both are in, then resolved', async () => {
     const created = await ok(ANN, { action: 'create', name: 'Ann' });
