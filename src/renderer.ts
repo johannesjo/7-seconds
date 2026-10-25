@@ -75,7 +75,7 @@ export class Renderer {
   }
 
   private onWindowResize = (): void => {
-    // A hidden battle screen has no size to fit; it refits when shown.
+    // Skip while the container has no size (not laid out yet)
     if (this.app.canvas.parentElement?.clientWidth) this.fitToContainer();
   };
 
@@ -810,6 +810,12 @@ export class Renderer {
     this.app.stage.scale.set(1);
     this.app.stage.position.set(0, 0);
     this.drawBackground();
+  }
+
+  /** Back to the standard map, e.g. after an online match recorded on another size. */
+  useStandardMap(): void {
+    if (MAP_WIDTH === STANDARD_MAP_WIDTH && MAP_HEIGHT === STANDARD_MAP_HEIGHT) return;
+    this.adaptToRemoteMap(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
   }
 
   destroy(): void {

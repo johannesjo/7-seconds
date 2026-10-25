@@ -144,8 +144,8 @@ export class GameEngine {
     // New battles are fought on the standard map, even after an online match
     // recorded on another size
     if (!this.initialState && (MAP_WIDTH !== STANDARD_MAP_WIDTH || MAP_HEIGHT !== STANDARD_MAP_HEIGHT)) {
+      this.renderer?.useStandardMap();
       setMapSize(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
-      this.renderer?.adaptToRemoteMap(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
     }
 
     // Load map before spawning units so we can avoid placing them inside blocks
