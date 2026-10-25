@@ -83,7 +83,7 @@ export function generateHordeElevationZones(): ElevationZone[] {
   const nestW = randomInRange(90, 140);
   const nestH = randomInRange(50, 70);
   const nestX = randomInRange(50, MAP_WIDTH - 50 - nestW);
-  const nestY = randomInRange(Math.round(MAP_HEIGHT * 0.06), Math.round(MAP_HEIGHT * 0.20) - nestH);
+  const nestY = randomInRange(Math.ceil(MAP_HEIGHT * 0.06), Math.floor(MAP_HEIGHT * 0.20) - nestH);
   zones.push({ x: nestX, y: nestY, w: nestW, h: nestH });
 
   // 1-3 additional zones further up (y: 0.30–0.70)
