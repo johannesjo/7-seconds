@@ -264,9 +264,8 @@
        so drags on it never start a system back swipe. The app sets the zone
        widths; 24px is Android's default for builds that don't. */
     .edge-guard #pixi-container {
-      position: relative;
-      width: calc(100% - var(--gesture-left, 24px) - var(--gesture-right, 24px));
-      left: calc((var(--gesture-left, 24px) - var(--gesture-right, 24px)) / 2);
+      margin-left: var(--gesture-left, 24px);
+      margin-right: var(--gesture-right, 24px);
     }
     #pixi-container canvas {
       max-width: 100%;
