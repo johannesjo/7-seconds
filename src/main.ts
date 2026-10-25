@@ -902,7 +902,7 @@ function startNextHordeWave(plan: HordeWavePlan): void {
     horde: true,
     cinematic: !getSettings().reducedMotion,
     hordeBlueUnits: hordeUnits,
-    hordeRedUnits: spawnHordeWave(plan, hordeMap!.obstacles, hordeMap!.elevationZones),
+    hordeRedUnits: spawnHordeWave(plan, hordeMap!.obstacles, hordeMap!.elevationZones, hordeUnits.filter(u => u.alive).length),
     hordeMap: hordeMap!,
     onInspectUnit: showUnitInfo,
   });
