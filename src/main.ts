@@ -670,6 +670,9 @@ async function initRenderer(): Promise<void> {
 
 function showPreview(): void {
   if (!renderer) return;
+  // Menu modes build their maps from here on (tutorial, horde, ...), so leave
+  // any online match's map size behind now
+  renderer.useStandardMap();
   const battlefield = generateBattlefield();
   renderer.renderElevationZones(battlefield.elevationZones);
   renderer.renderObstacles(battlefield.obstacles);

@@ -8,6 +8,7 @@ import { createUnitFromState } from './units';
 import { planTeamOrders } from './ai-planner';
 import { sanitizePlan, type PathList } from './online-plan';
 import { clampPathLength } from './path-orders';
+import { setMapSize } from './constants';
 
 export type BotDifficulty = 'recruit' | 'veteran';
 
@@ -29,6 +30,8 @@ function halfway(start: Vec2, waypoints: Vec2[]): Vec2[] {
  *  takes the best move, now and then the second best, so a line that beat it
  *  once doesn't simply win again. */
 export function planBotPaths(state: OnlineGameState, team: Team, difficulty: BotDifficulty, rng: () => number): PathList {
+  // Plan on the map the match was recorded on
+  setMapSize(state.mapWidth, state.mapHeight);
   const units = state.units.map(u => createUnitFromState(u));
   const recruit = difficulty === 'recruit';
   const plans = planTeamOrders(units, state.obstacles, state.elevationZones, team, {

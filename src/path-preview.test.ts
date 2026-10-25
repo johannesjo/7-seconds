@@ -76,7 +76,7 @@ describe('predictPath', () => {
 
   it('follows acceleration and a sharp bend at the six-second cutoff', () => {
     const blade = createUnit('b', 'blade', 'blue', { x: 100, y: 300 });
-    const path = [blade.pos, { x: 800, y: 300 }, { x: 800, y: 800 }, { x: 100, y: 800 }];
+    const path = [blade.pos, { x: 400, y: 300 }, { x: 400, y: 750 }, { x: 100, y: 750 }, { x: 100, y: 400 }, { x: 350, y: 400 }];
     const predicted = predictPath(blade, path);
     const actual = runActualMovement(blade, path, 6);
 

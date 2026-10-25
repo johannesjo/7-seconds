@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { GameEngine } from './game';
 import { hashGameState } from './online-sync';
+import { MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT } from './constants';
 import type { OnlineGameState } from './online-types';
 
 // Proves the lockstep fix: the host transmits the *per-round* seed and the guest
@@ -66,5 +67,22 @@ describe('lockstep determinism', () => {
       return hashGameState(eng.getUnits());
     })();
     expect(fromArg).toBe(runRound(12347, 40));
+  });
+});
+
+describe('map size', () => {
+  it('simulates on the size a state was recorded on, and seeds new matches on the standard map', () => {
+    const old = GameEngine.generateInitialState();
+    GameEngine.resolveRound({ ...old, mapWidth: 1000, mapHeight: 1000 }, [], [], 1, 60);
+    expect([MAP_WIDTH, MAP_HEIGHT]).toEqual([1000, 1000]);
+
+    const fresh = GameEngine.generateInitialState();
+    expect([fresh.mapWidth, fresh.mapHeight]).toEqual([STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT]);
+    for (const u of fresh.units) {
+      expect(u.x).toBeGreaterThan(0);
+      expect(u.x).toBeLessThan(STANDARD_MAP_WIDTH);
+      expect(u.y).toBeGreaterThan(0);
+      expect(u.y).toBeLessThan(STANDARD_MAP_HEIGHT);
+    }
   });
 });
