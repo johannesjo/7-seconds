@@ -189,8 +189,18 @@ export function createUnitFromState(s: { id: string; type: UnitType; team: Team;
   return unit;
 }
 
-/** If pos is inside any block, nudge it to the nearest edge + padding. */
+/** If pos is inside any block, nudge it to the nearest edge + padding. A nudge
+ *  can land in a neighbouring block, so a few passes clear touching ones. */
 export function nudgeOutOfBlocks(pos: Vec2, blocks: Obstacle[], padding = 4): Vec2 {
+  for (let pass = 0; pass < 4; pass++) {
+    const next = nudgeOutOfFirstBlock(pos, blocks, padding);
+    if (next === pos) break;
+    pos = next;
+  }
+  return pos;
+}
+
+function nudgeOutOfFirstBlock(pos: Vec2, blocks: Obstacle[], padding: number): Vec2 {
   for (const b of blocks) {
     const left = b.x - padding;
     const right = b.x + b.w + padding;
@@ -325,13 +335,14 @@ export function createMissionArmy(team: Team, composition: { type: UnitType; cou
     }
   } else {
     // Red spawns spread across the top ~60% of the map
-    const margin = 80;
+    const margin = Math.min(80, MAP_WIDTH * 0.08);
     const xRange = MAP_WIDTH - margin * 2;
-    const yMin = MAP_HEIGHT * 0.02;
-    const yMax = MAP_HEIGHT * 0.25;
     // Deterministic spread: distribute evenly with staggered offsets
     const cols = Math.min(totalUnits, Math.ceil(Math.sqrt(totalUnits * 2)));
     const rows = Math.ceil(totalUnits / cols);
+    // Big armies reach further down rather than spawning on top of each other
+    const yMin = MAP_HEIGHT * 0.02;
+    const yMax = Math.min(MAP_HEIGHT * 0.4, Math.max(MAP_HEIGHT * 0.25, yMin + rows * 24));
     const xStep = xRange / Math.max(cols, 1);
     const yStep = (yMax - yMin) / Math.max(rows, 1);
     let index = 0;

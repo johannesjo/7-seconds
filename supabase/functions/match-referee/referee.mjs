@@ -5,8 +5,8 @@ var MIN_MAP_WIDTH = 360;
 var MIN_MAP_HEIGHT = 620;
 var MAX_MAP_WIDTH = 1e3;
 var MAX_MAP_HEIGHT = 1e3;
-var STANDARD_MAP_WIDTH = 450;
-var STANDARD_MAP_HEIGHT = 800;
+var STANDARD_MAP_WIDTH = 360;
+var STANDARD_MAP_HEIGHT = 640;
 var MAP_WIDTH = STANDARD_MAP_WIDTH;
 var MAP_HEIGHT = STANDARD_MAP_HEIGHT;
 function setMapSize(w, h) {
@@ -212,6 +212,14 @@ function createUnitFromState(s) {
   return unit;
 }
 function nudgeOutOfBlocks(pos, blocks, padding = 4) {
+  for (let pass = 0; pass < 4; pass++) {
+    const next = nudgeOutOfFirstBlock(pos, blocks, padding);
+    if (next === pos) break;
+    pos = next;
+  }
+  return pos;
+}
+function nudgeOutOfFirstBlock(pos, blocks, padding) {
   for (const b of blocks) {
     const left = b.x - padding;
     const right = b.x + b.w + padding;

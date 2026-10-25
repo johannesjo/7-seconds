@@ -18,7 +18,7 @@
 
 Terrain matters: elevation grants range bonuses, obstacles block movement and line of sight, and flanking deals extra damage.
 
-Every battle is fought on the same 450×800 map, whatever the device; the board is scaled to fit the screen, so ranges and distances play the same everywhere.
+Every battle is fought on the same 360×640 map, whatever the device; the board is scaled to fit the screen, so ranges and distances play the same everywhere.
 
 ## Game Modes
 

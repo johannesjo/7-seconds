@@ -295,9 +295,9 @@ describe('bladeAoeAttack', () => {
 
 describe('blade momentum', () => {
   it('builds smoothSpeed when moving straight', () => {
-    const blade = createUnit('b1', 'blade', 'blue', { x: 100, y: 400 });
-    blade.moveTarget = { x: 900, y: 400 }; // straight right
-    blade.vel = { x: 120, y: 0 };
+    const blade = createUnit('b1', 'blade', 'blue', { x: 180, y: 20 });
+    blade.moveTarget = { x: 180, y: 900 }; // straight down, the map's long side
+    blade.vel = { x: 0, y: 120 };
 
     for (let i = 0; i < 30; i++) {
       moveUnit(blade, 0.05, [], []);
