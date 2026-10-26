@@ -10,6 +10,16 @@ import { Theme, NIGHT_THEME } from './theme';
  *  without a huge canvas to draw and record on big screens. */
 const MAX_RESOLUTION = 2;
 
+/** Grid spacing scaled to the map so its density looks like real graph paper. */
+function gridSpacing(): number {
+  return Math.min(30, Math.round(Math.min(MAP_WIDTH, MAP_HEIGHT) / 24));
+}
+
+/** CSS colour from a theme colour. */
+function cssColor(color: number, alpha = 1): string {
+  return `rgba(${(color >> 16) & 255}, ${(color >> 8) & 255}, ${color & 255}, ${alpha})`;
+}
+
 export class Renderer {
   private app: Application;
   private unitGraphics: Map<string, Container> = new Map();
@@ -30,6 +40,8 @@ export class Renderer {
   /** Called whenever any path drawer finishes a path. */
   onPathDrawn: (() => void) | null = null;
   onZoomAvailable: (() => void) | null = null;
+  /** CSS pixels per map pixel, as last fitted to the container. */
+  private viewScale = 1;
   /** Camera: zoom eases toward its target around `focus`; shake decays. */
   private camera = { zoom: 1, targetZoom: 1, focus: { x: 0, y: 0 }, shake: 0, active: false };
   private resizeObserver: ResizeObserver | null = null;
@@ -62,20 +74,60 @@ export class Renderer {
   }
 
   /**
-   * Show the whole map as large as the container allows, keeping its shape
-   * (the container's leftover space stays empty). The map keeps its logical
-   * size; only the pixel density follows the screen so it stays sharp.
+   * Show the whole map as large as the container's content box allows,
+   * keeping its shape; the leftover space shows the paper around the board
+   * (paintSurround). The map keeps its logical size; only the pixel density
+   * follows the screen so it stays sharp.
    */
   fitToContainer(): void {
     const canvas = this.app.canvas;
     const container = canvas.parentElement;
-    const containerW = container?.clientWidth || window.innerWidth;
+    const pad = this.containerPadding();
+    const containerW = container?.clientWidth ? container.clientWidth - pad.left - pad.right : window.innerWidth;
     const containerH = container?.clientHeight || window.innerHeight;
     const scale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
     const resolution = Math.min(MAX_RESOLUTION, Math.max(1, scale * (window.devicePixelRatio || 1)));
     this.app.renderer.resize(MAP_WIDTH, MAP_HEIGHT, resolution);
     canvas.style.width = `${MAP_WIDTH * scale}px`;
     canvas.style.height = `${MAP_HEIGHT * scale}px`;
+    this.viewScale = scale;
+    this.paintSurround();
+  }
+
+  /** Side padding of the container (the Android back-gesture zones). */
+  private containerPadding(): { left: number; right: number } {
+    const container = this.app.canvas.parentElement;
+    if (!container) return { left: 0, right: 0 };
+    const style = getComputedStyle(container);
+    return { left: parseFloat(style.paddingLeft) || 0, right: parseFloat(style.paddingRight) || 0 };
+  }
+
+  /**
+   * Carry the board's paper and grid past its edges under a light shade, so
+   * the screen's leftover space reads as the table around the board instead
+   * of empty bars. Only the board itself is played on.
+   */
+  private paintSurround(): void {
+    const container = this.app.canvas.parentElement;
+    if (!container?.clientWidth) return;
+    const scale = this.viewScale;
+    const pad = this.containerPadding();
+    // The canvas is centred in the content box; line the grid up with its own
+    const left = pad.left + (container.clientWidth - pad.left - pad.right - MAP_WIDTH * scale) / 2;
+    const top = (container.clientHeight - MAP_HEIGHT * scale) / 2;
+    const step = gridSpacing() * scale;
+    const line = Math.max(1, scale);
+    const grid = cssColor(this.theme.grid, this.theme.gridAlpha);
+    const style = container.style;
+    style.backgroundColor = cssColor(this.theme.bg);
+    style.backgroundImage = [
+      'linear-gradient(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.12))',
+      `linear-gradient(to right, ${grid} ${line}px, transparent ${line}px)`,
+      `linear-gradient(to bottom, ${grid} ${line}px, transparent ${line}px)`,
+    ].join(', ');
+    style.backgroundSize = `auto, ${step}px ${step}px, ${step}px ${step}px`;
+    const origin = `${left - line / 2}px ${top - line / 2}px`;
+    style.backgroundPosition = `0 0, ${origin}, ${origin}`;
   }
 
   private onContainerResize = (): void => {
@@ -138,15 +190,14 @@ export class Renderer {
     // Fill background with theme color (needed when stage is scaled for letterboxing)
     this.bgGraphics.rect(0, 0, MAP_WIDTH, MAP_HEIGHT);
     this.bgGraphics.fill(this.theme.bg);
-    // Scale grid spacing to screen size so density looks like real graph paper
-    const gridSpacing = Math.min(30, Math.round(Math.min(MAP_WIDTH, MAP_HEIGHT) / 24));
+    const spacing = gridSpacing();
     this.bgGraphics.setStrokeStyle({ width: 1, color: this.theme.grid, alpha: this.theme.gridAlpha });
-    for (let x = 0; x <= MAP_WIDTH; x += gridSpacing) {
+    for (let x = 0; x <= MAP_WIDTH; x += spacing) {
       this.bgGraphics.moveTo(x, 0);
       this.bgGraphics.lineTo(x, MAP_HEIGHT);
       this.bgGraphics.stroke();
     }
-    for (let y = 0; y <= MAP_HEIGHT; y += gridSpacing) {
+    for (let y = 0; y <= MAP_HEIGHT; y += spacing) {
       this.bgGraphics.moveTo(0, y);
       this.bgGraphics.lineTo(MAP_WIDTH, y);
       this.bgGraphics.stroke();
@@ -760,6 +811,7 @@ export class Renderer {
     this.theme = theme;
     this.app.renderer.background.color = theme.bg;
     this.drawBackground();
+    this.paintSurround();
     // Re-render terrain with new colors
     if (this.lastElevationZones.length > 0) this.renderElevationZones(this.lastElevationZones);
     if (this.lastObstacles.length > 0) this.renderObstacles(this.lastObstacles);
