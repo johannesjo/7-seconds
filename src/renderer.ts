@@ -42,6 +42,8 @@ export class Renderer {
   onZoomAvailable: (() => void) | null = null;
   /** CSS pixels per map pixel, as last fitted to the container. */
   private viewScale = 1;
+  /** CSS pixels from the content box's top to the map's, as last fitted. */
+  private viewTop = 0;
   /** Camera: zoom eases toward its target around `focus`; shake decays. */
   private camera = { zoom: 1, targetZoom: 1, focus: { x: 0, y: 0 }, shake: 0, active: false };
   private resizeObserver: ResizeObserver | null = null;
@@ -74,32 +76,43 @@ export class Renderer {
   }
 
   /**
-   * Show the whole map as large as the container's content box allows,
-   * keeping its shape; the leftover space shows the paper around the board
-   * (paintSurround). The map keeps its logical size; only the pixel density
-   * follows the screen so it stays sharp.
+   * Show the whole map as large as the container allows below its top
+   * padding (the HUD band), keeping its shape; the leftover space shows the
+   * paper around the board (paintSurround). The bottom padding (the Done
+   * button's band) is kept clear only as far as the leftover space allows, so
+   * it never shrinks the map. The map keeps its logical size; only the pixel
+   * density follows the screen so it stays sharp.
    */
   fitToContainer(): void {
     const canvas = this.app.canvas;
     const container = canvas.parentElement;
     const pad = this.containerPadding();
     const containerW = container?.clientWidth ? container.clientWidth - pad.left - pad.right : window.innerWidth;
-    const containerH = container?.clientHeight || window.innerHeight;
+    const containerH = Math.max(1, (container?.clientHeight || window.innerHeight) - pad.top);
     const scale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
     const resolution = Math.min(MAX_RESOLUTION, Math.max(1, scale * (window.devicePixelRatio || 1)));
     this.app.renderer.resize(MAP_WIDTH, MAP_HEIGHT, resolution);
     canvas.style.width = `${MAP_WIDTH * scale}px`;
     canvas.style.height = `${MAP_HEIGHT * scale}px`;
+    // Centre the map between both bands if it fits, else keep it under the HUD
+    this.viewTop = Math.max(0, (containerH - MAP_HEIGHT * scale - pad.bottom) / 2);
+    canvas.style.marginTop = `${this.viewTop}px`;
     this.viewScale = scale;
     this.paintSurround();
   }
 
-  /** Side padding of the container (the Android back-gesture zones). */
-  private containerPadding(): { left: number; right: number } {
+  /** Padding of the container: the HUD and Done button bands, and the
+   *  Android back-gesture zones at the sides. */
+  private containerPadding(): { left: number; right: number; top: number; bottom: number } {
     const container = this.app.canvas.parentElement;
-    if (!container) return { left: 0, right: 0 };
+    if (!container) return { left: 0, right: 0, top: 0, bottom: 0 };
     const style = getComputedStyle(container);
-    return { left: parseFloat(style.paddingLeft) || 0, right: parseFloat(style.paddingRight) || 0 };
+    return {
+      left: parseFloat(style.paddingLeft) || 0,
+      right: parseFloat(style.paddingRight) || 0,
+      top: parseFloat(style.paddingTop) || 0,
+      bottom: parseFloat(style.paddingBottom) || 0,
+    };
   }
 
   /**
@@ -112,9 +125,9 @@ export class Renderer {
     if (!container?.clientWidth) return;
     const scale = this.viewScale;
     const pad = this.containerPadding();
-    // The canvas is centred in the content box; line the grid up with its own
+    // Line the grid up with the canvas's own (centred across, fitToContainer's top)
     const left = pad.left + (container.clientWidth - pad.left - pad.right - MAP_WIDTH * scale) / 2;
-    const top = (container.clientHeight - MAP_HEIGHT * scale) / 2;
+    const top = pad.top + this.viewTop;
     const step = gridSpacing() * scale;
     const line = Math.max(1, scale);
     const grid = cssColor(this.theme.grid, this.theme.gridAlpha);
