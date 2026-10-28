@@ -1,0 +1,122 @@
+name: Android release
+
+# Builds the signed Play bundle and, when a Play service account is set up,
+# uploads it to a testing track. Run it by hand from the Actions tab after
+# bumping the version (`npm version patch|minor`, which raises versionCode).
+on:
+  workflow_dispatch:
+    inputs:
+      track:
+        description: Play track to upload to
+        type: choice
+        options: [beta, alpha, internal, production]
+        default: beta
+      upload:
+        description: Upload to Play (otherwise only build the bundle)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
+      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check signing secrets
+        run: |
+          missing=""
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [ -n "${!name}" ] || missing="$missing ANDROID_${name#ANDROID_}"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing (see DEPLOYMENT.md, Android)."
+            exit 1
+          fi
+          if [ "${{ inputs.upload }}" = "true" ] && [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error::Upload requested but PLAY_SERVICE_ACCOUNT_JSON is not set. Run again with upload off to only build."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync android
+
+      - name: Write signing and app config
+        working-directory: android
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+          # Optional: server turn alerts (docs/turn-alerts.md)
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+          else
+            echo "::warning::ANDROID_GOOGLE_SERVICES_JSON not set: this build has no server turn alerts."
+          fi
+
+      - name: Build signed bundle
+        working-directory: android
+        # Ranked ids are public (docs/ranked.md), so they come from repository
+        # variables; left unset, the build has no Ranked mode.
+        run: >
+          ./gradlew bundleRelease --no-daemon
+          -PrankedPlayGamesAppId="${{ vars.RANKED_PLAY_GAMES_APP_ID }}"
+          -PrankedGoogleWebClientId="${{ vars.RANKED_GOOGLE_WEB_CLIENT_ID }}"
+
+      - name: Remove signing files
+        if: always()
+        working-directory: android
+        run: rm -f release.jks keystore.properties app/google-services.json
+
+      - name: Read version
+        id: version
+        run: |
+          echo "name=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' android/app/build.gradle)" >> "$GITHUB_OUTPUT"
+          echo "code=$(sed -n 's/.*versionCode \([0-9]*\).*/\1/p' android/app/build.gradle)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 7-seconds-${{ steps.version.outputs.name }}-${{ steps.version.outputs.code }}
+          path: |
+            android/app/build/outputs/bundle/release/app-release.aab
+            android/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+
+      - name: Upload to Play
+        if: inputs.upload
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: io.github.johannesjo.sevenseconds
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          mappingFile: android/app/build/outputs/mapping/release/mapping.txt
+          track: ${{ inputs.track }}
+          status: completed

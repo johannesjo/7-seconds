@@ -104,4 +104,37 @@ The backend deploys before the client, so between the two, old clients get
 `npm run cap:build` builds the signed release bundle (needs
 `android/keystore.properties`). Web changes reach installed apps without a
 release; native changes (the Ranked and turn-alert plugins, their
-configuration) need a new build with a higher `versionCode`.
+configuration, `MainActivity`) need a new build with a higher `versionCode`.
+
+### Releasing from GitHub Actions
+
+`.github/workflows/android-release.yml` builds the signed bundle and uploads it
+to a Play track. To release:
+
+1. Bump the version on `main`: `npm version patch --no-git-tag-version` (or
+   `minor`) raises `versionCode`; commit `package.json`, `package-lock.json`
+   and `android/app/build.gradle`. Without `--no-git-tag-version`, npm's
+   `postversion` hook also builds locally, which needs the keystore.
+2. Actions → **Android release** → **Run workflow**, pick the track (default
+   `beta`). Untick "Upload" to only build; the bundle and its R8 mapping are
+   kept as a run artifact either way.
+
+One-time setup, under Settings → Secrets and variables → Actions:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | the upload keystore, base64 (`base64 -w0 upload.jks`, on macOS `base64 -i upload.jks`) |
+| `ANDROID_KEYSTORE_PASSWORD` | `storePassword` from your `keystore.properties` |
+| `ANDROID_KEY_ALIAS` | `keyAlias` |
+| `ANDROID_KEY_PASSWORD` | `keyPassword` |
+| `PLAY_SERVICE_ACCOUNT_JSON` | key of a Google Cloud service account invited in Play Console (Users and permissions) with "Release to testing tracks"; only needed for the upload |
+| `ANDROID_GOOGLE_SERVICES_JSON` | optional: contents of `google-services.json` (server turn alerts) |
+
+| Variable | Value |
+|---|---|
+| `RANKED_PLAY_GAMES_APP_ID` | optional: Play Games application id (Ranked, docs/ranked.md) |
+| `RANKED_GOOGLE_WEB_CLIENT_ID` | optional: Google web OAuth client id (Ranked) |
+
+Leave the optional ones out and the build simply has no server turn alerts or
+Ranked mode, the same as a local build without them. If your local builds
+include them, set them here too, or a CI release drops those features.
