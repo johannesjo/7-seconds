@@ -86,6 +86,19 @@ function resetOrders(unit: Unit): void {
   unit.rocketFired = false;
 }
 
+interface LabelBox { left: number; top: number; right: number; bottom: number }
+interface CircleObstacle { x: number; y: number; r: number }
+
+function boxesOverlap(a: LabelBox, b: LabelBox): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+function boxHitsCircle(box: LabelBox, c: CircleObstacle): boolean {
+  const nx = Math.max(box.left, Math.min(c.x, box.right));
+  const ny = Math.max(box.top, Math.min(c.y, box.bottom));
+  return (nx - c.x) ** 2 + (ny - c.y) ** 2 < c.r * c.r;
+}
+
 type Orders = Pick<Unit, 'waypoints' | 'moveTarget' | 'rocketPath' | 'rocketFired'>;
 
 function copyOrders(unit: Unit): Orders {
@@ -117,6 +130,8 @@ export class PathDrawer {
   private labelContainer: Container;
   private labelPool: Text[] = [];
   private labelIndex = 0;
+  /** Ghost markers drawn this frame, which labels must not cover. */
+  private ghostObstacles: CircleObstacle[] = [];
   private hoverLabel: Text;
   private onZoneHighlight: ((pos: Vec2 | null) => void) | null = null;
   onInspectUnit: ((unit: Unit | null) => void) | null = null;
@@ -208,6 +223,7 @@ export class PathDrawer {
 
   /** Translucent unit outline marks an approximate position after this round. */
   private drawGhost(gfx: Graphics, unit: Unit, pos: Vec2, color: number, alpha: number): void {
+    this.ghostObstacles.push({ x: pos.x, y: pos.y, r: unit.radius + 1 });
     gfx.circle(pos.x, pos.y, unit.radius);
     gfx.fill({ color, alpha: alpha * 0.13 });
     gfx.circle(pos.x, pos.y, unit.radius);
@@ -377,6 +393,41 @@ export class PathDrawer {
     return prediction;
   }
 
+  /** Nudge labels so they don't sit on each other or on another unit's ghost
+   *  marker (e.g. two paths ending close together). Earlier labels keep their
+   *  spot; later ones try above, then beside, then below. */
+  private declutterLabels(): void {
+    const placed: LabelBox[] = [];
+    for (let i = 0; i < this.labelIndex; i++) {
+      const label = this.labelPool[i];
+      const w = label.width;
+      const h = label.height;
+      const ox = label.position.x;
+      const oy = label.position.y;
+      const boxAt = (x: number, y: number): LabelBox =>
+        ({ left: x - w / 2, top: y - h, right: x + w / 2, bottom: y });
+      const step = h + 2;
+      const side = w / 2 + 4;
+      const candidates: Array<[number, number]> = [
+        [0, 0], [0, -step], [-side, 0], [side, 0], [0, -2 * step],
+        [-side, -step], [side, -step], [0, step], [0, 2 * step],
+      ];
+      // A label may touch the ghost it belongs to (just below it), so only
+      // count ghosts the original box isn't already resting against.
+      const ownBox = boxAt(ox, oy + 6);
+      const foreign = this.ghostObstacles.filter(c => !boxHitsCircle(ownBox, c));
+      let chosen = boxAt(ox, oy);
+      for (const [dx, dy] of candidates) {
+        const box = boxAt(ox + dx, oy + dy);
+        if (placed.some(p => boxesOverlap(p, box)) || foreign.some(c => boxHitsCircle(box, c))) continue;
+        chosen = box;
+        break;
+      }
+      label.position.set((chosen.left + chosen.right) / 2, chosen.bottom);
+      placed.push(chosen);
+    }
+  }
+
   private timeText(time: number | null): string {
     return time === null ? `>${MAX_PREDICTION_TIME_S}s` : `~${time.toFixed(1)}s`;
   }
@@ -435,6 +486,7 @@ export class PathDrawer {
   renderPaths(): void {
     this.gfx.clear();
     this.labelIndex = 0;
+    this.ghostObstacles = [];
 
     for (const unit of this.units) {
       if (!unit.alive || unit.waypoints.length === 0) continue;
@@ -520,6 +572,7 @@ export class PathDrawer {
     }
 
     this.renderRockets();
+    this.declutterLabels();
 
     // Hide unused pool labels
     for (let i = this.labelIndex; i < this.labelPool.length; i++) {
