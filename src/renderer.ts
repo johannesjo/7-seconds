@@ -88,7 +88,7 @@ export class Renderer {
     const container = canvas.parentElement;
     const pad = this.containerPadding();
     const containerW = container?.clientWidth ? container.clientWidth - pad.left - pad.right : window.innerWidth;
-    const containerH = (container?.clientHeight || window.innerHeight) - pad.top;
+    const containerH = Math.max(1, (container?.clientHeight || window.innerHeight) - pad.top);
     const scale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
     const resolution = Math.min(MAX_RESOLUTION, Math.max(1, scale * (window.devicePixelRatio || 1)));
     this.app.renderer.resize(MAP_WIDTH, MAP_HEIGHT, resolution);

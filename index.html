@@ -222,7 +222,7 @@
     .ranked-list li.loss { border-left: 4px solid var(--color-hud-red); }
     .ranked-list li.you { font-weight: bold; outline: 1px solid var(--color-online-title); }
     .ranked-account { margin-top: 28px; }
-    #battle-note { display: none; position: fixed; top: calc(34px + var(--sat)); left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 4px 10px; font-size: 13px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text); background: var(--color-online-border-subtle); border: 1px solid var(--color-online-border); border-radius: 6px; z-index: 13; pointer-events: none; }
+    #battle-note { display: none; position: fixed; top: calc(34px + var(--sat)); left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 2px 10px; font-size: 13px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text); background: var(--color-online-border-subtle); border: 1px solid var(--color-online-border); border-radius: 6px; z-index: 13; pointer-events: none; }
     #battle-note.win { border-color: var(--color-btn-green-border); }
     #battle-note.loss { border-color: var(--color-hud-red); }
     .lobby-btn { padding: 10px 18px; font: inherit; font-size: 14px; background: var(--color-btn-bg); color: var(--color-text); border: 1px solid var(--color-btn-border); border-radius: 4px; cursor: pointer; }
@@ -254,7 +254,8 @@
     #pixi-container {
       display: flex;
       justify-content: center;
-      align-items: center;
+      /* The renderer sets the canvas's top margin; it may reach into the bottom padding */
+      align-items: flex-start;
       flex: 1;
       min-height: 0;
       /* Take the screen's full width, not the canvas's: the renderer sizes
@@ -264,7 +265,7 @@
       /* The map sits below the HUD band. The bottom padding is the Done
          button's band: the renderer keeps the map out of it only when that
          doesn't shrink the map (see Renderer.fitToContainer). */
-      padding-top: calc(var(--hud-h) + var(--sat));
+      padding-top: calc(var(--map-top, var(--hud-h)) + var(--sat));
       padding-bottom: calc(36px + var(--sab));
     }
     /* Android app: keep the map out of the back-gesture zone at each edge,
@@ -278,9 +279,6 @@
       /* The board's edge against the paper around it (see Renderer.paintSurround) */
       box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25), 0 0 16px rgba(0, 0, 0, 0.2);
       max-width: 100%;
-      /* Placed by the renderer, and may reach into the bottom padding */
-      align-self: flex-start;
-      flex-shrink: 0;
       display: block;
       touch-action: none;
     }
@@ -367,6 +365,8 @@
     #planning-overlay.tutorial { width: min(460px, calc(100% - 32px)); text-align: center; }
     #planning-overlay.tutorial #planning-label { font-size: 18px; letter-spacing: 1px; }
     #planning-overlay.tutorial #planning-instructions { display: block; opacity: 1; line-height: 1.5; }
+    /* Keep the map below the lesson text for the whole tutorial, so it doesn't jump between phases */
+    #battle-screen:has(#planning-overlay.tutorial) #pixi-container { --map-top: 76px; }
     #skip-tutorial-btn { display: none; }
     #planning-overlay.tutorial.active ~ #skip-tutorial-btn {
       display: block;
@@ -648,6 +648,8 @@
       #prompt-screen p { font-size: 13px; padding: 0 8px; }
       .menu { gap: 14px; }
       :root { --hud-h: 48px; }
+      /* Fit under the planning label, inside the HUD band */
+      #battle-note { top: calc(27px + var(--sat)); padding: 2px 8px; font-size: 12px; }
       #battle-hud { font-size: 11px; padding: calc(6px + var(--sat)) 8px 6px; gap: 4px; }
       #battle-hud > div { gap: 6px; }
       #round-timer { font-size: 22px; }
