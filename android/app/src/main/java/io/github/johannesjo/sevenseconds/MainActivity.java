@@ -80,10 +80,12 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void updateGestureGuard(WebView webView) {
-        // The policy pages keep the bar and the back swipe that leaves them
+        // The policy pages keep the bar and the back swipe that leaves them.
+        // The game is served from a folder (server.url ends in "/7-seconds/"),
+        // so its last path segment is that folder, not "index.html".
         String url = webView.getUrl();
         String page = url == null ? null : Uri.parse(url).getLastPathSegment();
-        gestureGuard = url != null && (page == null || page.equals("index.html"));
+        gestureGuard = url != null && (page == null || !page.endsWith(".html") || page.equals("index.html"));
         WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(getWindow(), webView);
         bars.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         if (gestureGuard) {
