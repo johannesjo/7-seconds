@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "696934308369",
+    "project_id": "seven-seconds-ranked",
+    "storage_bucket": "seven-seconds-ranked.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:696934308369:android:fa47d3c597eb97e7d7afb0",
+        "android_client_info": {
+          "package_name": "io.github.johannesjo.sevenseconds"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "696934308369-338963jktnrv2flf6kg6b314rssofnaq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDiSrE0Xe7Wt4S4Y1eSgxR14nrBIzKKW18"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "696934308369-338963jktnrv2flf6kg6b314rssofnaq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
