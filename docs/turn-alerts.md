@@ -54,8 +54,12 @@ For Android FCM:
 1. **Firebase project.** Add Firebase to the Google Cloud project that holds
    the Play Games configuration (or any project), add the Android app
    `io.github.johannesjo.sevenseconds`, and download `google-services.json`
-   into `android/app/`. It holds public identifiers; commit it. Restrict its
-   API key to this Android app.
+   into `android/app/` for local builds. It is gitignored: its API key ships
+   in the app anyway, but GitHub secret scanning flags it, so keep it out of
+   the repo. For CI release builds store its contents as the
+   `ANDROID_GOOGLE_SERVICES_JSON` repository secret (see DEPLOYMENT.md).
+   Restrict its API key to this Android app (package name and signing SHA-1)
+   and to the APIs Firebase needs.
 2. **Sender credentials.** Enable the *Firebase Cloud Messaging API (V1)*,
    create a service account with only the *Firebase Cloud Messaging API
    Admin* role, create a JSON key, and store it:
