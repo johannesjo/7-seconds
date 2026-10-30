@@ -6,6 +6,7 @@ dist
 .worktrees/
 *.png
 !android/app/src/main/res/mipmap-*/ic_launcher*.png
+!android/app/src/main/res/drawable*/splash.png
 !store-assets/*.png
 /.desloppify/
 /output/
