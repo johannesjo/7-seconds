@@ -1,6 +1,7 @@
 import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
 import { PathDrawer } from './path-drawer';
-import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState } from './types';
+import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState, Team } from './types';
+import { sightPolygon, type NightVision } from './night';
 import { MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS, MORTAR_BLAST_RADIUS } from './constants';
 import { EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
@@ -19,6 +20,25 @@ function gridSpacing(): number {
 function cssColor(color: number, alpha = 1): string {
   return `rgba(${(color >> 16) & 255}, ${(color >> 8) & 255}, ${color & 255}, ${alpha})`;
 }
+
+/** What a night battle lets the viewing team see. */
+export interface NightView {
+  team: Team;
+  vision: NightVision;
+  obstacles: Obstacle[];
+  elevationZones: ElevationZone[];
+}
+
+/** Night fog: darkness outside friendly sight, and how faint a ghost (an
+ *  enemy's last-known position) is drawn. */
+const FOG = { color: 0x04060c, alpha: 0.68 };
+const GHOST_ALPHA = 0.35;
+/** Night markers keep their own light colours so they read on the fog in
+ *  either theme: ghosts (last seen here) and muzzle-flash reveals. */
+const GHOST_RING = 0xd8dce8;
+const FLASH_RING = 0xffc23a;
+/** On the dark theme the sight pools are lifted slightly so they stand out. */
+const LIGHT_POOL_ALPHA = 0.06;
 
 export class Renderer {
   private app: Application;
@@ -47,6 +67,13 @@ export class Renderer {
   /** Camera: zoom eases toward its target around `focus`; shake decays. */
   private camera = { zoom: 1, targetZoom: 1, focus: { x: 0, y: 0 }, shake: 0, active: false };
   private resizeObserver: ResizeObserver | null = null;
+  private nightView: NightView | null = null;
+  /** Night layers: darkness (masked by the sight polygons) above the terrain,
+   *  and ghost / muzzle-flash markers above the units. */
+  private fogLayer: Graphics | null = null;
+  private fogMask: Graphics | null = null;
+  private lightPool: Graphics | null = null;
+  private nightMarks: Graphics | null = null;
 
 
   constructor() {
@@ -499,6 +526,10 @@ export class Renderer {
           // Move to dying pool instead of removing immediately
           this.unitGraphics.delete(unit.id);
           this.bladeSpinAngles.delete(unit.id);
+          // A kill in the dark shows where the unit really fell.
+          existing.position.set(unit.pos.x, unit.pos.y);
+          existing.visible = true;
+          existing.alpha = 1;
           this.dyingUnits.set(unit.id, { container: existing, age: 0 });
         }
         continue;
@@ -515,6 +546,22 @@ export class Renderer {
 
       container.x = unit.pos.x;
       container.y = unit.pos.y;
+      container.visible = true;
+      const night = this.nightView;
+      if (night && unit.team !== night.team) {
+        const ghost = night.vision.lastSeen[night.team].get(unit.id);
+        if (night.vision.visible[night.team].has(unit.id)) {
+          container.alpha = 1;
+        } else if (ghost) {
+          container.x = ghost.x;
+          container.y = ghost.y;
+          container.alpha = GHOST_ALPHA;
+        } else {
+          container.visible = false;
+        }
+      } else if (!ctfState) {
+        container.alpha = 1;
+      }
 
       // CTF carrier glow
       if (ctfState) {
@@ -584,6 +631,8 @@ export class Renderer {
         hpBar.clear();
       }
     }
+
+    this.renderNight(units);
 
     // Update dying units — fade out over 0.3s
     const DEATH_DURATION = 0.3;
@@ -814,6 +863,99 @@ export class Renderer {
       dying.container.destroy({ children: true });
     }
     this.dyingUnits.clear();
+  }
+
+  /** Start (or, with null, end) drawing a night battle from one team's eyes. */
+  setNightView(view: NightView | null): void {
+    this.nightView = view;
+    if (!view) {
+      for (const g of [this.fogLayer, this.fogMask, this.lightPool, this.nightMarks]) {
+        if (!g) continue;
+        this.app.stage.removeChild(g);
+        g.destroy();
+      }
+      this.fogLayer = this.fogMask = this.lightPool = this.nightMarks = null;
+      for (const c of this.unitGraphics.values()) {
+        c.visible = true;
+        c.alpha = 1;
+      }
+      return;
+    }
+    if (!this.fogLayer) {
+      this.fogLayer = new Graphics();
+      this.fogMask = new Graphics();
+      this.nightMarks = new Graphics();
+      this.lightPool = new Graphics();
+      this.fogLayer.setMask({ mask: this.fogMask, inverse: true });
+      this.app.stage.addChild(this.fogMask);
+      this.app.stage.addChild(this.fogLayer);
+      this.app.stage.addChild(this.lightPool);
+      this.app.stage.addChild(this.nightMarks);
+    }
+  }
+
+  /** Night: darken everything outside the viewing team's sight, and mark
+   *  enemies' last-known positions and fresh muzzle flashes. */
+  private renderNight(units: Unit[]): void {
+    const view = this.nightView;
+    const fog = this.fogLayer;
+    const mask = this.fogMask;
+    const marks = this.nightMarks;
+    const light = this.lightPool;
+    if (!view || !fog || !mask || !marks || !light) return;
+    const stage = this.app.stage;
+    // Darkness sits just above the terrain: under paths, units and effects,
+    // so revealed enemies and the player's orders stay readable.
+    const terrain = this.obstacleGraphics ?? this.elevationGraphics;
+    const above = terrain ? stage.getChildIndex(terrain) + 1 : 1;
+    if (stage.getChildIndex(fog) !== above) {
+      stage.setChildIndex(fog, Math.min(above, stage.children.length - 1));
+      stage.setChildIndex(mask, stage.getChildIndex(fog));
+      stage.setChildIndex(light, stage.getChildIndex(fog) + 1);
+    }
+    // Markers above every unit
+    if (stage.getChildIndex(marks) !== stage.children.length - 1) stage.setChildIndex(marks, stage.children.length - 1);
+
+    fog.clear();
+    fog.rect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+    fog.fill({ color: FOG.color, alpha: FOG.alpha });
+    mask.clear();
+    light.clear();
+    const darkTheme = (((this.theme.bg >> 16) & 255) + ((this.theme.bg >> 8) & 255) + (this.theme.bg & 255)) / 3 < 128;
+    for (const u of units) {
+      if (!u.alive || u.team !== view.team) continue;
+      const poly = sightPolygon(u, view.obstacles, view.elevationZones, view.vision.sightScale);
+      mask.poly(poly);
+      mask.fill(0xffffff);
+      if (darkTheme) {
+        light.poly(poly);
+        light.fill({ color: 0xbfd0ff, alpha: LIGHT_POOL_ALPHA });
+      }
+    }
+
+    marks.clear();
+    const t = Date.now() / 1000;
+    for (const u of units) {
+      if (!u.alive || u.team === view.team) continue;
+      const seen = view.vision.visible[view.team].has(u.id);
+      const flash = view.vision.revealed.get(u.id) ?? 0;
+      if (seen && flash > 0) {
+        // Gave itself away by firing: a pulse that fades with the reveal.
+        marks.circle(u.pos.x, u.pos.y, u.radius + 6 + 3 * Math.sin(t * 12));
+        marks.stroke({ width: 2.5, color: FLASH_RING, alpha: 0.95 * Math.min(1, flash) });
+      } else if (!seen) {
+        const ghost = view.vision.lastSeen[view.team].get(u.id);
+        if (!ghost) continue;
+        // Dashed ring: "last seen here".
+        const r = u.radius + 5;
+        for (let i = 0; i < 8; i++) {
+          const a0 = (i / 8) * Math.PI * 2;
+          marks.moveTo(ghost.x + Math.cos(a0) * r, ghost.y + Math.sin(a0) * r);
+          marks.arc(ghost.x, ghost.y, r, a0, a0 + Math.PI / 8);
+        }
+        marks.stroke({ width: 1.5, color: GHOST_RING, alpha: 0.6 });
+      }
+    }
   }
 
   get currentTheme(): Theme {

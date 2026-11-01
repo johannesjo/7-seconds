@@ -30,12 +30,14 @@ function dist(a: Vec2, b: Vec2): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-/** The mortar's target: the nearest enemy inside its firing band. */
-export function findMortarTarget(mortar: Unit, allUnits: Unit[], elevationZones: ElevationZone[]): Unit | null {
+/** The mortar's target: the nearest enemy inside its firing band. At night
+ *  `canSee` limits it to enemies a spotter can see. */
+export function findMortarTarget(mortar: Unit, allUnits: Unit[], elevationZones: ElevationZone[], canSee?: (enemy: Unit) => boolean): Unit | null {
   let best: Unit | null = null;
   let bestDist = Infinity;
   for (const u of allUnits) {
     if (!u.alive || u.team === mortar.team || !mortarCanReach(mortar, u, elevationZones)) continue;
+    if (canSee && !canSee(u)) continue;
     const d = dist(mortar.pos, u.pos);
     if (d < bestDist) {
       best = u;

@@ -120,6 +120,9 @@ export class PathDrawer {
   private hoverLabel: Text;
   private onZoneHighlight: ((pos: Vec2 | null) => void) | null = null;
   onInspectUnit: ((unit: Unit | null) => void) | null = null;
+  /** Night battles: only enemies this returns true for can be inspected or
+   *  previewed; null (day) shows every enemy. */
+  canSeeEnemy: ((unit: Unit) => boolean) | null = null;
   /** A movement or rocket path was just finished (for UI feedback). */
   onPathDrawn: (() => void) | null = null;
   /** Pinch zoom became available for this planning phase (map shown small). */
@@ -676,6 +679,7 @@ export class PathDrawer {
       let nearest: Unit | null = null;
       for (const u of this.units) {
         if (!u.alive || u.team === unit.team || !mortarCanReach(probe, u, this.elevationZones)) continue;
+        if (this.canSeeEnemy && !this.canSeeEnemy(u)) continue;
         if (!nearest || distancePt(pos, u.pos) < distancePt(pos, nearest.pos)) nearest = u;
       }
       if (nearest) this.drawBlast(this.hoverGfx, nearest.pos, MORTAR_BLAST_RADIUS, color, 0.9);
@@ -739,6 +743,7 @@ export class PathDrawer {
 
     for (const unit of this.units) {
       if (!unit.alive || unit.team === this.team) continue;
+      if (this.canSeeEnemy && !this.canSeeEnemy(unit)) continue;
       const dist = distancePt(unit.pos, { x: px, y: py });
       if (dist < closestDist) {
         closest = unit;

@@ -762,8 +762,11 @@ export function hasLineOfSight(a: Vec2, b: Vec2, obstacles: Obstacle[], padding 
   return !obstacles.some(o => segmentHitsRect(a, b, o, padding));
 }
 
-export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null, obstacles: Obstacle[] = []): Unit | null {
-  const enemies = allUnits.filter(u => u.alive && u.team !== attacker.team);
+/** The enemy `attacker` aims at: the nearest one in line of sight, else the
+ *  nearest at all. `canSee` (night battles) limits it to enemies its team can
+ *  see; when omitted every enemy counts, as in normal play. */
+export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null, obstacles: Obstacle[] = [], canSee?: (enemy: Unit) => boolean): Unit | null {
+  const enemies = allUnits.filter(u => u.alive && u.team !== attacker.team && (!canSee || canSee(u)));
   if (enemies.length === 0) return null;
 
   if (preferredId) {
