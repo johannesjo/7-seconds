@@ -6,6 +6,7 @@ import { getElevationLevel, mortarCanReach } from './units';
 import { Theme, NIGHT_THEME } from './theme';
 import { MAX_PREDICTION_TIME_S, predictPath, type PathPrediction } from './path-preview';
 import { PinchZoom } from './plan-zoom';
+import { pulse } from './haptics';
 
 function polylineLength(points: Vec2[]): number {
   let length = 0;
@@ -64,6 +65,16 @@ const PATH_END_DRAW_RADIUS = 5;
  *  its path (continue it) or a rocketeer's rocket handle. */
 type Grab = { kind: 'unit' | 'end' | 'rocket'; unit: Unit };
 
+/** The parts of a pixi pointer event the drawer reads. */
+type PointerInput = { global: Vec2; client?: Vec2; pointerId?: number };
+
+/** Pointer position in CSS pixels, so drag thresholds feel the same however
+ *  the canvas is scaled. */
+function screenPoint(e: PointerInput): Vec2 {
+  const p = e.client ?? e.global;
+  return { x: p.x, y: p.y };
+}
+
 /** The grab point for drawing a rocket: just ahead of the launch point, along
  *  the last leg of the move path (or toward the enemy side when standing). */
 function rocketHandle(unit: Unit): Vec2 {
@@ -105,6 +116,14 @@ function canFocus(unit: Unit): boolean {
 const FOCUS_HINT_KEY = '7s-focus-hint-seen';
 /** Taps that wander further than this are drags, not focus taps. */
 const TAP_SLOP = 12;
+/** Screen pixels a press on a unit, path end or rocket handle must travel
+ *  before it starts drawing. Shorter presses are taps (inspect) or holds
+ *  (clear), and leave the orders alone. */
+const DRAG_START_PX = 8;
+/** Hold this long without moving, then release, to clear the orders. */
+const HOLD_CLEAR_MS = 500;
+/** The hold ring only shows after this, so plain taps don't flash it. */
+const HOLD_SHOW_MS = 150;
 
 function focusHintSeen(): boolean {
   try { return localStorage.getItem(FOCUS_HINT_KEY) === '1'; } catch { return false; }
@@ -138,6 +157,9 @@ export class PathDrawer {
   private keptWaypoints = 0;
   /** Pointer is over the end of the hovered unit's path (desktop hover). */
   private hoveredEnd = false;
+  /** A press that hasn't moved far enough to draw yet: lifting it is a tap
+   *  (inspect), or, once `ready` after a hold, clears the grabbed orders. */
+  private press: { grab: Grab; client: Vec2; at: number; ready: boolean } | null = null;
   /** Rocketeer whose rocket flight is being drawn, and the raw stroke. */
   private rocketUnit: Unit | null = null;
   private rawRocket: Vec2[] = [];
@@ -527,6 +549,7 @@ export class PathDrawer {
     this.rawPoints = [];
     this.keptWaypoints = 0;
     this.hoveredEnd = false;
+    this.press = null;
     this.strokePointer = null;
     this.strokeBackup = null;
     this.strokeGlobal = null;
@@ -551,6 +574,7 @@ export class PathDrawer {
     this.rawPoints = [];
     this.keptWaypoints = 0;
     this.hoveredEnd = false;
+    this.press = null;
     this.rocketUnit = null;
     this.rawRocket = [];
     this.inspectedUnit = null;
@@ -809,11 +833,54 @@ export class PathDrawer {
         : this.hoveredEnemy.pos;
       this.drawRangeCircle(this.hoveredEnemy, enemyEndPos, enemyColor);
     }
+
+    this.drawHold();
+  }
+
+  /** Ring that fills while a press is held on something with orders; once
+   *  full, releasing clears them. */
+  private drawHold(): void {
+    const press = this.press;
+    if (!press || !this.canClear(press.grab)) return;
+    const held = performance.now() - press.at;
+    if (held < HOLD_SHOW_MS) return;
+    const { kind, unit } = press.grab;
+    const at = kind === 'rocket' ? rocketHandle(unit)
+      : kind === 'end' ? unit.waypoints[unit.waypoints.length - 1]
+      : unit.pos;
+    const r = kind === 'rocket' ? ROCKET_HANDLE_DRAW_RADIUS + 7
+      : kind === 'end' ? PATH_END_DRAW_RADIUS + 10
+      : unit.radius + 10;
+    const color = this.theme.labelWarn;
+    const t = Math.min(1, (held - HOLD_SHOW_MS) / (HOLD_CLEAR_MS - HOLD_SHOW_MS));
+    const start = -Math.PI / 2;
+    this.hoverGfx.circle(at.x, at.y, r);
+    this.hoverGfx.setStrokeStyle({ width: 3, color, alpha: 0.2 });
+    this.hoverGfx.stroke();
+    this.hoverGfx.moveTo(at.x + Math.cos(start) * r, at.y + Math.sin(start) * r);
+    this.hoverGfx.arc(at.x, at.y, r, start, start + t * Math.PI * 2);
+    this.hoverGfx.setStrokeStyle({ width: 3, color, alpha: 0.9 });
+    this.hoverGfx.stroke();
+    if (press.ready) {
+      this.hoverLabel.text = kind === 'rocket' ? 'release to clear rocket' : 'release to clear';
+      this.hoverLabel.style.fill = color;
+      this.hoverLabel.position.set(
+        Math.max(80, Math.min(MAP_WIDTH - 80, at.x)),
+        Math.max(16, at.y - r - 6),
+      );
+      this.hoverLabel.alpha = 1;
+      this.hoverLabel.visible = true;
+    }
   }
 
   /** Call each frame to animate pulsing indicators during planning. */
   updateHover(): void {
     if (!this.enabled) return;
+    const press = this.press;
+    if (press && !press.ready && performance.now() - press.at >= HOLD_CLEAR_MS && this.canClear(press.grab)) {
+      press.ready = true;
+      pulse('light');
+    }
     this.edgeScroll();
     this.renderHoverLayer();
   }
@@ -964,6 +1031,7 @@ export class PathDrawer {
     this.rawPoints = [];
     this.keptWaypoints = 0;
     this.hoveredEnd = false;
+    this.press = null;
     this.rawRocket = [];
     this.renderPaths();
   };
@@ -980,7 +1048,7 @@ export class PathDrawer {
     return this.strokePointer !== null && pointerId !== this.strokePointer;
   }
 
-  private onPointerDown = (e: { global: { x: number; y: number }; button?: number; pointerId?: number }): void => {
+  private onPointerDown = (e: PointerInput & { button?: number }): void => {
     if (!this.enabled || !this.team) return;
     // Ignore right clicks for path drawing
     if (e.button === 2) return;
@@ -988,48 +1056,15 @@ export class PathDrawer {
     const pos = this.toLocal(e.global);
 
     const grab = this.findGrab(pos.x, pos.y);
-    if (grab?.kind === 'rocket') {
-      const rocketeer = grab.unit;
-      this.hoveredEnemy = null;
-      this.hoveredUnit = rocketeer;
-      this.hoveredEnd = false;
-      this.rocketUnit = rocketeer;
-      this.strokePointer = e.pointerId ?? null;
-      this.strokeBackup = { unit: rocketeer, orders: copyOrders(rocketeer) };
-      this.armedUnit = null;
-      rocketeer.rocketPath = [];
-      rocketeer.rocketFired = false;
-      this.strokeGlobal = { x: e.global.x, y: e.global.y };
-      this.rawRocket = [{ ...launchPoint(rocketeer) }];
-      this.renderPaths();
-      return;
-    }
-
     if (grab) {
-      const unit = grab.unit;
-      this.hoveredEnemy = null;
-      this.hoveredUnit = unit;
-      this.hoveredEnd = false;
-      this.selectedUnit = unit;
+      // Nothing changes until the press turns out to be a drag or a hold.
+      this.press = { grab, client: screenPoint(e), at: performance.now(), ready: false };
       this.strokePointer = e.pointerId ?? null;
-      this.strokeBackup = { unit, orders: copyOrders(unit) };
+      this.hoveredEnemy = null;
+      this.hoveredUnit = grab.unit;
+      this.hoveredEnd = grab.kind === 'end';
       this.armedUnit = null;
-      this.strokeGlobal = { x: e.global.x, y: e.global.y };
-      if (grab.kind === 'end') {
-        // Continue the path: keep its waypoints and focus. The rocket
-        // launches from the path's end, which is about to move.
-        this.keptWaypoints = unit.waypoints.length;
-        this.rawPoints = [{ x: unit.pos.x, y: unit.pos.y }, ...unit.waypoints.map(p => ({ x: p.x, y: p.y }))];
-        unit.rocketPath = [];
-        unit.rocketFired = false;
-      } else {
-        this.keptWaypoints = 0;
-        resetOrders(unit);
-        // New orders start clean, as with right-click: the focus goes too.
-        unit.attackTargetId = null;
-        this.rawPoints = [{ x: unit.pos.x, y: unit.pos.y }];
-      }
-      this.renderPaths();
+      this.renderHoverLayer();
       return;
     }
 
@@ -1047,10 +1082,68 @@ export class PathDrawer {
     this.renderHoverLayer();
   };
 
-  private onPointerMove = (e: { global: { x: number; y: number }; pointerId?: number }): void => {
+  /** A press became a drag: start drawing the grabbed path or rocket. */
+  private beginStroke(grab: Grab): void {
+    const unit = grab.unit;
+    this.strokeBackup = { unit, orders: copyOrders(unit) };
+    this.hoveredEnd = false;
+    if (grab.kind === 'rocket') {
+      this.rocketUnit = unit;
+      unit.rocketPath = [];
+      unit.rocketFired = false;
+      this.rawRocket = [{ ...launchPoint(unit) }];
+      return;
+    }
+    this.selectedUnit = unit;
+    if (grab.kind === 'end') {
+      // Continue the path: keep its waypoints and focus. The rocket
+      // launches from the path's end, which is about to move.
+      this.keptWaypoints = unit.waypoints.length;
+      this.rawPoints = [{ x: unit.pos.x, y: unit.pos.y }, ...unit.waypoints.map(p => ({ x: p.x, y: p.y }))];
+      unit.rocketPath = [];
+      unit.rocketFired = false;
+    } else {
+      this.keptWaypoints = 0;
+      resetOrders(unit);
+      // New orders start clean, as with right-click: the focus goes too.
+      unit.attackTargetId = null;
+      this.rawPoints = [{ x: unit.pos.x, y: unit.pos.y }];
+    }
+  }
+
+  /** Clear what a grab points at: a rocket handle drops just the rocket. */
+  private clearGrab(grab: Grab): void {
+    const unit = grab.unit;
+    if (grab.kind === 'rocket') {
+      unit.rocketPath = [];
+      unit.rocketFired = false;
+    } else {
+      resetOrders(unit);
+      unit.attackTargetId = null;
+      if (this.armedUnit === unit) this.armedUnit = null;
+    }
+    this.renderPaths();
+  }
+
+  /** Whether holding on this grab would clear anything. */
+  private canClear(grab: Grab): boolean {
+    const unit = grab.unit;
+    if (grab.kind === 'rocket') return (unit.rocketPath?.length ?? 0) > 0;
+    return unit.waypoints.length > 0 || (unit.rocketPath?.length ?? 0) > 0 || !!unit.attackTargetId;
+  }
+
+  private onPointerMove = (e: PointerInput): void => {
     if (!this.enabled) return;
     if (this.ignorePointer(e.pointerId)) return;
     const pos = this.toLocal(e.global);
+    const press = this.press;
+    if (press) {
+      // Still a tap or a hold until the pointer travels far enough.
+      const now = screenPoint(e);
+      if (Math.hypot(now.x - press.client.x, now.y - press.client.y) < DRAG_START_PX) return;
+      this.press = null;
+      this.beginStroke(press.grab);
+    }
     if (this.strokePointer !== null || this.selectedUnit || this.rocketUnit) {
       this.strokeGlobal = { x: e.global.x, y: e.global.y };
     }
@@ -1094,6 +1187,19 @@ export class PathDrawer {
     const backup = this.strokeBackup;
     this.strokeBackup = null;
     this.strokeGlobal = null;
+    const press = this.press;
+    this.press = null;
+    if (press) {
+      // Never became a drag: a tap just inspects (the unit stays hovered);
+      // a long enough hold clears.
+      if (press.ready && this.canClear(press.grab)) {
+        this.clearGrab(press.grab);
+        pulse('medium');
+      } else {
+        this.renderHoverLayer();
+      }
+      return;
+    }
     const pending = this.pendingFocus;
     this.pendingFocus = null;
     if (pending) {
@@ -1148,17 +1254,6 @@ export class PathDrawer {
     if (!this.enabled || !this.team) return;
     const pos = this.toLocal(e.global);
     const grab = this.findGrab(pos.x, pos.y);
-    if (!grab) return;
-    const unit = grab.unit;
-    if (grab.kind === 'rocket') {
-      // Right-click the rocket handle: drop just the rocket.
-      unit.rocketPath = [];
-      unit.rocketFired = false;
-    } else {
-      resetOrders(unit);
-      unit.attackTargetId = null;
-      if (this.armedUnit === unit) this.armedUnit = null;
-    }
-    this.renderPaths();
+    if (grab) this.clearGrab(grab);
   };
 }
