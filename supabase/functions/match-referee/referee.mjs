@@ -1398,6 +1398,11 @@ var NightVision = class {
   lastSeen = { blue: /* @__PURE__ */ new Map(), red: /* @__PURE__ */ new Map() };
   /** Sight multiplier for the current round (see dawnScale). */
   sightScale = 1;
+  /** Per-team targeting filters (built once; the engine asks every tick). */
+  canSee = {
+    blue: (enemy) => this.visible.blue.has(enemy.id),
+    red: (enemy) => this.visible.red.has(enemy.id)
+  };
   /** A new round starts: dawn may have pushed sight further. */
   setRound(round) {
     this.sightScale = dawnScale(round);
@@ -1414,6 +1419,11 @@ var NightVision = class {
   /** A unit fired: it stands out for MUZZLE_REVEAL_S. */
   noteFire(unit) {
     this.revealed.set(unit.id, MUZZLE_REVEAL_S);
+  }
+  /** Round over: muzzle flashes fade. Where the shooters stood is kept as
+   *  their last-known position (call after a final update). */
+  endRound() {
+    this.revealed.clear();
   }
   /** Advance reveal timers by one fixed step. */
   tick(dt) {
@@ -1582,8 +1592,8 @@ var GameEngine = class _GameEngine {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer.highlightZonesAt(pos));
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
       const night = this.night;
-      this.pathDrawer.canSeeEnemy = night ? (u) => night.canTarget("blue", u) : null;
-      this.renderer.setNightView(night ? { team: "blue", vision: night, obstacles: this.obstacles, elevationZones: this.elevationZones } : null);
+      this.pathDrawer.canSeeEnemy = night ? night.canSee.blue : null;
+      this.renderer.setNightView(night ? { team: "blue", vision: night } : null);
       this.renderer.renderElevationZones(this.elevationZones);
       this.renderer.renderObstacles(this.obstacles);
       if (this.ctfMode) {
@@ -1625,8 +1635,12 @@ var GameEngine = class _GameEngine {
     this._phase = phase;
     if (phase === "blue-planning") {
       this.renderer?.resetCamera();
-      this.night?.update(this.units, this.obstacles, this.elevationZones);
-      this.night?.setRound(this.roundNumber);
+      if (this.night) {
+        this.night.update(this.units, this.obstacles, this.elevationZones);
+        this.night.endRound();
+        this.night.setRound(this.roundNumber);
+        this.night.update(this.units, this.obstacles, this.elevationZones);
+      }
       for (const u of this.units) {
         u.rocketFired = false;
         if (u.team === "blue") u.rocketPath = [];
@@ -1878,8 +1892,7 @@ var GameEngine = class _GameEngine {
   }
   /** Night: which enemies `unit`'s team may target. Undefined (all) by day. */
   sightFilter(unit) {
-    const night = this.night;
-    return night ? (enemy) => night.canTarget(unit.team, enemy) : void 0;
+    return this.night?.canSee[unit.team];
   }
   recordFire(unit, damage, weapon) {
     this.replayEvents.push({
@@ -2121,7 +2134,7 @@ var GameEngine = class _GameEngine {
   }
   endBattle(winner) {
     this.running = false;
-    this.renderer?.setNightView(null);
+    if (this.night) this.renderer?.setNightView(null, this.units);
     this.renderer?.ticker.remove(this.tick, this);
     this.projectiles = [];
     this.renderer?.renderProjectiles([]);
@@ -2214,10 +2227,6 @@ var GameEngine = class _GameEngine {
       blue: this.units.filter((u) => u.alive && u.team === "blue").length,
       red: this.units.filter((u) => u.alive && u.team === "red").length
     };
-  }
-  /** Night battle state, or null by day. */
-  getNightVision() {
-    return this.night;
   }
   getCtfState() {
     return this.ctfState;

@@ -82,6 +82,11 @@ export class NightVision {
   readonly lastSeen: Record<Team, Map<string, Vec2>> = { blue: new Map(), red: new Map() };
   /** Sight multiplier for the current round (see dawnScale). */
   sightScale = 1;
+  /** Per-team targeting filters (built once; the engine asks every tick). */
+  readonly canSee: Record<Team, (enemy: Unit) => boolean> = {
+    blue: (enemy) => this.visible.blue.has(enemy.id),
+    red: (enemy) => this.visible.red.has(enemy.id),
+  };
 
   /** A new round starts: dawn may have pushed sight further. */
   setRound(round: number): void {
@@ -101,6 +106,12 @@ export class NightVision {
   /** A unit fired: it stands out for MUZZLE_REVEAL_S. */
   noteFire(unit: Unit): void {
     this.revealed.set(unit.id, MUZZLE_REVEAL_S);
+  }
+
+  /** Round over: muzzle flashes fade. Where the shooters stood is kept as
+   *  their last-known position (call after a final update). */
+  endRound(): void {
+    this.revealed.clear();
   }
 
   /** Advance reveal timers by one fixed step. */
@@ -131,20 +142,27 @@ export class NightVision {
   }
 }
 
-/** Distance along a ray from `o` (unit direction d) to where it enters `r`, or Infinity. */
+/** Distance along a ray from `o` (unit direction dx, dy) to where it enters
+ *  `r`, or Infinity (slab method, unrolled: it runs for every ray each frame). */
 function rayRectDistance(o: Vec2, dx: number, dy: number, r: Obstacle): number {
   let tMin = 0;
   let tMax = Infinity;
-  for (const [p, d, lo, hi] of [[o.x, dx, r.x, r.x + r.w], [o.y, dy, r.y, r.y + r.h]] as const) {
-    if (Math.abs(d) < 1e-9) {
-      if (p < lo || p > hi) return Infinity;
-      continue;
-    }
-    let t1 = (lo - p) / d;
-    let t2 = (hi - p) / d;
-    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
-    tMin = Math.max(tMin, t1);
-    tMax = Math.min(tMax, t2);
+  if (Math.abs(dx) < 1e-9) {
+    if (o.x < r.x || o.x > r.x + r.w) return Infinity;
+  } else {
+    const t1 = (r.x - o.x) / dx;
+    const t2 = (r.x + r.w - o.x) / dx;
+    tMin = Math.max(tMin, Math.min(t1, t2));
+    tMax = Math.min(tMax, Math.max(t1, t2));
+    if (tMin > tMax) return Infinity;
+  }
+  if (Math.abs(dy) < 1e-9) {
+    if (o.y < r.y || o.y > r.y + r.h) return Infinity;
+  } else {
+    const t1 = (r.y - o.y) / dy;
+    const t2 = (r.y + r.h - o.y) / dy;
+    tMin = Math.max(tMin, Math.min(t1, t2));
+    tMax = Math.min(tMax, Math.max(t1, t2));
     if (tMin > tMax) return Infinity;
   }
   return tMin;
@@ -154,13 +172,17 @@ function rayRectDistance(o: Vec2, dx: number, dy: number, r: Obstacle): number {
  *  short where obstacles block the view. For drawing only. */
 export function sightPolygon(unit: Unit, obstacles: Obstacle[], zones: ElevationZone[] = [], scale = 1, rays = 96): Vec2[] {
   const radius = sightRadius(unit, zones, scale);
+  // Only obstacles that reach into the sight circle can block it.
+  const { x, y } = unit.pos;
+  const near = obstacles.filter(o =>
+    o.x - radius <= x && x <= o.x + o.w + radius && o.y - radius <= y && y <= o.y + o.h + radius);
   const points: Vec2[] = [];
   for (let i = 0; i < rays; i++) {
     const a = (i / rays) * Math.PI * 2;
     const dx = Math.cos(a);
     const dy = Math.sin(a);
     let reach = radius;
-    for (const o of obstacles) reach = Math.min(reach, rayRectDistance(unit.pos, dx, dy, o));
+    for (const o of near) reach = Math.min(reach, rayRectDistance(unit.pos, dx, dy, o));
     // Let the light spill a few pixels onto the wall face so cover reads.
     if (reach < radius) reach = Math.min(radius, reach + 4);
     points.push({ x: unit.pos.x + dx * reach, y: unit.pos.y + dy * reach });

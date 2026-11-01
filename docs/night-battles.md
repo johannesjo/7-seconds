@@ -14,6 +14,9 @@ tutorial, Horde or CTF. Night results are not counted in the vs-AI record.
   need spotters.
 - **Muzzle flash**: firing (bullets, shells, rockets) reveals the shooter to the
   enemy team for 1 s, wherever it is.
+- Flashes fade when a round ends; the shooter shows as a ghost where it fired.
+- Hits on hidden enemies (blood, kill text) still show: a blind rocket or
+  shell tells you it found something.
 - **Mortars** only fire at enemies their team sees.
 - **Rockets** follow their drawn path as usual, so they are the one blind-fire
   weapon: aim them at last-known positions.

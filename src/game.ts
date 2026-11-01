@@ -212,8 +212,8 @@ export class GameEngine {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer!.highlightZonesAt(pos));
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
       const night = this.night;
-      this.pathDrawer.canSeeEnemy = night ? (u) => night.canTarget('blue', u) : null;
-      this.renderer.setNightView(night ? { team: 'blue', vision: night, obstacles: this.obstacles, elevationZones: this.elevationZones } : null);
+      this.pathDrawer.canSeeEnemy = night ? night.canSee.blue : null;
+      this.renderer.setNightView(night ? { team: 'blue', vision: night } : null);
 
       // Render initial state — hills under obstacles
       this.renderer.renderElevationZones(this.elevationZones);
@@ -267,10 +267,15 @@ export class GameEngine {
 
     if (phase === 'blue-planning') {
       this.renderer?.resetCamera();
-      // Plan from what was in sight when the round ended, then let dawn
-      // widen sight for the coming round.
-      this.night?.update(this.units, this.obstacles, this.elevationZones);
-      this.night?.setRound(this.roundNumber);
+      // Plan from what was in sight when the round ended: record where the
+      // last shooters flashed, let the flashes fade, and let dawn widen sight
+      // for the coming round (planning shows that wider sight).
+      if (this.night) {
+        this.night.update(this.units, this.obstacles, this.elevationZones);
+        this.night.endRound();
+        this.night.setRound(this.roundNumber);
+        this.night.update(this.units, this.obstacles, this.elevationZones);
+      }
       // Reload every rocketeer and drop blue's old rocket orders here rather
       // than relying on the drawer: Horde carries units into a fresh engine
       // whose drawer doesn't know them yet.
@@ -574,8 +579,7 @@ export class GameEngine {
 
   /** Night: which enemies `unit`'s team may target. Undefined (all) by day. */
   private sightFilter(unit: Unit): ((enemy: Unit) => boolean) | undefined {
-    const night = this.night;
-    return night ? (enemy) => night.canTarget(unit.team, enemy) : undefined;
+    return this.night?.canSee[unit.team];
   }
 
   private recordFire(unit: Unit, damage: number, weapon: 'shell' | 'rocket'): void {
@@ -845,7 +849,7 @@ export class GameEngine {
   private endBattle(winner: Team): void {
     this.running = false;
     // Lights up: the result screen shows where everyone really was.
-    this.renderer?.setNightView(null);
+    if (this.night) this.renderer?.setNightView(null, this.units);
     this.renderer?.ticker.remove(this.tick, this);
     this.projectiles = [];
     this.renderer?.renderProjectiles([]);
@@ -953,11 +957,6 @@ export class GameEngine {
       blue: this.units.filter(u => u.alive && u.team === 'blue').length,
       red: this.units.filter(u => u.alive && u.team === 'red').length,
     };
-  }
-
-  /** Night battle state, or null by day. */
-  getNightVision(): NightVision | null {
-    return this.night;
   }
 
   getCtfState(): CtfState | null {

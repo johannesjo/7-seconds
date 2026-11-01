@@ -34,6 +34,11 @@ describe('sight', () => {
     expect(teamVisibleEnemies('blue', [sniper, scout, enemy], [])).toEqual(new Set());
   });
 
+  it('ignores obstacles outside the sight circle', () => {
+    const blue = createUnit('b', 'soldier', 'blue', { x: 180, y: 400 });
+    expect(sightPolygon(blue, [{ x: 0, y: 0, w: 40, h: 40 }])).toEqual(sightPolygon(blue, []));
+  });
+
   it('draws a sight polygon cut short by walls', () => {
     const blue = createUnit('b', 'soldier', 'blue', { x: 180, y: 400 });
     const open = sightPolygon(blue, []);
@@ -88,6 +93,30 @@ describe('NightVision', () => {
     red.alive = false;
     night.update([blue, red], []);
     expect(night.lastSeen.blue.has('r')).toBe(false);
+  });
+
+  it('lets muzzle flashes fade at round end but remembers where the shooter stood', () => {
+    const blue = createUnit('b', 'soldier', 'blue', { x: 180, y: 600 });
+    const sniper = createUnit('r', 'sniper', 'red', { x: 180, y: 300 });
+    const night = new NightVision();
+    night.noteFire(sniper);
+    night.update([blue, sniper], []);
+    night.endRound();
+    night.update([blue, sniper], []);
+    expect(night.canTarget('blue', sniper)).toBe(false);
+    expect(night.lastSeen.blue.get('r')).toEqual({ x: 180, y: 300 });
+  });
+
+  it('exposes stable per-team targeting filters', () => {
+    const blue = createUnit('b', 'soldier', 'blue', { x: 180, y: 400 });
+    const red = createUnit('r', 'soldier', 'red', { x: 180, y: 330 });
+    const night = new NightVision();
+    const filter = night.canSee.blue;
+    expect(filter(red)).toBe(false);
+    night.update([blue, red], []);
+    expect(night.canSee.blue).toBe(filter);
+    expect(filter(red)).toBe(true);
+    expect(night.canSee.red(blue)).toBe(true);
   });
 
   it('starts out knowing the enemy deployment', () => {
