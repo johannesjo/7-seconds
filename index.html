@@ -285,6 +285,10 @@
       max-width: 100%;
       display: block;
       touch-action: none;
+      /* A press-and-hold clears orders: no text callout or selection on it. */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
     #battle-hud {
       position: absolute;

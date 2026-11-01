@@ -6,6 +6,7 @@ import { getElevationLevel, mortarCanReach } from './units';
 import { Theme, NIGHT_THEME } from './theme';
 import { MAX_PREDICTION_TIME_S, predictPath, type PathPrediction } from './path-preview';
 import { PinchZoom } from './plan-zoom';
+import { pulse } from './haptics';
 
 function polylineLength(points: Vec2[]): number {
   let length = 0;
@@ -55,6 +56,37 @@ const ROCKET_HANDLE_OFFSET = 38;
 const ROCKET_HANDLE_RADIUS = 26;
 const ROCKET_HANDLE_DRAW_RADIUS = 15;
 
+/** Grab radius around the end of a drawn path: dragging from it continues
+ *  the path instead of redrawing it from the unit. */
+const PATH_END_RADIUS = 24;
+const PATH_END_DRAW_RADIUS = 5;
+
+/** What a press on the map picks up: a unit (draw a new path), the end of
+ *  its path (continue it) or a rocketeer's rocket handle. */
+type Grab = { kind: 'unit' | 'end' | 'rocket'; unit: Unit };
+
+/** Where a grab sits on the map. */
+function grabPoint(grab: Grab): Vec2 {
+  const { kind, unit } = grab;
+  if (kind === 'rocket') return rocketHandle(unit);
+  if (kind === 'end') return unit.waypoints[unit.waypoints.length - 1] ?? unit.pos;
+  return unit.pos;
+}
+
+/** Map units over which a continued stroke eases from the path's end onto
+ *  the finger, so grabbing the end off-centre leaves no hook at the join. */
+const GRAB_EASE = 40;
+
+/** The parts of a pixi pointer event the drawer reads. */
+type PointerInput = { global: Vec2; client?: Vec2; pointerId?: number };
+
+/** Pointer position in CSS pixels, so drag thresholds feel the same however
+ *  the canvas is scaled. */
+function screenPoint(e: PointerInput): Vec2 {
+  const p = e.client ?? e.global;
+  return { x: p.x, y: p.y };
+}
+
 /** The grab point for drawing a rocket: just ahead of the launch point, along
  *  the last leg of the move path (or toward the enemy side when standing). */
 function rocketHandle(unit: Unit): Vec2 {
@@ -96,6 +128,14 @@ function canFocus(unit: Unit): boolean {
 const FOCUS_HINT_KEY = '7s-focus-hint-seen';
 /** Taps that wander further than this are drags, not focus taps. */
 const TAP_SLOP = 12;
+/** Screen pixels a press on a unit, path end or rocket handle must travel
+ *  before it starts drawing. Shorter presses are taps (inspect) or holds
+ *  (clear), and leave the orders alone. */
+const DRAG_START_PX = 8;
+/** Hold this long without moving, then release, to clear the orders. */
+const HOLD_CLEAR_MS = 500;
+/** The hold ring only shows after this, so plain taps don't flash it. */
+const HOLD_SHOW_MS = 150;
 
 function focusHintSeen(): boolean {
   try { return localStorage.getItem(FOCUS_HINT_KEY) === '1'; } catch { return false; }
@@ -124,6 +164,17 @@ export class PathDrawer {
   private hoveredUnit: Unit | null = null;
   private hoveredEnemy: Unit | null = null;
   private rawPoints: Vec2[] = [];
+  /** How many of the selected unit's existing waypoints the stroke keeps:
+   *  0 for a fresh path, all of them when continuing from its end. */
+  private keptWaypoints = 0;
+  /** Pointer is over the end of the hovered unit's path (desktop hover). */
+  private hoveredEnd = false;
+  /** A press that hasn't moved far enough to draw yet: lifting it is a tap
+   *  (inspect), or, once `ready` after a hold, clears the grabbed orders. */
+  private press: { grab: Grab; client: Vec2; local: Vec2; at: number; ready: boolean } | null = null;
+  /** Continuing a path grabbed off-centre: the gap from the finger to the
+   *  path's end, faded out as the finger travels from where it pressed. */
+  private grabOffset: { dx: number; dy: number; from: Vec2; travel: number } | null = null;
   /** Rocketeer whose rocket flight is being drawn, and the raw stroke. */
   private rocketUnit: Unit | null = null;
   private rawRocket: Vec2[] = [];
@@ -282,9 +333,11 @@ export class PathDrawer {
       const target = this.units.find(u => u.id === unit.attackTargetId && u.alive);
       // Night: don't draw a reticle on where a hidden enemy really is.
       if (!target || (this.canSeeEnemy && !this.canSeeEnemy(target))) continue;
-      const from = unit.waypoints.length > 0
-        ? this.prediction(unit, [unit.pos, ...unit.waypoints]).position
-        : unit.pos;
+      const from = unit === this.selectedUnit && this.rawPoints.length > 1
+        ? this.prediction(unit, this.rawPoints).position
+        : unit.waypoints.length > 0
+          ? this.prediction(unit, [unit.pos, ...unit.waypoints]).position
+          : unit.pos;
       const len = distancePt(from, target.pos);
       if (len > target.radius + 8) {
         const k = (len - target.radius - 8) / len;
@@ -315,6 +368,8 @@ export class PathDrawer {
     const color = this.theme.bomber;
     for (const unit of this.units) {
       if (!unit.alive || unit.team !== this.team || unit.type !== 'rocketeer') continue;
+      // Its move is being drawn: the launch point is still moving.
+      if (unit === this.selectedUnit) continue;
       const launch = launchPoint(unit);
       const drawing = unit === this.rocketUnit;
       // Sample the live stroke as on release, so the preview and its "max"
@@ -424,18 +479,29 @@ export class PathDrawer {
     this.gfx.fill({ color, alpha: 0.95 });
   }
 
-  private findRocketHandle(px: number, py: number): Unit | null {
+  /** What a press here would pick up. The nearest grab point wins, so
+   *  units, path ends and rocket handles that overlap stay reachable; on a
+   *  tie a unit beats its path end, which beats a rocket handle. */
+  private findGrab(px: number, py: number): Grab | null {
+    if (!this.team) return null;
+    const at = { x: px, y: py };
+    let best: Grab | null = null;
+    let bestDist = Infinity;
+    const consider = (kind: Grab['kind'], unit: Unit, point: Vec2, radius: number): void => {
+      const d = distancePt(point, at);
+      if (d <= radius && d < bestDist) {
+        best = { kind, unit };
+        bestDist = d;
+      }
+    };
     for (const unit of this.units) {
-      if (!unit.alive || unit.team !== this.team || unit.type !== 'rocketeer') continue;
-      const toHandle = distancePt(rocketHandle(unit), { x: px, y: py });
-      if (toHandle > ROCKET_HANDLE_RADIUS) continue;
-      // The handle overlaps units' tap areas: it only wins when the pointer
-      // is nearer to it than to any of our units.
-      const nearerUnit = this.units.some(u => u.alive && u.team === this.team
-        && distancePt(u.pos, { x: px, y: py }) <= toHandle);
-      if (!nearerUnit) return unit;
+      if (!unit.alive || unit.team !== this.team) continue;
+      consider('unit', unit, unit.pos, UNIT_SELECT_RADIUS);
+      const end = unit.waypoints[unit.waypoints.length - 1];
+      if (end) consider('end', unit, end, PATH_END_RADIUS);
+      if (unit.type === 'rocketeer') consider('rocket', unit, rocketHandle(unit), ROCKET_HANDLE_RADIUS);
     }
-    return null;
+    return best;
   }
 
   /** Baseline for the time label at a path's end: above it, unless one of
@@ -496,6 +562,10 @@ export class PathDrawer {
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rawPoints = [];
+    this.keptWaypoints = 0;
+    this.hoveredEnd = false;
+    this.press = null;
+    this.grabOffset = null;
     this.strokePointer = null;
     this.strokeBackup = null;
     this.strokeGlobal = null;
@@ -518,6 +588,10 @@ export class PathDrawer {
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rawPoints = [];
+    this.keptWaypoints = 0;
+    this.hoveredEnd = false;
+    this.press = null;
+    this.grabOffset = null;
     this.rocketUnit = null;
     this.rawRocket = [];
     this.inspectedUnit = null;
@@ -543,6 +617,8 @@ export class PathDrawer {
       if (!unit.alive || unit.waypoints.length === 0) continue;
       // Only show the active team's movement lines during planning
       if (unit.team !== this.team) continue;
+      // Being continued: the live stroke below draws it.
+      if (unit === this.selectedUnit) continue;
 
       const color = unit.team === 'blue' ? this.theme.bluePath : this.theme.redPath;
       const alpha = 0.8;
@@ -552,11 +628,13 @@ export class PathDrawer {
       this.strokePath(this.gfx, remainder, color, 2, alpha * 0.22);
       this.drawGhost(this.gfx, unit, position, color, alpha);
 
+      // Ring at the end: drag from it to continue the path.
       const last = unit.waypoints[unit.waypoints.length - 1];
-      if (remainder.length > 0) {
-        this.gfx.circle(last.x, last.y, 3);
-        this.gfx.fill({ color, alpha: alpha * 0.25 });
-      }
+      this.gfx.circle(last.x, last.y, PATH_END_DRAW_RADIUS);
+      this.gfx.fill({ color, alpha: remainder.length > 0 ? alpha * 0.15 : alpha * 0.3 });
+      this.gfx.circle(last.x, last.y, PATH_END_DRAW_RADIUS);
+      this.gfx.setStrokeStyle({ width: 1.5, color, alpha: remainder.length > 0 ? alpha * 0.4 : alpha });
+      this.gfx.stroke();
 
       // Ticks mark seconds reachable within this round.
       const tickAlpha = alpha * 0.5;
@@ -723,6 +801,11 @@ export class PathDrawer {
         this.drawGhost(this.hoverGfx, this.hoveredUnit, position, brightColor, 1);
 
         const last = this.hoveredUnit.waypoints[this.hoveredUnit.waypoints.length - 1];
+        if (this.hoveredEnd) {
+          this.hoverGfx.circle(last.x, last.y, PATH_END_DRAW_RADIUS + 3);
+          this.hoverGfx.setStrokeStyle({ width: 2, color: brightColor, alpha: 1 });
+          this.hoverGfx.stroke();
+        }
         const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
         this.hoverLabel.text = this.timeText(travelTime);
         this.hoverLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.hoverLabelFill;
@@ -767,11 +850,53 @@ export class PathDrawer {
         : this.hoveredEnemy.pos;
       this.drawRangeCircle(this.hoveredEnemy, enemyEndPos, enemyColor);
     }
+
+    this.drawHold();
+  }
+
+  /** Ring that fills while a press is held on something with orders; once
+   *  full, releasing clears them. */
+  private drawHold(): void {
+    const press = this.press;
+    if (!press || !this.canClear(press.grab)) return;
+    const held = performance.now() - press.at;
+    if (held < HOLD_SHOW_MS) return;
+    const { kind, unit } = press.grab;
+    const at = grabPoint(press.grab);
+    const r = kind === 'rocket' ? ROCKET_HANDLE_DRAW_RADIUS + 7
+      : kind === 'end' ? PATH_END_DRAW_RADIUS + 10
+      : unit.radius + 10;
+    const color = this.theme.labelWarn;
+    const t = Math.min(1, (held - HOLD_SHOW_MS) / (HOLD_CLEAR_MS - HOLD_SHOW_MS));
+    const start = -Math.PI / 2;
+    this.hoverGfx.circle(at.x, at.y, r);
+    this.hoverGfx.setStrokeStyle({ width: 3, color, alpha: 0.2 });
+    this.hoverGfx.stroke();
+    this.hoverGfx.moveTo(at.x + Math.cos(start) * r, at.y + Math.sin(start) * r);
+    this.hoverGfx.arc(at.x, at.y, r, start, start + t * Math.PI * 2);
+    this.hoverGfx.setStrokeStyle({ width: 3, color, alpha: 0.9 });
+    this.hoverGfx.stroke();
+    if (press.ready) {
+      this.hoverLabel.text = kind === 'rocket' ? 'release to clear rocket' : 'release to clear';
+      this.hoverLabel.style.fill = color;
+      // Below a path's end, where its time label isn't; above anything else.
+      const below = at.y + r + 16;
+      const y = kind === 'end' && below <= MAP_HEIGHT - 4 ? below : Math.max(16, at.y - r - 6);
+      this.hoverLabel.position.set(Math.max(80, Math.min(MAP_WIDTH - 80, at.x)), y);
+      this.hoverLabel.alpha = 1;
+      this.hoverLabel.visible = true;
+      this.focusHint.visible = false;
+    }
   }
 
   /** Call each frame to animate pulsing indicators during planning. */
   updateHover(): void {
     if (!this.enabled) return;
+    const press = this.press;
+    if (press && !press.ready && performance.now() - press.at >= HOLD_CLEAR_MS && this.canClear(press.grab)) {
+      press.ready = true;
+      pulse('light');
+    }
     this.edgeScroll();
     this.renderHoverLayer();
   }
@@ -791,8 +916,18 @@ export class PathDrawer {
     if (!this.zoom.edgePan(this.strokeGlobal, dt)) return;
     const pos = this.toLocal(this.strokeGlobal);
     if (this.rocketUnit) this.rawRocket.push({ x: pos.x, y: pos.y });
-    else this.rawPoints.push({ x: pos.x, y: pos.y });
+    else this.rawPoints.push(this.strokePoint(pos));
     this.renderPaths();
+  }
+
+  /** A pointer position as a point of the stroke being drawn. */
+  private strokePoint(pos: Vec2): Vec2 {
+    const g = this.grabOffset;
+    if (!g) return { x: pos.x, y: pos.y };
+    g.travel = Math.max(g.travel, distancePt(pos, g.from));
+    const k = Math.max(0, 1 - g.travel / GRAB_EASE);
+    if (k === 0) this.grabOffset = null;
+    return { x: pos.x + g.dx * k, y: pos.y + g.dy * k };
   }
 
   /** Highest zoom available this planning phase (1 when the map fits). */
@@ -883,22 +1018,6 @@ export class PathDrawer {
     e.preventDefault();
   };
 
-  private findNearestUnit(px: number, py: number): Unit | null {
-    if (!this.team) return null;
-    let closest: Unit | null = null;
-    let closestDist = UNIT_SELECT_RADIUS;
-
-    for (const unit of this.units) {
-      if (!unit.alive || unit.team !== this.team) continue;
-      const dist = distancePt(unit.pos, { x: px, y: py });
-      if (dist < closestDist) {
-        closest = unit;
-        closestDist = dist;
-      }
-    }
-    return closest;
-  }
-
   private findNearestEnemy(px: number, py: number): Unit | null {
     if (!this.team) return null;
     let closest: Unit | null = null;
@@ -936,6 +1055,10 @@ export class PathDrawer {
     this.hoveredEnemy = null;
     this.rocketUnit = null;
     this.rawPoints = [];
+    this.keptWaypoints = 0;
+    this.hoveredEnd = false;
+    this.press = null;
+    this.grabOffset = null;
     this.rawRocket = [];
     this.renderPaths();
   };
@@ -952,50 +1075,36 @@ export class PathDrawer {
     return this.strokePointer !== null && pointerId !== this.strokePointer;
   }
 
-  private onPointerDown = (e: { global: { x: number; y: number }; button?: number; pointerId?: number }): void => {
+  private onPointerDown = (e: PointerInput & { button?: number }): void => {
     if (!this.enabled || !this.team) return;
     // Ignore right clicks for path drawing
     if (e.button === 2) return;
     if (this.ignorePointer(e.pointerId)) return;
     const pos = this.toLocal(e.global);
 
-    const rocketeer = this.findRocketHandle(pos.x, pos.y);
-    if (rocketeer) {
-      this.hoveredEnemy = null;
-      this.hoveredUnit = rocketeer;
-      this.rocketUnit = rocketeer;
+    const enemy = this.findNearestEnemy(pos.x, pos.y);
+    const armed = this.armedUnit;
+    const canFocusTap = this.focusFire && enemy !== null && !!armed?.alive;
+    const grab = this.findGrab(pos.x, pos.y);
+    // Paths often end right by an enemy: with a unit waiting for a focus
+    // target, an enemy nearer than the grab point takes the tap.
+    const enemyWins = canFocusTap && grab !== null && enemy !== null
+      && distancePt(enemy.pos, pos) < distancePt(grabPoint(grab), pos);
+    if (grab && !enemyWins) {
+      // Nothing changes until the press turns out to be a drag or a hold.
+      this.press = { grab, client: screenPoint(e), local: { x: pos.x, y: pos.y }, at: performance.now(), ready: false };
       this.strokePointer = e.pointerId ?? null;
-      this.strokeBackup = { unit: rocketeer, orders: copyOrders(rocketeer) };
-      this.armedUnit = null;
-      rocketeer.rocketPath = [];
-      rocketeer.rocketFired = false;
-      this.strokeGlobal = { x: e.global.x, y: e.global.y };
-      this.rawRocket = [{ ...launchPoint(rocketeer) }];
-      this.renderPaths();
-      return;
-    }
-
-    const closest = this.findNearestUnit(pos.x, pos.y);
-    if (closest) {
       this.hoveredEnemy = null;
-      this.hoveredUnit = closest;
-      this.selectedUnit = closest;
-      this.strokePointer = e.pointerId ?? null;
-      this.strokeBackup = { unit: closest, orders: copyOrders(closest) };
-      this.armedUnit = null;
-      resetOrders(closest);
-      this.strokeGlobal = { x: e.global.x, y: e.global.y };
-      // New orders start clean, as with right-click: the focus goes too.
-      closest.attackTargetId = null;
-      this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
-      this.renderPaths();
+      this.hoveredUnit = grab.unit;
+      this.hoveredEnd = grab.kind === 'end';
+      // Pressing the armed unit itself (to look at it) keeps it armed.
+      if (grab.unit !== armed) this.armedUnit = null;
+      this.renderHoverLayer();
       return;
     }
 
     // Tap on enemy → show their range, and focus it if a unit was just ordered.
-    const enemy = this.findNearestEnemy(pos.x, pos.y);
-    const armed = this.armedUnit;
-    if (this.focusFire && enemy && armed?.alive) {
+    if (canFocusTap && enemy && armed) {
       this.pendingFocus = { unit: armed, enemy, at: pos };
       this.strokePointer = e.pointerId ?? null;
     }
@@ -1006,10 +1115,71 @@ export class PathDrawer {
     this.renderHoverLayer();
   };
 
-  private onPointerMove = (e: { global: { x: number; y: number }; pointerId?: number }): void => {
+  /** A press became a drag: start drawing the grabbed path or rocket. */
+  private beginStroke(grab: Grab, pressedAt: Vec2): void {
+    const unit = grab.unit;
+    this.strokeBackup = { unit, orders: copyOrders(unit) };
+    this.hoveredEnd = false;
+    this.armedUnit = null;
+    if (grab.kind === 'rocket') {
+      this.rocketUnit = unit;
+      unit.rocketPath = [];
+      unit.rocketFired = false;
+      this.rawRocket = [{ ...launchPoint(unit) }];
+      return;
+    }
+    this.selectedUnit = unit;
+    if (grab.kind === 'end') {
+      // Continue the path: keep its waypoints and focus. The rocket
+      // launches from the path's end, which is about to move.
+      this.keptWaypoints = unit.waypoints.length;
+      this.rawPoints = [{ x: unit.pos.x, y: unit.pos.y }, ...unit.waypoints.map(p => ({ x: p.x, y: p.y }))];
+      const end = unit.waypoints[unit.waypoints.length - 1];
+      this.grabOffset = { dx: end.x - pressedAt.x, dy: end.y - pressedAt.y, from: pressedAt, travel: 0 };
+      unit.rocketPath = [];
+      unit.rocketFired = false;
+    } else {
+      this.keptWaypoints = 0;
+      resetOrders(unit);
+      // New orders start clean, as with right-click: the focus goes too.
+      unit.attackTargetId = null;
+      this.rawPoints = [{ x: unit.pos.x, y: unit.pos.y }];
+    }
+  }
+
+  /** Clear what a grab points at: a rocket handle drops just the rocket. */
+  private clearGrab(grab: Grab): void {
+    const unit = grab.unit;
+    if (grab.kind === 'rocket') {
+      unit.rocketPath = [];
+      unit.rocketFired = false;
+    } else {
+      resetOrders(unit);
+      unit.attackTargetId = null;
+      if (this.armedUnit === unit) this.armedUnit = null;
+    }
+    this.renderPaths();
+  }
+
+  /** Whether holding on this grab would clear anything. */
+  private canClear(grab: Grab): boolean {
+    const unit = grab.unit;
+    if (grab.kind === 'rocket') return (unit.rocketPath?.length ?? 0) > 0;
+    return unit.waypoints.length > 0 || (unit.rocketPath?.length ?? 0) > 0 || !!unit.attackTargetId;
+  }
+
+  private onPointerMove = (e: PointerInput): void => {
     if (!this.enabled) return;
     if (this.ignorePointer(e.pointerId)) return;
     const pos = this.toLocal(e.global);
+    const press = this.press;
+    if (press) {
+      // Still a tap or a hold until the pointer travels far enough.
+      const now = screenPoint(e);
+      if (Math.hypot(now.x - press.client.x, now.y - press.client.y) < DRAG_START_PX) return;
+      this.press = null;
+      this.beginStroke(press.grab, press.local);
+    }
     if (this.strokePointer !== null || this.selectedUnit || this.rocketUnit) {
       this.strokeGlobal = { x: e.global.x, y: e.global.y };
     }
@@ -1019,7 +1189,10 @@ export class PathDrawer {
     // Update hover state
     if (!this.selectedUnit && !this.rocketUnit) {
       const prev = this.hoveredUnit;
-      this.hoveredUnit = this.findNearestUnit(pos.x, pos.y);
+      const prevEnd = this.hoveredEnd;
+      const grab = this.findGrab(pos.x, pos.y);
+      this.hoveredUnit = grab?.unit ?? null;
+      this.hoveredEnd = grab?.kind === 'end';
       // If not hovering own unit, check for enemy
       const prevEnemy = this.hoveredEnemy;
       if (!this.hoveredUnit) {
@@ -1027,7 +1200,7 @@ export class PathDrawer {
       } else {
         this.hoveredEnemy = null;
       }
-      if (this.hoveredUnit !== prev || this.hoveredEnemy !== prevEnemy) this.renderHoverLayer();
+      if (this.hoveredUnit !== prev || this.hoveredEnemy !== prevEnemy || this.hoveredEnd !== prevEnd) this.renderHoverLayer();
     }
 
     if (this.rocketUnit) {
@@ -1038,7 +1211,7 @@ export class PathDrawer {
 
     // Drawing mode
     if (this.selectedUnit) {
-      this.rawPoints.push({ x: pos.x, y: pos.y });
+      this.rawPoints.push(this.strokePoint(pos));
       this.renderPaths();
     }
   };
@@ -1047,8 +1220,23 @@ export class PathDrawer {
     if (!this.enabled) return;
     if (this.strokePointer !== null && e.pointerId !== this.strokePointer) return;
     this.strokePointer = null;
+    const backup = this.strokeBackup;
     this.strokeBackup = null;
     this.strokeGlobal = null;
+    const press = this.press;
+    this.press = null;
+    if (press) {
+      // Never became a drag: a tap just inspects (the unit stays hovered);
+      // a long enough hold clears. Touch has no hover to drop the end ring.
+      this.hoveredEnd = false;
+      if (press.ready && this.canClear(press.grab)) {
+        this.clearGrab(press.grab);
+        pulse('medium');
+      } else {
+        this.renderHoverLayer();
+      }
+      return;
+    }
     const pending = this.pendingFocus;
     this.pendingFocus = null;
     if (pending) {
@@ -1071,32 +1259,39 @@ export class PathDrawer {
       if (unit.rocketPath.length > 0) this.onPathDrawn?.();
       return;
     }
-    if (!this.selectedUnit) return;
+    const unit = this.selectedUnit;
+    if (!unit) return;
 
-    const waypoints = samplePath(this.rawPoints, PATH_SAMPLE_DISTANCE);
-    // Skip the first point (unit's current position)
-    this.selectedUnit.waypoints = waypoints.slice(1);
-    if (this.selectedUnit.waypoints.length > 0) this.onPathDrawn?.();
+    // The kept waypoints stay exactly as they were; only the new stroke,
+    // starting from the last kept point (or the unit), is sampled.
+    const kept = this.keptWaypoints;
+    const stroke = this.rawPoints.slice(kept);
+    const added = samplePath(stroke, PATH_SAMPLE_DISTANCE).slice(1);
+    // A drag that ends back where it began adds nothing: keep the orders.
+    const extended = added.length > 0;
+    if (kept > 0 && !extended) {
+      if (backup?.unit === unit) Object.assign(unit, backup.orders);
+    } else {
+      unit.waypoints = [...this.rawPoints.slice(1, kept + 1), ...added];
+    }
+    if (extended) this.onPathDrawn?.();
 
-    this.hoveredUnit = this.selectedUnit;
+    this.hoveredUnit = unit;
     // Only a drawn path arms the unit: a plain tap on it is an inspect.
-    if (this.focusFire && canFocus(this.selectedUnit) && this.selectedUnit.waypoints.length > 0) {
-      this.armedUnit = this.selectedUnit;
+    if (this.focusFire && canFocus(unit) && extended) {
+      this.armedUnit = unit;
     }
     this.selectedUnit = null;
     this.rawPoints = [];
+    this.keptWaypoints = 0;
+    this.grabOffset = null;
     this.renderPaths();
   };
 
   private onRightDown = (e: { global: { x: number; y: number } }): void => {
     if (!this.enabled || !this.team) return;
     const pos = this.toLocal(e.global);
-    const unit = this.findNearestUnit(pos.x, pos.y);
-    if (unit) {
-      resetOrders(unit);
-      unit.attackTargetId = null;
-      if (this.armedUnit === unit) this.armedUnit = null;
-      this.renderPaths();
-    }
+    const grab = this.findGrab(pos.x, pos.y);
+    if (grab) this.clearGrab(grab);
   };
 }
