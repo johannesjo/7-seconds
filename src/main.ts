@@ -208,14 +208,19 @@ const toastEl = document.getElementById('toast')!;
 let toastTimer: number | undefined;
 /** Transient in-app banner that auto-dismisses. Used for the "it's your turn"
  *  cue while the app is focused. */
-function showToast(message: string): void {
+/** Show a short message. `top` keeps it off the bottom of the map, where
+ *  the squad and the Done button are while planning. */
+function showToast(message: string, placement: 'bottom' | 'top' = 'bottom'): void {
+  const away = placement === 'top' ? '-20px' : '20px';
   toastEl.textContent = message;
+  toastEl.style.top = placement === 'top' ? 'calc(env(safe-area-inset-top, 0px) + 64px)' : '';
+  toastEl.style.bottom = placement === 'top' ? 'auto' : '';
   toastEl.style.opacity = '1';
   toastEl.style.transform = 'translateX(-50%) translateY(0)';
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => {
     toastEl.style.opacity = '0';
-    toastEl.style.transform = 'translateX(-50%) translateY(20px)';
+    toastEl.style.transform = `translateX(-50%) translateY(${away})`;
   }, 3500);
 }
 
@@ -236,7 +241,9 @@ function markTutorialSeen(): void {
   try { localStorage.setItem(TUTORIAL_SEEN_KEY, '1'); } catch { /* storage unavailable */ }
 }
 
-const ZOOM_HINT_KEY = '7s-zoom-hint-seen';
+// Renamed when one-finger panning came, so players who saw the old
+// pinch-only hint learn it too.
+const ZOOM_HINT_KEY = '7s-pan-hint-seen';
 const ZOOM_HINT_DELAY_MS = 4000;
 let zoomHintTimer: number | undefined;
 
@@ -250,7 +257,8 @@ function showZoomHint(): void {
   zoomHintTimer = window.setTimeout(() => {
     if (!planningOverlay.classList.contains('active')) return;
     try { localStorage.setItem(ZOOM_HINT_KEY, '1'); } catch { /* unavailable */ }
-    showToast('Pinch with two fingers to zoom in');
+    const touch = matchMedia('(pointer: coarse)').matches;
+    showToast(touch ? 'Drag the map to look around · pinch to zoom' : 'Drag the map to look around · scroll to zoom', 'top');
   }, ZOOM_HINT_DELAY_MS);
 }
 let retryEncounter: { state: OnlineGameState; seed: number } | null = null;
@@ -1162,8 +1170,8 @@ function startExpedition(): void {
   waveCounterEl.style.display = '';
   const touch = matchMedia('(pointer: coarse)').matches;
   planningInstructions.textContent = touch
-    ? 'Drag from a unit to draw its path. Pinch to zoom; hold near an edge while drawing to scroll.'
-    : 'Drag from a unit to draw its path. Scroll to zoom; hold near an edge while drawing to scroll.';
+    ? 'Drag from a unit to draw its path. Drag the map to look around; pinch to zoom.'
+    : 'Drag from a unit to draw its path. Drag the map to look around; scroll to zoom.';
   engine.startBattle();
   waveCounterEl.textContent = expeditionDistanceLabel();
   flashBanner('Expedition', 'Reach the extraction zone to call the evac. Don\'t stall — the horde follows.');

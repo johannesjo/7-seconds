@@ -260,6 +260,39 @@ export function distanceToExtraction(units: Unit[], extraction: Obstacle): numbe
   return Math.round(Math.hypot(dx, dy));
 }
 
+/** Room kept between the squad and the view's edges when planning. The
+ *  bottom is larger: the Done button sits over the map there. */
+const FRAME_MARGIN = { top: 60, side: 70, bottom: 130 };
+/** How far in planning zooms, as a share of the most it allows: in enough
+ *  to draw, out enough to see the packs ahead. */
+const FRAME_ZOOM_SHARE = 0.72;
+
+/**
+ * The planning view for the squad at `points`: its rearmost unit near the
+ * bottom of the view so the way north (to the extraction) fills the rest,
+ * and every unit in sight (zooming out if the squad is spread). The caller
+ * clamps it to the map.
+ */
+export function planningFrame(points: Vec2[], maxZoom: number, mapW: number, mapH: number): { center: Vec2; zoom: number } {
+  if (points.length === 0) return { center: { x: mapW / 2, y: mapH / 2 }, zoom: 1 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  const m = FRAME_MARGIN;
+  const zoom = Math.max(1, Math.min(
+    maxZoom * FRAME_ZOOM_SHARE,
+    mapW / (maxX - minX + m.side * 2),
+    mapH / (maxY - minY + m.top + m.bottom),
+  ));
+  const viewH = mapH / zoom;
+  return {
+    center: { x: (minX + maxX) / 2, y: maxY + m.bottom - viewH / 2 },
+    zoom,
+  };
+}
+
 export function centroid(points: Vec2[]): Vec2 {
   if (points.length === 0) return { x: 0, y: 0 };
   let x = 0;
