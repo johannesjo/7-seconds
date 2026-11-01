@@ -86,6 +86,13 @@ function resetOrders(unit: Unit): void {
   unit.rocketFired = false;
 }
 
+/** Units whose auto-targeting a focus order steers: gunners, mortars, and
+ *  shielders (which turn their shield toward the focus). Rocketeers and
+ *  bombers have no auto weapon; blades cut everything around them. */
+function canFocus(unit: Unit): boolean {
+  return unit.type !== 'rocketeer' && unit.type !== 'bomber' && unit.type !== 'blade';
+}
+
 type Orders = Pick<Unit, 'waypoints' | 'moveTarget' | 'rocketPath' | 'rocketFired'>;
 
 function copyOrders(unit: Unit): Orders {
@@ -122,6 +129,13 @@ export class PathDrawer {
   onInspectUnit: ((unit: Unit | null) => void) | null = null;
   /** A movement or rocket path was just finished (for UI feedback). */
   onPathDrawn: (() => void) | null = null;
+  /** Allow focus-fire orders: tap an enemy right after giving a unit its
+   *  path to make that unit prefer shooting it. Off where the orders can't be
+   *  sent along (online play). */
+  focusFire = false;
+  /** The own unit whose orders were given last; tapping an enemy now sets its focus. */
+  private armedUnit: Unit | null = null;
+  private focusHint: Text;
   /** Pinch zoom became available for this planning phase (map shown small). */
   onZoomAvailable: (() => void) | null = null;
   private zoom: PinchZoom | null = null;
@@ -153,10 +167,14 @@ export class PathDrawer {
     this.hoverLabel = new Text({ text: '', style: hoverStyle });
     this.hoverLabel.anchor.set(0.5, 1);
     this.hoverLabel.visible = false;
+    this.focusHint = new Text({ text: 'tap an enemy to focus fire', style: { ...hoverStyle, fontSize: 10 } });
+    this.focusHint.anchor.set(0.5, 0);
+    this.focusHint.visible = false;
     this.stage.addChild(this.gfx);
     this.stage.addChild(this.hoverGfx);
     this.stage.addChild(this.labelContainer);
     this.stage.addChild(this.hoverLabel);
+    this.stage.addChild(this.focusHint);
 
     // Suppress context menu on canvas
     if (canvas) {
@@ -215,6 +233,42 @@ export class PathDrawer {
     gfx.stroke();
     gfx.circle(pos.x, pos.y, 2);
     gfx.fill({ color, alpha: alpha * 0.8 });
+  }
+
+  /** Focus-fire orders for the active team: a dashed line from where each
+   *  unit ends its move to the enemy it will prefer, and a reticle on it. */
+  private renderFocus(): void {
+    if (!this.focusFire) return;
+    const color = this.team === 'blue' ? this.theme.bluePath : this.theme.redPath;
+    for (const unit of this.units) {
+      if (!unit.alive || unit.team !== this.team || !unit.attackTargetId) continue;
+      const target = this.units.find(u => u.id === unit.attackTargetId && u.alive);
+      if (!target) continue;
+      const from = unit.waypoints.length > 0
+        ? this.prediction(unit, [unit.pos, ...unit.waypoints]).position
+        : unit.pos;
+      const len = distancePt(from, target.pos);
+      if (len > target.radius + 8) {
+        const k = (len - target.radius - 8) / len;
+        const to = { x: from.x + (target.pos.x - from.x) * k, y: from.y + (target.pos.y - from.y) * k };
+        this.dashPath([from, to], color, 1.5, 0.55);
+      }
+      this.drawReticle(this.gfx, target, color, 0.95);
+    }
+  }
+
+  /** Crosshair ring around a focused enemy. */
+  private drawReticle(gfx: Graphics, target: Unit, color: number, alpha: number): void {
+    const { x, y } = target.pos;
+    const r = target.radius + 6;
+    gfx.circle(x, y, r);
+    gfx.setStrokeStyle({ width: 2, color, alpha });
+    gfx.stroke();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      gfx.moveTo(x + dx * (r - 3), y + dy * (r - 3));
+      gfx.lineTo(x + dx * (r + 5), y + dy * (r + 5));
+    }
+    gfx.stroke();
   }
 
   /** Rocket orders for the active team: each rocketeer's handle, its drawn
@@ -394,6 +448,11 @@ export class PathDrawer {
     this.units = units;
     this.elevationZones = elevationZones;
     this.enabled = true;
+    this.armedUnit = null;
+    // Forget focus on enemies that died last round.
+    for (const u of units) {
+      if (u.attackTargetId && !units.some(t => t.id === u.attackTargetId && t.alive)) u.attackTargetId = null;
+    }
     this.selectedUnit = null;
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
@@ -411,6 +470,8 @@ export class PathDrawer {
     this.strokePointer = null;
     this.strokeBackup = null;
     this.team = null;
+    this.armedUnit = null;
+    this.focusHint.visible = false;
     this.selectedUnit = null;
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
@@ -519,6 +580,7 @@ export class PathDrawer {
       this.onZoneHighlight?.(null);
     }
 
+    this.renderFocus();
     this.renderRockets();
 
     // Hide unused pool labels
@@ -533,7 +595,36 @@ export class PathDrawer {
     this.syncInspectedUnit();
     this.hoverGfx.clear();
     this.hoverLabel.visible = false;
+    this.focusHint.visible = false;
     if (!this.enabled || !this.team) return;
+
+    const armed = this.armedUnit;
+    if (this.focusFire && armed && armed.alive && !this.selectedUnit && !this.rocketUnit) {
+      const at = armed.waypoints.length > 0
+        ? this.prediction(armed, [armed.pos, ...armed.waypoints]).position
+        : armed.pos;
+      if (!armed.attackTargetId) {
+        // Styled here: the theme is assigned after construction.
+        this.focusHint.style.fill = this.theme.labelFill;
+        if (this.theme.labelStroke !== null) {
+          this.focusHint.style.stroke = { color: this.theme.labelStroke, width: this.theme.labelStrokeWidth };
+        }
+        this.focusHint.position.set(
+          Math.max(70, Math.min(MAP_WIDTH - 70, at.x)),
+          Math.min(MAP_HEIGHT - 14, at.y + armed.radius + 6),
+        );
+        this.focusHint.visible = true;
+      }
+      // Faint pulsing reticles show which enemies can be picked.
+      const enemyColor = this.team === 'blue' ? this.theme.redPath : this.theme.bluePath;
+      const p = 0.5 + 0.5 * Math.sin(Date.now() / 300);
+      for (const u of this.units) {
+        if (!u.alive || u.team === this.team || u.id === armed.attackTargetId) continue;
+        this.hoverGfx.circle(u.pos.x, u.pos.y, u.radius + 5 + p * 2);
+        this.hoverGfx.setStrokeStyle({ width: 1, color: enemyColor, alpha: 0.25 + p * 0.25 });
+        this.hoverGfx.stroke();
+      }
+    }
 
     const teamColor = this.team === 'blue' ? this.theme.bluePath : this.theme.redPath;
     const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
@@ -706,6 +797,8 @@ export class PathDrawer {
     this.stage.removeChild(this.hoverGfx);
     this.stage.removeChild(this.labelContainer);
     this.stage.removeChild(this.hoverLabel);
+    this.stage.removeChild(this.focusHint);
+    this.focusHint.destroy();
     this.gfx.destroy();
     this.hoverGfx.destroy();
     this.labelContainer.destroy();
@@ -761,6 +854,7 @@ export class PathDrawer {
     this.strokeBackup = null;
     this.strokePointer = null;
     this.selectedUnit = null;
+    this.armedUnit = null;
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rocketUnit = null;
@@ -795,6 +889,7 @@ export class PathDrawer {
       this.rocketUnit = rocketeer;
       this.strokePointer = e.pointerId ?? null;
       this.strokeBackup = { unit: rocketeer, orders: copyOrders(rocketeer) };
+      this.armedUnit = null;
       rocketeer.rocketPath = [];
       rocketeer.rocketFired = false;
       this.rawRocket = [{ ...launchPoint(rocketeer) }];
@@ -809,14 +904,23 @@ export class PathDrawer {
       this.selectedUnit = closest;
       this.strokePointer = e.pointerId ?? null;
       this.strokeBackup = { unit: closest, orders: copyOrders(closest) };
+      this.armedUnit = null;
       resetOrders(closest);
       this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
       this.renderPaths();
       return;
     }
 
-    // Tap on enemy → show their range
+    // Tap on enemy → show their range, and focus it if a unit was just ordered.
     const enemy = this.findNearestEnemy(pos.x, pos.y);
+    const armed = this.armedUnit;
+    if (this.focusFire && enemy && armed?.alive) {
+      armed.attackTargetId = armed.attackTargetId === enemy.id ? null : enemy.id;
+      this.onPathDrawn?.();
+      this.renderPaths();
+    }
+    // Tapping open ground (or after focusing) ends the unit's turn for orders.
+    this.armedUnit = null;
     this.hoveredUnit = null;
     this.hoveredEnemy = enemy;
     this.renderHoverLayer();
@@ -878,6 +982,7 @@ export class PathDrawer {
     if (this.selectedUnit.waypoints.length > 0) this.onPathDrawn?.();
 
     this.hoveredUnit = this.selectedUnit;
+    if (this.focusFire && canFocus(this.selectedUnit)) this.armedUnit = this.selectedUnit;
     this.selectedUnit = null;
     this.rawPoints = [];
     this.renderPaths();
@@ -889,6 +994,8 @@ export class PathDrawer {
     const unit = this.findNearestUnit(pos.x, pos.y);
     if (unit) {
       resetOrders(unit);
+      unit.attackTargetId = null;
+      if (this.armedUnit === unit) this.armedUnit = null;
       this.renderPaths();
     }
   };

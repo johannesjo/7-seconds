@@ -1,7 +1,7 @@
 import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, UnitType, ReplayFrame, ReplayEvent, ReplayData, CtfState, Vec2 } from './types';
 import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, ROCKET_MAX_PATH } from './constants';
 import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELEVATION_ZONES } from './online-types';
-import { createArmy, generateRandomComposition, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
+import { createArmy, generateRandomComposition, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, findCombatTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
 import { generateBattlefield, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 import { findMortarTarget, fireMortar, rocketReady, launchRocket, updateOrdnance, type Explosion } from './ordnance';
@@ -196,6 +196,7 @@ export class GameEngine {
 
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer!.highlightZonesAt(pos));
+      this.pathDrawer.focusFire = true;
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
 
       // Render initial state — hills under obstacles
@@ -438,7 +439,7 @@ export class GameEngine {
         continue;
       }
 
-      const target = findTarget(unit, this.units, null, this.obstacles);
+      const target = findCombatTarget(unit, this.units, this.obstacles, this.elevationZones);
 
       // Blade uses AoE melee attack instead of projectiles
       if (unit.type === 'blade') {

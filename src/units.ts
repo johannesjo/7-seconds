@@ -792,6 +792,31 @@ export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string
   return nearestVisible ?? nearestAny;
 }
 
+/** The living enemy this unit was ordered to focus, if any. A dead or missing
+ *  focus clears the order, so the unit falls back to auto-targeting. */
+export function focusTarget(unit: Unit, allUnits: Unit[]): Unit | null {
+  const id = unit.attackTargetId;
+  if (!id) return null;
+  const target = allUnits.find(u => u.id === id && u.alive && u.team !== unit.team) ?? null;
+  if (!target) unit.attackTargetId = null;
+  return target;
+}
+
+/** Who a gun unit shoots at (or faces). Focus fire never makes a unit hold
+ *  its fire: it shoots its focus whenever it can, otherwise the usual nearest
+ *  enemy it can hit, and only when it can hit nothing it turns toward its
+ *  focus (if seen) so its gun is already on it. */
+export function findCombatTarget(unit: Unit, allUnits: Unit[], obstacles: Obstacle[], elevationZones: ElevationZone[]): Unit | null {
+  const canShoot = (t: Unit) => isInRange(unit, t, elevationZones)
+    && hasLineOfSight(unit.pos, t.pos, obstacles, unit.projectileRadius);
+  const focus = focusTarget(unit, allUnits);
+  if (focus && canShoot(focus)) return focus;
+  const nearest = findTarget(unit, allUnits, null, obstacles);
+  if (nearest && canShoot(nearest)) return nearest;
+  if (focus && hasLineOfSight(unit.pos, focus.pos, obstacles)) return focus;
+  return nearest;
+}
+
 /** True when `target` sits inside the mortar's firing band: beyond its minimum
  *  range, within its (elevation-boosted) maximum. No line of sight needed. */
 export function mortarCanReach(mortar: Unit, target: Unit, elevationZones: ElevationZone[]): boolean {

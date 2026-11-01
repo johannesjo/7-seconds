@@ -32,6 +32,11 @@ function dist(a: Vec2, b: Vec2): number {
 
 /** The mortar's target: the nearest enemy inside its firing band. */
 export function findMortarTarget(mortar: Unit, allUnits: Unit[], elevationZones: ElevationZone[]): Unit | null {
+  // A focused enemy inside the firing band takes priority over the nearest.
+  const focus = mortar.attackTargetId
+    ? allUnits.find(u => u.id === mortar.attackTargetId && u.alive && u.team !== mortar.team)
+    : undefined;
+  if (focus && mortarCanReach(mortar, focus, elevationZones)) return focus;
   let best: Unit | null = null;
   let bestDist = Infinity;
   for (const u of allUnits) {
