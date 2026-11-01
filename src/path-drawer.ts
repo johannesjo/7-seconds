@@ -7,6 +7,7 @@ import { Theme, NIGHT_THEME } from './theme';
 import { MAX_PREDICTION_TIME_S, predictPath, type PathPrediction } from './path-preview';
 import { PinchZoom } from './plan-zoom';
 import { pulse } from './haptics';
+import { wakeRings } from './expedition';
 
 function polylineLength(points: Vec2[]): number {
   let length = 0;
@@ -204,6 +205,8 @@ export class PathDrawer {
    *  path to make that unit prefer shooting it. Off where the orders can't be
    *  sent along (online play). */
   focusFire = false;
+  /** Expedition: the lurkers' wake radius, to show it near planned paths; null elsewhere. */
+  wakeRadius: number | null = null;
   /** The own unit whose orders were given last; tapping an enemy now sets its focus. */
   private armedUnit: Unit | null = null;
   /** An enemy tap that sets the armed unit's focus once the finger lifts
@@ -351,6 +354,20 @@ export class PathDrawer {
         this.dashPath([from, to], color, 1.5, 0.55);
       }
       this.drawReticle(this.gfx, target, color, 0.95);
+    }
+  }
+
+  /** Expedition: the wake radius of sleeping enemies near this round's paths,
+   *  stronger where a path would wake them. */
+  private renderWakeRings(paths: Vec2[][]): void {
+    if (this.wakeRadius === null || this.team !== 'blue' || paths.length === 0) return;
+    const color = this.theme.labelWarn;
+    for (const ring of wakeRings(paths, this.units, this.wakeRadius)) {
+      this.gfx.circle(ring.pos.x, ring.pos.y, this.wakeRadius);
+      this.gfx.fill({ color, alpha: ring.crossed ? 0.08 : 0.03 });
+      this.gfx.circle(ring.pos.x, ring.pos.y, this.wakeRadius);
+      this.gfx.setStrokeStyle({ width: 1, color, alpha: ring.crossed ? 0.6 : 0.25 });
+      this.gfx.stroke();
     }
   }
 
@@ -650,6 +667,8 @@ export class PathDrawer {
   renderPaths(): void {
     this.gfx.clear();
     this.labelIndex = 0;
+    // What each path covers this round, for the wake rings
+    const reachedPaths: Vec2[][] = [];
 
     for (const unit of this.units) {
       if (!unit.alive || unit.waypoints.length === 0) continue;
@@ -662,6 +681,7 @@ export class PathDrawer {
       const alpha = 0.8;
       const fullPath: Vec2[] = [unit.pos, ...unit.waypoints];
       const { reached, remainder, position, travelTime, tickDistances } = this.prediction(unit, fullPath);
+      reachedPaths.push(reached);
       this.strokePath(this.gfx, reached, color, 2, alpha);
       this.strokePath(this.gfx, remainder, color, 2, alpha * 0.22);
       this.drawGhost(this.gfx, unit, position, color, alpha);
@@ -706,6 +726,7 @@ export class PathDrawer {
     if (this.selectedUnit && this.rawPoints.length > 1) {
       const color = this.team === 'blue' ? this.theme.bluePathBright : this.theme.redPathBright;
       const { reached, remainder, position, travelTime, tickDistances } = this.prediction(this.selectedUnit, this.rawPoints);
+      reachedPaths.push(reached);
       this.strokePath(this.gfx, reached, color, 4, 1);
       this.strokePath(this.gfx, remainder, color, 3, 0.22);
       this.drawGhost(this.gfx, this.selectedUnit, position, color, 1);
@@ -740,6 +761,7 @@ export class PathDrawer {
       this.onZoneHighlight?.(null);
     }
 
+    this.renderWakeRings(reachedPaths);
     this.renderFocus();
     this.renderRockets();
 

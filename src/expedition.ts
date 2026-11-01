@@ -244,6 +244,37 @@ function inside(p: Vec2, r: Obstacle): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
 }
 
+/** Wake rings show once a planned path comes this much closer than the wake radius. */
+const WAKE_RING_MARGIN = 120;
+
+/**
+ * Planning: the sleeping enemies a planned path passes near, so their wake
+ * radius can be shown — `crossed` when the path enters it and would wake them.
+ */
+export function wakeRings(paths: Vec2[][], units: Unit[], radius: number): { pos: Vec2; crossed: boolean }[] {
+  const rings: { pos: Vec2; crossed: boolean }[] = [];
+  for (const u of units) {
+    if (!u.dormant || !u.alive) continue;
+    const closest = Math.min(...paths.map(p => distanceToPath(u.pos, p)));
+    if (closest < radius + WAKE_RING_MARGIN) rings.push({ pos: u.pos, crossed: closest < radius });
+  }
+  return rings;
+}
+
+function distanceToPath(p: Vec2, path: Vec2[]): number {
+  let best = Infinity;
+  for (let i = 1; i < path.length; i++) best = Math.min(best, distanceToSegment(p, path[i - 1], path[i]));
+  return best;
+}
+
+function distanceToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
+}
+
 /** Living blue units standing in the extraction zone. */
 export function unitsInZone(units: Unit[], extraction: Obstacle): Unit[] {
   return units.filter(u => u.alive && u.team === 'blue' && inside(u.pos, extraction));

@@ -636,7 +636,7 @@ function hasLineOfSight(a, b, obstacles, padding = 0) {
   return !obstacles.some((o) => segmentHitsRect(a, b, o, padding));
 }
 function findTarget(attacker, allUnits, preferredId, obstacles = [], canSee) {
-  const enemies = allUnits.filter((u) => u.alive && u.team !== attacker.team && (!canSee || canSee(u)));
+  const enemies = allUnits.filter((u) => u.alive && !u.dormant && u.team !== attacker.team && (!canSee || canSee(u)));
   if (enemies.length === 0) return null;
   if (preferredId) {
     const preferred = enemies.find((u) => u.id === preferredId);
@@ -1780,6 +1780,7 @@ var GameEngine = class _GameEngine {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer.highlightZonesAt(pos));
       this.pathDrawer.focusFire = !this.practice && !this.onlineHostMode;
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
+      this.pathDrawer.wakeRadius = this.expedition ? LURKER_WAKE_RADIUS : null;
       const night = this.night;
       this.pathDrawer.canSeeEnemy = night ? night.canSee.blue : null;
       this.renderer.setNightView(night ? { team: "blue", vision: night } : null);

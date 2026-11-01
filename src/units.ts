@@ -770,7 +770,9 @@ export function hasLineOfSight(a: Vec2, b: Vec2, obstacles: Obstacle[], padding 
  *  nearest at all. `canSee` (night battles) limits it to enemies its team can
  *  see; when omitted every enemy counts, as in normal play. */
 export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null, obstacles: Obstacle[] = [], canSee?: (enemy: Unit) => boolean): Unit | null {
-  const enemies = allUnits.filter(u => u.alive && u.team !== attacker.team && (!canSee || canSee(u)));
+  // Sleeping lurkers (Expedition only) are left alone so a squad can sneak
+  // past; a focus order (focusTarget) still shoots one on purpose.
+  const enemies = allUnits.filter(u => u.alive && !u.dormant && u.team !== attacker.team && (!canSee || canSee(u)));
   if (enemies.length === 0) return null;
 
   if (preferredId) {

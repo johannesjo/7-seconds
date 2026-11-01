@@ -18,7 +18,7 @@ import { planTeamOrders } from './ai-planner';
 import { createRng } from './rng';
 import { clampPathLength, validPoints } from './path-orders';
 import {
-  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, STALL_DISTANCE, distanceToExtraction, planningFrame, spawnPursuers, unitsInZone, wakeLurkers,
+  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, LURKER_WAKE_RADIUS, STALL_DISTANCE, distanceToExtraction, planningFrame, spawnPursuers, unitsInZone, wakeLurkers,
   type ExpeditionSetup,
 } from './expedition';
 import { NightVision } from './night';
@@ -245,6 +245,7 @@ export class GameEngine {
       // go over the network, which doesn't carry focus yet.
       this.pathDrawer.focusFire = !this.practice && !this.onlineHostMode;
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
+      this.pathDrawer.wakeRadius = this.expedition ? LURKER_WAKE_RADIUS : null;
       const night = this.night;
       this.pathDrawer.canSeeEnemy = night ? night.canSee.blue : null;
       this.renderer.setNightView(night ? { team: 'blue', vision: night } : null);

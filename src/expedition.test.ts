@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from './rng';
-import { createUnit } from './units';
+import { createUnit, findCombatTarget } from './units';
+import { GameEngine } from './game';
 import {
   EXPEDITION_MAP_HEIGHT, EXPEDITION_MAP_WIDTH, LURKER_WAKE_RADIUS, MAX_ALIVE_ENEMIES, MIN_SPAWN_DISTANCE,
   createExpeditionSquad, distanceToExtraction, extractionZone, generateExpeditionMap, pursuitComposition,
-  planningFrame, spawnLurkers, spawnPursuers, unitsInZone, wakeLurkers,
+  planningFrame, spawnLurkers, spawnPursuers, unitsInZone, wakeLurkers, wakeRings,
 } from './expedition';
 import type { Obstacle, Vec2 } from './types';
 
@@ -158,5 +159,68 @@ describe('planningFrame', () => {
   it('never zooms below the whole map', () => {
     expect(planningFrame([{ x: 0, y: 0 }, { x: W, y: H }], 2.8, W, H).zoom).toBe(1);
     expect(planningFrame(squad(1200), 1, W, H).zoom).toBe(1);
+  });
+});
+
+describe('stealth', () => {
+  // A sniper outranges the wake radius: it could shoot a sleeper without waking it by walking up
+  const sniperAndSleeper = () => {
+    const sniper = createUnit('blue_sn', 'sniper', 'blue', { x: 540, y: 1000 });
+    const sleeper = createUnit('red_lurk_0', 'zombie', 'red', { x: 540, y: 1000 - LURKER_WAKE_RADIUS - 50 });
+    sleeper.dormant = true;
+    return { sniper, sleeper };
+  };
+
+  it('units leave sleeping enemies alone unless told to shoot one', () => {
+    const { sniper, sleeper } = sniperAndSleeper();
+    expect(findCombatTarget(sniper, [sniper, sleeper], [], [])).toBeNull();
+    sniper.attackTargetId = sleeper.id;
+    expect(findCombatTarget(sniper, [sniper, sleeper], [], [])).toBe(sleeper);
+  });
+
+  it('units shoot sleepers once they wake', () => {
+    const { sniper, sleeper } = sniperAndSleeper();
+    sleeper.dormant = false;
+    expect(findCombatTarget(sniper, [sniper, sleeper], [], [])).toBe(sleeper);
+  });
+
+  it('a squad standing in range of a sleeping pack does not wake it', () => {
+    const { sniper, sleeper } = sniperAndSleeper();
+    const engine = new GameEngine(null, () => {}, {
+      aiMode: true, seed: 1,
+      expedition: { obstacles: [], elevationZones: [], extraction: { x: 0, y: 0, w: 100, h: 100 }, units: [sniper, sleeper] },
+    });
+    engine.startBattle();
+    engine.confirmPlan();
+    for (let tick = 0; tick < 4 * 60; tick++) engine.externalTick(1000 / 60);
+    expect(sleeper.dormant).toBe(true);
+    expect(sleeper.hp).toBe(sleeper.maxHp);
+    engine.stop();
+  });
+});
+
+describe('wake rings', () => {
+  const sleeper = (x: number, y: number, id = 'red_lurk_0') => {
+    const u = createUnit(id, 'zombie', 'red', { x, y });
+    u.dormant = true;
+    return u;
+  };
+  const path: Vec2[] = [{ x: 100, y: 1000 }, { x: 100, y: 500 }];
+
+  it('marks sleepers a path would wake, and shows those it passes near', () => {
+    const crossed = sleeper(100 + LURKER_WAKE_RADIUS - 10, 750, 'a');
+    const near = sleeper(100 + LURKER_WAKE_RADIUS + 50, 750, 'b');
+    const far = sleeper(900, 750, 'c');
+    const rings = wakeRings([path], [crossed, near, far], LURKER_WAKE_RADIUS);
+    expect(rings).toEqual([{ pos: crossed.pos, crossed: true }, { pos: near.pos, crossed: false }]);
+  });
+
+  it('skips awake and dead enemies, and works without paths', () => {
+    const awake = sleeper(100, 750, 'a');
+    awake.dormant = false;
+    const dead = sleeper(100, 760, 'b');
+    dead.alive = false;
+    expect(wakeRings([path], [awake, dead], LURKER_WAKE_RADIUS)).toEqual([]);
+    expect(wakeRings([], [sleeper(100, 750)], LURKER_WAKE_RADIUS)).toEqual([]);
   });
 });
