@@ -17,7 +17,7 @@ import { planTeamOrders } from './ai-planner';
 import { createRng } from './rng';
 import { clampPathLength, validPoints } from './path-orders';
 import {
-  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, STALL_DISTANCE, centroid, distanceToExtraction, spawnPursuers, unitsInZone, wakeLurkers,
+  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, STALL_DISTANCE, distanceToExtraction, planningFrame, spawnPursuers, unitsInZone, wakeLurkers,
   type ExpeditionSetup,
 } from './expedition';
 import { NightVision } from './night';
@@ -448,20 +448,16 @@ export class GameEngine {
     return news;
   }
 
-  /** Expedition planning: zoomed in on the squad, or where the battle left off. */
+  /** Expedition planning: glide from where the battle left off (or the
+   *  whole map, in round 1) to frame the squad with the way ahead above it. */
   private focusPlanningView(battleView?: { zoom: number; x: number; y: number }): void {
     const drawer = this.pathDrawer;
     if (!drawer) return;
-    if (battleView && battleView.zoom > 1.001) {
-      drawer.setView(battleView);
-      return;
-    }
+    if (battleView && battleView.zoom > 1.001) drawer.setView(battleView);
     const blue = this.units.filter(u => u.alive && u.team === 'blue');
     if (blue.length === 0) return;
-    const c = centroid(blue.map(u => u.pos));
-    // Ahead of the squad (that's where the paths go), zoomed in enough to
-    // draw but out enough to see the packs in the way
-    drawer.focusOn({ x: c.x, y: c.y - 260 }, Math.max(1, drawer.zoomLimit * 0.72));
+    const frame = planningFrame(blue.map(u => u.pos), drawer.zoomLimit, MAP_WIDTH, MAP_HEIGHT);
+    drawer.focusOn(frame.center, frame.zoom, battleView && battleView.zoom > 1.001 ? 450 : 800);
   }
 
   /** Generate AI paths for red units using position-scoring system. Zombies,

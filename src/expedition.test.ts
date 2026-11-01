@@ -4,7 +4,7 @@ import { createUnit } from './units';
 import {
   EXPEDITION_MAP_HEIGHT, EXPEDITION_MAP_WIDTH, LURKER_WAKE_RADIUS, MAX_ALIVE_ENEMIES, MIN_SPAWN_DISTANCE,
   createExpeditionSquad, distanceToExtraction, extractionZone, generateExpeditionMap, pursuitComposition,
-  spawnLurkers, spawnPursuers, unitsInZone, wakeLurkers,
+  planningFrame, spawnLurkers, spawnPursuers, unitsInZone, wakeLurkers,
 } from './expedition';
 import type { Obstacle, Vec2 } from './types';
 
@@ -29,7 +29,7 @@ describe('generateExpeditionMap', () => {
   it('starts the squad clear of walls, far from extraction', () => {
     const map = generateExpeditionMap(createRng(7));
     const squad = createExpeditionSquad(map.obstacles);
-    expect(squad).toHaveLength(5);
+    expect(squad).toHaveLength(4);
     for (const u of squad) {
       expect(map.obstacles.some(o => inRect(u.pos, o))).toBe(false);
     }
@@ -125,5 +125,38 @@ describe('extraction', () => {
     dead.alive = false;
     const red = createUnit('red_z', 'zombie', 'red', inside);
     expect(unitsInZone([a, b, dead, red], zone)).toEqual([a]);
+  });
+});
+
+describe('planningFrame', () => {
+  const W = EXPEDITION_MAP_WIDTH;
+  const H = EXPEDITION_MAP_HEIGHT;
+  const squad = (y: number, xs = [480, 540, 600]): Vec2[] => xs.map(x => ({ x, y }));
+
+  it('zooms in to its share of the limit and keeps the squad low in the view', () => {
+    const { center, zoom } = planningFrame(squad(1200), 2.8, W, H);
+    expect(zoom).toBeCloseTo(2.8 * 0.72);
+    const viewH = H / zoom;
+    const squadAt = (1200 - (center.y - viewH / 2)) / viewH;
+    // Most of the view is the way ahead (north)
+    expect(squadAt).toBeGreaterThan(0.8);
+    expect(squadAt).toBeLessThan(1);
+    expect(center.x).toBe(540);
+  });
+
+  it('zooms out so a spread squad stays in sight', () => {
+    const points = [{ x: 100, y: 900 }, { x: 980, y: 1500 }];
+    const { center, zoom } = planningFrame(points, 2.8, W, H);
+    const viewW = W / zoom;
+    const viewH = H / zoom;
+    for (const p of points) {
+      expect(Math.abs(p.x - center.x)).toBeLessThan(viewW / 2);
+      expect(Math.abs(p.y - center.y)).toBeLessThan(viewH / 2);
+    }
+  });
+
+  it('never zooms below the whole map', () => {
+    expect(planningFrame([{ x: 0, y: 0 }, { x: W, y: H }], 2.8, W, H).zoom).toBe(1);
+    expect(planningFrame(squad(1200), 1, W, H).zoom).toBe(1);
   });
 });

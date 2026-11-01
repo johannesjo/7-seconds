@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setMapSize } from './constants';
-import { clampView, edgePanView, maxPlanZoom, pinchView, PinchZoom, PLAN_ZOOM_THRESHOLD } from './plan-zoom';
+import { clampView, edgePanView, lerpView, maxPlanZoom, pinchView, PinchZoom, PLAN_ZOOM_THRESHOLD } from './plan-zoom';
 
 describe('maxPlanZoom', () => {
   it('stays off when the map is shown near full size', () => {
@@ -12,6 +12,21 @@ describe('maxPlanZoom', () => {
   it('allows zooming back to native size, capped', () => {
     expect(maxPlanZoom(0.5)).toBe(2);
     expect(maxPlanZoom(0.1)).toBe(3);
+  });
+});
+
+describe('lerpView', () => {
+  const centre = (v: { zoom: number; x: number; y: number }) => ({ x: (500 - v.x) / v.zoom, y: (500 - v.y) / v.zoom });
+
+  it('moves the centred map point in a straight line while zooming', () => {
+    const a = { zoom: 1, x: 0, y: 0 }; // centre (500, 500)
+    const b = { zoom: 3, x: 500 - 200 * 3, y: 500 - 800 * 3 }; // centre (200, 800)
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      const c = centre(lerpView(a, b, t, 1000, 1000));
+      expect(c.x).toBeCloseTo(500 - 300 * t);
+      expect(c.y).toBeCloseTo(500 + 300 * t);
+    }
+    expect(lerpView(a, b, 0.5, 1000, 1000).zoom).toBeCloseTo(Math.sqrt(3));
   });
 });
 
@@ -130,6 +145,86 @@ describe('PinchZoom', () => {
     canvas.dispatchEvent(pointer('pointerdown', 7, 100, 100)); // never lifted
     canvas.dispatchEvent(pointer('pointerdown', 1, 200, 200)); // new touch sequence
     expect(zoom.gesturing).toBe(false);
+  });
+
+  describe('one-finger pan and glides', () => {
+    let now = 0;
+    beforeEach(() => {
+      now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    function zoomedIn(): PinchZoom {
+      makeCanvas(400); // 1000px map at 0.4×: 2.5 canvas px per CSS px
+      const zoom = new PinchZoom(canvas as unknown as HTMLCanvasElement, stage);
+      zoom.attach();
+      zoom.setView({ zoom: 2, x: -500, y: -500 });
+      return zoom;
+    }
+
+    it('keeps the map under the finger, within the map', () => {
+      const zoom = zoomedIn();
+      zoom.beginPan({ x: 200, y: 200 });
+      now = 100;
+      zoom.movePan({ x: 240, y: 180 });
+      expect(stage.x).toBeCloseTo(-400);
+      expect(stage.y).toBeCloseTo(-550);
+      now = 200;
+      zoom.movePan({ x: 400, y: 200 }); // past the left edge
+      expect(stage.x).toBe(0);
+    });
+
+    it('coasts after a flick, slowing to a stop, but not after a held stop', () => {
+      const zoom = zoomedIn();
+      zoom.beginPan({ x: 200, y: 200 });
+      for (let i = 1; i <= 5; i++) {
+        now = i * 16;
+        zoom.movePan({ x: 200, y: 200 - i * 8 });
+      }
+      zoom.endPan();
+      const before = stage.y;
+      zoom.tick(0.016);
+      expect(stage.y).toBeLessThan(before);
+      for (let i = 0; i < 200; i++) zoom.tick(0.016);
+      const settled = stage.y;
+      zoom.tick(0.016);
+      expect(stage.y).toBe(settled);
+
+      // Same drag, but the finger rests before lifting: no coasting.
+      zoom.beginPan({ x: 200, y: 200 });
+      for (let i = 1; i <= 5; i++) {
+        now = 10_000 + i * 16;
+        zoom.movePan({ x: 200, y: 200 + i * 8 });
+      }
+      now += 300;
+      zoom.endPan();
+      const rested = stage.y;
+      zoom.tick(0.016);
+      expect(stage.y).toBe(rested);
+    });
+
+    it('glides to a view, and a touch stops the glide', () => {
+      const zoom = zoomedIn();
+      zoom.focusOn({ x: 250, y: 750 }, 2, 400);
+      now = 200;
+      zoom.tick(0.016);
+      // Part of the way there (eased: more than half, not all)
+      expect(stage.x).toBeGreaterThan(-250);
+      expect(stage.x).toBeLessThan(0);
+      now = 400;
+      zoom.tick(0.016);
+      expect(stage).toMatchObject({ zoom: 2, x: 0, y: -1000 });
+
+      zoom.focusOn({ x: 750, y: 250 }, 2, 400);
+      now = 500;
+      zoom.tick(0.016);
+      const caught = { x: stage.x, y: stage.y };
+      canvas.dispatchEvent(pointer('pointerdown', 1, 100, 100));
+      now = 900;
+      zoom.tick(0.016);
+      expect({ x: stage.x, y: stage.y }).toEqual(caught);
+    });
   });
 });
 

@@ -60,6 +60,29 @@ export function edgePanView(view: ZoomView, p: Vec2, dt: number, mapW: number, m
   }, mapW, mapH, maxZoom);
 }
 
+/** A fling slows by this factor every second (exponential decay). */
+const FLING_DECAY = 6;
+/** Flings slower than this (canvas px per second) just stop. */
+const FLING_MIN_SPEED = 40;
+
+/** Smoothstep-like ease for glides: quick start, soft landing. */
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+/** The view `t` (0..1) of the way from `a` to `b` on a `mapW`×`mapH` map:
+ *  the centred map point moves straight and zoom changes at an even rate,
+ *  so a glide that also zooms doesn't swing sideways. */
+export function lerpView(a: ZoomView, b: ZoomView, t: number, mapW: number, mapH: number): ZoomView {
+  const zoom = Math.exp(Math.log(a.zoom) + (Math.log(b.zoom) - Math.log(a.zoom)) * t);
+  const centre = (v: ZoomView): Vec2 => ({ x: (mapW / 2 - v.x) / v.zoom, y: (mapH / 2 - v.y) / v.zoom });
+  const ca = centre(a);
+  const cb = centre(b);
+  const cx = ca.x + (cb.x - ca.x) * t;
+  const cy = ca.y + (cb.y - ca.y) * t;
+  return { zoom, x: mapW / 2 - cx * zoom, y: mapH / 2 - cy * zoom };
+}
+
 interface Transformable {
   scale: { set(v: number): void };
   position: { set(x: number, y: number): void };
@@ -81,6 +104,13 @@ export class PinchZoom {
   private maxZoom = 1;
   private gesture: { view: ZoomView; mid: Vec2; dist: number } | null = null;
   private attached = false;
+  /** One-finger pan: where it started, and the finger's recent speed so a
+   *  flick keeps the map gliding after release. */
+  private pan: { view: ZoomView; start: Vec2; last: Vec2; lastAt: number; vel: Vec2 } | null = null;
+  /** Speed (canvas px per second) the map coasts at after a flick. */
+  private fling: Vec2 | null = null;
+  /** An eased move to a view (e.g. framing the squad for planning). */
+  private glide: { from: ZoomView; to: ZoomView; at: number; ms: number } | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private stage: Transformable) {}
 
@@ -116,6 +146,8 @@ export class PinchZoom {
     }
     this.pointers.clear();
     this.gesture = null;
+    this.pan = null;
+    this.stopMotion();
     // Only touch the stage if we moved it: the battle camera may own it now.
     const v = this.view;
     if (v.zoom !== 1 || v.x !== 0 || v.y !== 0) this.apply({ zoom: 1, x: 0, y: 0 });
@@ -129,14 +161,97 @@ export class PinchZoom {
   /** Show `view` (e.g. carried over from the battle camera), clamped. */
   setView(view: ZoomView): void {
     if (!this.attached) return;
+    this.stopMotion();
     this.apply(clampView(view, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
   }
 
-  /** Centre the view on a map point at `zoom` (clamped to what's allowed). */
-  focusOn(center: Vec2, zoom: number): void {
+  /** Centre the view on a map point at `zoom` (clamped to what's allowed),
+   *  gliding there over `ms` when given. */
+  focusOn(center: Vec2, zoom: number, ms = 0): void {
     if (!this.attached) return;
     const z = Math.max(1, Math.min(this.maxZoom, zoom));
-    this.setView({ zoom: z, x: MAP_WIDTH / 2 - center.x * z, y: MAP_HEIGHT / 2 - center.y * z });
+    const to = clampView({ zoom: z, x: MAP_WIDTH / 2 - center.x * z, y: MAP_HEIGHT / 2 - center.y * z }, MAP_WIDTH, MAP_HEIGHT, this.maxZoom);
+    this.stopMotion();
+    if (ms > 0) this.glide = { from: { ...this.view }, to, at: performance.now(), ms };
+    else this.apply(to);
+  }
+
+  /** Start dragging the map with one finger (client coordinates): the map
+   *  follows the finger from here on, so a drag threshold adds no jump. */
+  beginPan(client: Vec2): void {
+    if (!this.attached || this.gesture) return;
+    this.stopMotion();
+    const p = this.clientToCanvas(client);
+    this.pan = { view: { ...this.view }, start: p, last: p, lastAt: performance.now(), vel: { x: 0, y: 0 } };
+  }
+
+  /** The panning finger moved: the map point under it stays under it. */
+  movePan(client: Vec2): void {
+    const pan = this.pan;
+    if (!pan || this.gesture) return;
+    const p = this.clientToCanvas(client);
+    const now = performance.now();
+    const dt = (now - pan.lastAt) / 1000;
+    if (dt > 0) {
+      // Smoothed, so one jittery event doesn't decide the flick.
+      const k = Math.min(1, dt / 0.05);
+      pan.vel = {
+        x: pan.vel.x + ((p.x - pan.last.x) / dt - pan.vel.x) * k,
+        y: pan.vel.y + ((p.y - pan.last.y) / dt - pan.vel.y) * k,
+      };
+    }
+    pan.last = p;
+    pan.lastAt = now;
+    this.apply(clampView({
+      zoom: pan.view.zoom,
+      x: pan.view.x + p.x - pan.start.x,
+      y: pan.view.y + p.y - pan.start.y,
+    }, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
+  }
+
+  /** Drop a pan without coasting (e.g. the touch was cancelled). */
+  cancelPan(): void {
+    this.pan = null;
+  }
+
+  /** The panning finger lifted: coast on if it was flicked. */
+  endPan(): void {
+    const pan = this.pan;
+    this.pan = null;
+    if (!pan) return;
+    // A finger that stopped before lifting shouldn't fling.
+    const idle = performance.now() - pan.lastAt;
+    if (idle < 80 && Math.hypot(pan.vel.x, pan.vel.y) > FLING_MIN_SPEED * 3) this.fling = pan.vel;
+  }
+
+  /** Stop any glide or coasting (e.g. a finger landed). */
+  stopMotion(): void {
+    this.fling = null;
+    this.glide = null;
+  }
+
+  /** Advance glides and flings; call every frame. */
+  tick(dt: number): void {
+    if (!this.attached) return;
+    const glide = this.glide;
+    if (glide) {
+      const t = Math.min(1, (performance.now() - glide.at) / glide.ms);
+      const v = lerpView(glide.from, glide.to, easeOutCubic(t), MAP_WIDTH, MAP_HEIGHT);
+      this.apply(t >= 1 ? glide.to : clampView(v, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
+      if (t >= 1) this.glide = null;
+      return;
+    }
+    const v = this.fling;
+    if (!v || dt <= 0) return;
+    const next = clampView({ zoom: this.view.zoom, x: this.view.x + v.x * dt, y: this.view.y + v.y * dt }, MAP_WIDTH, MAP_HEIGHT, this.maxZoom);
+    // Hitting an edge stops that direction.
+    if (next.x === this.view.x) v.x = 0;
+    if (next.y === this.view.y) v.y = 0;
+    this.apply(next);
+    const decay = Math.exp(-FLING_DECAY * dt);
+    v.x *= decay;
+    v.y *= decay;
+    if (Math.hypot(v.x, v.y) < FLING_MIN_SPEED) this.fling = null;
   }
 
   /**
@@ -156,17 +271,24 @@ export class PinchZoom {
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
     if (this.gesture) return;
+    this.stopMotion();
     const p = this.toCanvas(e);
     const factor = Math.exp(-Math.max(-100, Math.min(100, e.deltaY)) * 0.004);
     this.apply(pinchView(this.view, p, 1, p, factor, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
+    // Zoomed mid-drag: carry on dragging from the new view.
+    if (this.pan) this.pan = { ...this.pan, view: { ...this.view }, start: this.pan.last };
   };
 
   /** Client coordinates → canvas (Pixi "global") coordinates. */
   private toCanvas(e: { clientX: number; clientY: number }): Vec2 {
+    return this.clientToCanvas({ x: e.clientX, y: e.clientY });
+  }
+
+  private clientToCanvas(client: Vec2): Vec2 {
     const rect = this.canvas.getBoundingClientRect();
     return {
-      x: (e.clientX - rect.left) * (MAP_WIDTH / rect.width),
-      y: (e.clientY - rect.top) * (MAP_HEIGHT / rect.height),
+      x: (client.x - rect.left) * (MAP_WIDTH / rect.width),
+      y: (client.y - rect.top) * (MAP_HEIGHT / rect.height),
     };
   }
 
@@ -185,8 +307,11 @@ export class PinchZoom {
       this.pointers.clear();
       this.gesture = null;
     }
+    // A touch catches the map: no gliding or coasting on under the finger.
+    this.stopMotion();
     this.pointers.set(e.pointerId, this.toCanvas(e));
     if (this.pointers.size === 2) {
+      this.pan = null;
       const { mid, dist } = this.midAndDist();
       this.gesture = { view: { ...this.view }, mid, dist };
       this.onGestureStart?.();

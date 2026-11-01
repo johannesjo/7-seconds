@@ -1457,6 +1457,29 @@ function distanceToExtraction(units, extraction) {
   const dy = Math.max(extraction.y - c.y, 0, c.y - (extraction.y + extraction.h));
   return Math.round(Math.hypot(dx, dy));
 }
+var FRAME_MARGIN = { top: 60, side: 70, bottom: 130 };
+var FRAME_ZOOM_SHARE = 0.72;
+function planningFrame(points, maxZoom, mapW, mapH) {
+  if (points.length === 0) return { center: { x: mapW / 2, y: mapH / 2 }, zoom: 1 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+  const m = FRAME_MARGIN;
+  const zoom = Math.max(1, Math.min(
+    maxZoom * FRAME_ZOOM_SHARE,
+    mapW / (maxX - minX + m.side * 2),
+    mapH / (maxY - minY + m.top + m.bottom)
+  ));
+  const viewH = mapH / zoom;
+  return {
+    center: { x: (minX + maxX) / 2, y: maxY + m.bottom - viewH / 2 },
+    zoom
+  };
+}
 function centroid(points) {
   if (points.length === 0) return { x: 0, y: 0 };
   let x = 0;
@@ -1906,18 +1929,16 @@ var GameEngine = class _GameEngine {
     this.lastPursuit = null;
     return news;
   }
-  /** Expedition planning: zoomed in on the squad, or where the battle left off. */
+  /** Expedition planning: glide from where the battle left off (or the
+   *  whole map, in round 1) to frame the squad with the way ahead above it. */
   focusPlanningView(battleView) {
     const drawer = this.pathDrawer;
     if (!drawer) return;
-    if (battleView && battleView.zoom > 1.001) {
-      drawer.setView(battleView);
-      return;
-    }
+    if (battleView && battleView.zoom > 1.001) drawer.setView(battleView);
     const blue = this.units.filter((u) => u.alive && u.team === "blue");
     if (blue.length === 0) return;
-    const c = centroid(blue.map((u) => u.pos));
-    drawer.focusOn({ x: c.x, y: c.y - 260 }, Math.max(1, drawer.zoomLimit * 0.72));
+    const frame = planningFrame(blue.map((u) => u.pos), drawer.zoomLimit, MAP_WIDTH, MAP_HEIGHT);
+    drawer.focusOn(frame.center, frame.zoom, battleView && battleView.zoom > 1.001 ? 450 : 800);
   }
   /** Generate AI paths for red units using position-scoring system. Zombies,
    *  shielders, and bombers are left to the real-time chase AI. */

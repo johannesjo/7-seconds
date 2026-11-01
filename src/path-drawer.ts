@@ -126,8 +126,11 @@ function canFocus(unit: Unit): boolean {
 }
 
 const FOCUS_HINT_KEY = '7s-focus-hint-seen';
-/** Taps that wander further than this are drags, not focus taps. */
+/** Taps that wander further than this (CSS pixels) are drags, not focus taps. */
 const TAP_SLOP = 12;
+/** However far the map is zoomed out, a unit, path end or rocket handle can
+ *  be grabbed from this many CSS pixels away: about a fingertip. */
+const MIN_GRAB_PX = 22;
 /** Screen pixels a press on a unit, path end or rocket handle must travel
  *  before it starts drawing. Shorter presses are taps (inspect) or holds
  *  (clear), and leave the orders alone. */
@@ -205,7 +208,10 @@ export class PathDrawer {
   private armedUnit: Unit | null = null;
   /** An enemy tap that sets the armed unit's focus once the finger lifts
    *  without dragging or pinching. */
-  private pendingFocus: { unit: Unit; enemy: Unit; at: Vec2 } | null = null;
+  private pendingFocus: { unit: Unit; enemy: Unit; client: Vec2 } | null = null;
+  /** A press on open ground (or an enemy) on a zoomed map: dragging it pans
+   *  the view; `panning` once it has moved far enough. */
+  private panPress: { client: Vec2; panning: boolean } | null = null;
   private focusHint: Text;
   /** The hint teaches the gesture; once used, it stays hidden. */
   private focusHintDone = focusHintSeen();
@@ -479,6 +485,19 @@ export class PathDrawer {
     this.gfx.fill({ color, alpha: 0.95 });
   }
 
+  /** Map units per CSS pixel at the current canvas size and zoom. */
+  private mapUnitsPerPx(): number {
+    const width = this.canvas?.getBoundingClientRect().width ?? 0;
+    const zoom = this.stage.scale.x;
+    if (!(width > 0) || !(zoom > 0)) return 0;
+    return MAP_WIDTH / (width * zoom);
+  }
+
+  /** A grab radius in map units that never shrinks under a fingertip. */
+  private reach(radius: number): number {
+    return Math.max(radius, MIN_GRAB_PX * this.mapUnitsPerPx());
+  }
+
   /** What a press here would pick up. The nearest grab point wins, so
    *  units, path ends and rocket handles that overlap stay reachable; on a
    *  tie a unit beats its path end, which beats a rocket handle. */
@@ -489,7 +508,7 @@ export class PathDrawer {
     let bestDist = Infinity;
     const consider = (kind: Grab['kind'], unit: Unit, point: Vec2, radius: number): void => {
       const d = distancePt(point, at);
-      if (d <= radius && d < bestDist) {
+      if (d <= this.reach(radius) && d < bestDist) {
         best = { kind, unit };
         bestDist = d;
       }
@@ -566,6 +585,8 @@ export class PathDrawer {
     this.hoveredEnd = false;
     this.press = null;
     this.grabOffset = null;
+    this.panPress = null;
+    this.zoom?.cancelPan();
     this.strokePointer = null;
     this.strokeBackup = null;
     this.strokeGlobal = null;
@@ -592,6 +613,8 @@ export class PathDrawer {
     this.hoveredEnd = false;
     this.press = null;
     this.grabOffset = null;
+    this.panPress = null;
+    this.zoom?.cancelPan();
     this.rocketUnit = null;
     this.rawRocket = [];
     this.inspectedUnit = null;
@@ -911,6 +934,7 @@ export class PathDrawer {
     const now = performance.now();
     const dt = Math.min(0.05, (now - (this.lastFrameAt || now)) / 1000);
     this.lastFrameAt = now;
+    this.zoom?.tick(dt);
     const drawing = this.selectedUnit !== null || this.rocketUnit !== null;
     if (!drawing || !this.strokeGlobal || !this.zoom || dt <= 0) return;
     if (!this.zoom.edgePan(this.strokeGlobal, dt)) return;
@@ -941,8 +965,8 @@ export class PathDrawer {
   }
 
   /** Centre the planning view on a map point. */
-  focusOn(center: Vec2, zoom: number): void {
-    this.zoom?.focusOn(center, zoom);
+  focusOn(center: Vec2, zoom: number, ms = 0): void {
+    this.zoom?.focusOn(center, zoom, ms);
   }
 
   private drawRangeCircle(unit: Unit, pos: Vec2, color: number): void {
@@ -1021,7 +1045,7 @@ export class PathDrawer {
   private findNearestEnemy(px: number, py: number): Unit | null {
     if (!this.team) return null;
     let closest: Unit | null = null;
-    let closestDist = UNIT_SELECT_RADIUS;
+    let closestDist = this.reach(UNIT_SELECT_RADIUS);
 
     for (const unit of this.units) {
       if (!unit.alive || unit.team === this.team) continue;
@@ -1059,6 +1083,8 @@ export class PathDrawer {
     this.hoveredEnd = false;
     this.press = null;
     this.grabOffset = null;
+    this.panPress = null;
+    this.zoom?.cancelPan();
     this.rawRocket = [];
     this.renderPaths();
   };
@@ -1105,7 +1131,12 @@ export class PathDrawer {
 
     // Tap on enemy → show their range, and focus it if a unit was just ordered.
     if (canFocusTap && enemy && armed) {
-      this.pendingFocus = { unit: armed, enemy, at: pos };
+      this.pendingFocus = { unit: armed, enemy, client: screenPoint(e) };
+      this.strokePointer = e.pointerId ?? null;
+    }
+    // On a zoomed map, dragging open ground (or an enemy) moves the view.
+    if (this.zoomLimit > 1) {
+      this.panPress = { client: screenPoint(e), panning: false };
       this.strokePointer = e.pointerId ?? null;
     }
     // Tapping open ground (or an enemy) ends the unit's turn for orders.
@@ -1180,11 +1211,34 @@ export class PathDrawer {
       this.press = null;
       this.beginStroke(press.grab, press.local);
     }
+    const panPress = this.panPress;
+    if (panPress) {
+      const now = screenPoint(e);
+      if (!panPress.panning) {
+        // A focus tap on an enemy keeps its usual wobble allowance.
+        const slop = this.pendingFocus ? Math.max(TAP_SLOP, DRAG_START_PX) : DRAG_START_PX;
+        if (Math.hypot(now.x - panPress.client.x, now.y - panPress.client.y) < slop) return;
+        panPress.panning = true;
+        this.pendingFocus = null;
+        this.hoveredEnemy = null;
+        this.renderHoverLayer();
+        // Pan from here, so the map neither jumps nor reads the threshold
+        // as a flick.
+        this.zoom?.beginPan(now);
+        return;
+      }
+      this.zoom?.movePan(now);
+      return;
+    }
     if (this.strokePointer !== null || this.selectedUnit || this.rocketUnit) {
       this.strokeGlobal = { x: e.global.x, y: e.global.y };
     }
 
-    if (this.pendingFocus && distancePt(pos, this.pendingFocus.at) > TAP_SLOP) this.pendingFocus = null;
+    const focusAt = this.pendingFocus?.client;
+    if (focusAt) {
+      const now = screenPoint(e);
+      if (Math.hypot(now.x - focusAt.x, now.y - focusAt.y) > TAP_SLOP) this.pendingFocus = null;
+    }
 
     // Update hover state
     if (!this.selectedUnit && !this.rocketUnit) {
@@ -1223,6 +1277,12 @@ export class PathDrawer {
     const backup = this.strokeBackup;
     this.strokeBackup = null;
     this.strokeGlobal = null;
+    const panPress = this.panPress;
+    this.panPress = null;
+    if (panPress?.panning) {
+      this.zoom?.endPan();
+      return;
+    }
     const press = this.press;
     this.press = null;
     if (press) {
