@@ -641,6 +641,22 @@ function findTarget(attacker, allUnits, preferredId, obstacles = []) {
   }
   return nearestVisible ?? nearestAny;
 }
+function focusTarget(unit, allUnits) {
+  const id = unit.attackTargetId;
+  if (!id) return null;
+  const target = allUnits.find((u) => u.id === id && u.alive && u.team !== unit.team) ?? null;
+  if (!target) unit.attackTargetId = null;
+  return target;
+}
+function findCombatTarget(unit, allUnits, obstacles, elevationZones) {
+  const canShoot = (t) => isInRange(unit, t, elevationZones) && hasLineOfSight(unit.pos, t.pos, obstacles, unit.projectileRadius);
+  const focus = focusTarget(unit, allUnits);
+  if (focus && canShoot(focus)) return focus;
+  const nearest = findTarget(unit, allUnits, null, obstacles);
+  if (nearest && canShoot(nearest)) return nearest;
+  if (focus && hasLineOfSight(unit.pos, focus.pos, obstacles)) return focus;
+  return nearest;
+}
 function mortarCanReach(mortar, target, elevationZones) {
   const d = distance(mortar.pos, target.pos);
   const max = mortar.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(mortar.pos, elevationZones));
@@ -1001,6 +1017,8 @@ function dist2(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 function findMortarTarget(mortar, allUnits, elevationZones) {
+  const focus = focusTarget(mortar, allUnits);
+  if (focus && mortarCanReach(mortar, focus, elevationZones)) return focus;
   let best = null;
   let bestDist = Infinity;
   for (const u of allUnits) {
@@ -1481,6 +1499,7 @@ var GameEngine = class _GameEngine {
     this.running = true;
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer.highlightZonesAt(pos));
+      this.pathDrawer.focusFire = !this.practice && !this.onlineHostMode;
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
       this.renderer.renderElevationZones(this.elevationZones);
       this.renderer.renderObstacles(this.obstacles);
@@ -1670,7 +1689,7 @@ var GameEngine = class _GameEngine {
         this.updateRocketeer(unit, dt);
         continue;
       }
-      const target = findTarget(unit, this.units, null, this.obstacles);
+      const target = findCombatTarget(unit, this.units, this.obstacles, this.elevationZones);
       if (unit.type === "blade") {
         if (target) {
           const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
@@ -1737,7 +1756,7 @@ var GameEngine = class _GameEngine {
   /** Mortar: lob shells at any enemy in its firing band, over obstacles. */
   updateMortar(unit, dt) {
     const target = findMortarTarget(unit, this.units, this.elevationZones);
-    const facing = target ?? findTarget(unit, this.units, null, this.obstacles);
+    const facing = target ?? focusTarget(unit, this.units) ?? findTarget(unit, this.units, null, this.obstacles);
     if (facing) {
       updateGunAngle(unit, Math.atan2(facing.pos.y - unit.pos.y, facing.pos.x - unit.pos.x), dt);
     }

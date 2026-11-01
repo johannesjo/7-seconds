@@ -12,7 +12,7 @@
 
 ## How It Works
 
-1. **Plan** — Draw movement paths for each of your units
+1. **Plan** — Draw movement paths for each of your units; right after drawing one, tap an enemy to make that unit focus its fire on it (tap again to clear; not yet in online play)
 2. **Fight** — Units follow their paths and auto-engage enemies within range
 3. **Repeat** — Survive multiple rounds until one side is eliminated
 

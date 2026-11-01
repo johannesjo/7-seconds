@@ -703,7 +703,7 @@ function startGame(retry = false): void {
   tutorialFinished = false;
   planningOverlay.classList.toggle('tutorial', tutorialLesson !== null);
   planningInstructions.textContent = tutorialLesson === null
-    ? 'Click a unit, drag to draw a path. Repeat for each unit.'
+    ? 'Drag from a unit to draw its path. Then tap an enemy to focus its fire.'
     : TUTORIAL_LESSONS[tutorialLesson].instruction;
   confirmBtn.textContent = tutorialLesson === null ? 'Done' : 'Fight';
   rematchBtn.textContent = 'Rematch';
