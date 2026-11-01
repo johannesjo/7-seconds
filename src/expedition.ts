@@ -34,9 +34,8 @@ export const STALL_DISTANCE = 150;
 export const MAX_ALIVE_ENEMIES = 90;
 
 export const EXPEDITION_SQUAD: { type: UnitType; count: number }[] = [
-  { type: 'soldier', count: 2 },
+  { type: 'soldier', count: 3 },
   { type: 'sniper', count: 1 },
-  { type: 'blade', count: 1 },
 ];
 
 export interface ExpeditionMap {
