@@ -70,9 +70,17 @@ function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
-/** The view `t` (0..1) of the way from `a` to `b`. */
-export function lerpView(a: ZoomView, b: ZoomView, t: number): ZoomView {
-  return { zoom: a.zoom + (b.zoom - a.zoom) * t, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+/** The view `t` (0..1) of the way from `a` to `b` on a `mapW`×`mapH` map:
+ *  the centred map point moves straight and zoom changes at an even rate,
+ *  so a glide that also zooms doesn't swing sideways. */
+export function lerpView(a: ZoomView, b: ZoomView, t: number, mapW: number, mapH: number): ZoomView {
+  const zoom = Math.exp(Math.log(a.zoom) + (Math.log(b.zoom) - Math.log(a.zoom)) * t);
+  const centre = (v: ZoomView): Vec2 => ({ x: (mapW / 2 - v.x) / v.zoom, y: (mapH / 2 - v.y) / v.zoom });
+  const ca = centre(a);
+  const cb = centre(b);
+  const cx = ca.x + (cb.x - ca.x) * t;
+  const cy = ca.y + (cb.y - ca.y) * t;
+  return { zoom, x: mapW / 2 - cx * zoom, y: mapH / 2 - cy * zoom };
 }
 
 interface Transformable {
@@ -168,7 +176,8 @@ export class PinchZoom {
     else this.apply(to);
   }
 
-  /** Start dragging the map with one finger (client coordinates). */
+  /** Start dragging the map with one finger (client coordinates): the map
+   *  follows the finger from here on, so a drag threshold adds no jump. */
   beginPan(client: Vec2): void {
     if (!this.attached || this.gesture) return;
     this.stopMotion();
@@ -200,6 +209,11 @@ export class PinchZoom {
     }, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
   }
 
+  /** Drop a pan without coasting (e.g. the touch was cancelled). */
+  cancelPan(): void {
+    this.pan = null;
+  }
+
   /** The panning finger lifted: coast on if it was flicked. */
   endPan(): void {
     const pan = this.pan;
@@ -222,7 +236,8 @@ export class PinchZoom {
     const glide = this.glide;
     if (glide) {
       const t = Math.min(1, (performance.now() - glide.at) / glide.ms);
-      this.apply(lerpView(glide.from, glide.to, easeOutCubic(t)));
+      const v = lerpView(glide.from, glide.to, easeOutCubic(t), MAP_WIDTH, MAP_HEIGHT);
+      this.apply(t >= 1 ? glide.to : clampView(v, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
       if (t >= 1) this.glide = null;
       return;
     }
@@ -260,6 +275,8 @@ export class PinchZoom {
     const p = this.toCanvas(e);
     const factor = Math.exp(-Math.max(-100, Math.min(100, e.deltaY)) * 0.004);
     this.apply(pinchView(this.view, p, 1, p, factor, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
+    // Zoomed mid-drag: carry on dragging from the new view.
+    if (this.pan) this.pan = { ...this.pan, view: { ...this.view }, start: this.pan.last };
   };
 
   /** Client coordinates → canvas (Pixi "global") coordinates. */

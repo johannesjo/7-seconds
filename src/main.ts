@@ -214,7 +214,7 @@ function showToast(message: string, placement: 'bottom' | 'top' = 'bottom'): voi
   const away = placement === 'top' ? '-20px' : '20px';
   toastEl.textContent = message;
   toastEl.style.top = placement === 'top' ? 'calc(env(safe-area-inset-top, 0px) + 64px)' : '';
-  toastEl.style.bottom = placement === 'top' ? 'auto' : '';
+  toastEl.style.bottom = placement === 'top' ? 'auto' : '32px';
   toastEl.style.opacity = '1';
   toastEl.style.transform = 'translateX(-50%) translateY(0)';
   clearTimeout(toastTimer);
@@ -332,6 +332,23 @@ let onlineActive = false;
 let returnTo: 'matches' | 'ranked' | null = null;
 let asyncStartVersion = 0;
 let playbackPathDrawer: PathDrawer | null = null;
+let playbackDrawerTicking = false;
+
+/** Online planning has no engine loop: animate its drawer every frame
+ *  (pulses, hold-to-clear, edge-scroll, map glides) while it exists. */
+function tickPlaybackDrawer(): void {
+  if (playbackDrawerTicking) return;
+  playbackDrawerTicking = true;
+  const frame = (): void => {
+    if (!playbackPathDrawer) {
+      playbackDrawerTicking = false;
+      return;
+    }
+    playbackPathDrawer.updateHover();
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
 let playbackUnits: Unit[] = [];
 let playbackElevationZones: ElevationZone[] = [];
 let playbackEngine: GameEngine | null = null;
@@ -1882,6 +1899,7 @@ function asyncHooks(): AsyncGameHooks {
       playbackPathDrawer.onPathDrawn = () => audio.play('draw');
       playbackPathDrawer.onZoomAvailable = showZoomHint;
       playbackPathDrawer.enable(myTeam, playbackUnits, playbackElevationZones);
+      tickPlaybackDrawer();
 
       planningLabel.textContent = 'Your Planning';
       planningLabel.style.color = myTeam === 'blue'

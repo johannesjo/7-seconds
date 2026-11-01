@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setMapSize } from './constants';
-import { clampView, edgePanView, maxPlanZoom, pinchView, PinchZoom, PLAN_ZOOM_THRESHOLD } from './plan-zoom';
+import { clampView, edgePanView, lerpView, maxPlanZoom, pinchView, PinchZoom, PLAN_ZOOM_THRESHOLD } from './plan-zoom';
 
 describe('maxPlanZoom', () => {
   it('stays off when the map is shown near full size', () => {
@@ -12,6 +12,21 @@ describe('maxPlanZoom', () => {
   it('allows zooming back to native size, capped', () => {
     expect(maxPlanZoom(0.5)).toBe(2);
     expect(maxPlanZoom(0.1)).toBe(3);
+  });
+});
+
+describe('lerpView', () => {
+  const centre = (v: { zoom: number; x: number; y: number }) => ({ x: (500 - v.x) / v.zoom, y: (500 - v.y) / v.zoom });
+
+  it('moves the centred map point in a straight line while zooming', () => {
+    const a = { zoom: 1, x: 0, y: 0 }; // centre (500, 500)
+    const b = { zoom: 3, x: 500 - 200 * 3, y: 500 - 800 * 3 }; // centre (200, 800)
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      const c = centre(lerpView(a, b, t, 1000, 1000));
+      expect(c.x).toBeCloseTo(500 - 300 * t);
+      expect(c.y).toBeCloseTo(500 + 300 * t);
+    }
+    expect(lerpView(a, b, 0.5, 1000, 1000).zoom).toBeCloseTo(Math.sqrt(3));
   });
 });
 

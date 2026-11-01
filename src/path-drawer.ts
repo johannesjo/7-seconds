@@ -586,6 +586,7 @@ export class PathDrawer {
     this.press = null;
     this.grabOffset = null;
     this.panPress = null;
+    this.zoom?.cancelPan();
     this.strokePointer = null;
     this.strokeBackup = null;
     this.strokeGlobal = null;
@@ -613,6 +614,7 @@ export class PathDrawer {
     this.press = null;
     this.grabOffset = null;
     this.panPress = null;
+    this.zoom?.cancelPan();
     this.rocketUnit = null;
     this.rawRocket = [];
     this.inspectedUnit = null;
@@ -1082,6 +1084,7 @@ export class PathDrawer {
     this.press = null;
     this.grabOffset = null;
     this.panPress = null;
+    this.zoom?.cancelPan();
     this.rawRocket = [];
     this.renderPaths();
   };
@@ -1212,12 +1215,17 @@ export class PathDrawer {
     if (panPress) {
       const now = screenPoint(e);
       if (!panPress.panning) {
-        if (Math.hypot(now.x - panPress.client.x, now.y - panPress.client.y) < DRAG_START_PX) return;
+        // A focus tap on an enemy keeps its usual wobble allowance.
+        const slop = this.pendingFocus ? Math.max(TAP_SLOP, DRAG_START_PX) : DRAG_START_PX;
+        if (Math.hypot(now.x - panPress.client.x, now.y - panPress.client.y) < slop) return;
         panPress.panning = true;
         this.pendingFocus = null;
         this.hoveredEnemy = null;
         this.renderHoverLayer();
-        this.zoom?.beginPan(panPress.client);
+        // Pan from here, so the map neither jumps nor reads the threshold
+        // as a flick.
+        this.zoom?.beginPan(now);
+        return;
       }
       this.zoom?.movePan(now);
       return;
