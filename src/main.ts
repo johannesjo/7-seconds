@@ -425,6 +425,10 @@ function showRoundBanner(round: number, before: { blue: number; red: number }, a
   const parts: string[] = [];
   if (blueLost > 0) parts.push(`${vsComputer ? 'You' : 'Blue'} lost ${blueLost}`);
   if (redLost > 0) parts.push(`${vsComputer ? 'Enemy' : 'Red'} lost ${redLost}`);
+  if (expeditionActive && engine?.evacStatus === 'landing') {
+    checkEvacCall();
+    parts.unshift('Evac lands at the end of this round — be in the zone');
+  }
   const news = expeditionActive ? engine?.takePursuitNews() : null;
   if (news && news.count > 0) parts.push(`${news.count} more on your trail${news.stalled ? ' — you stalled' : ''}`);
   flashBanner(`Round ${round - 1} over`, parts.length > 0 ? parts.join(' · ') : 'No casualties');
@@ -1089,7 +1093,7 @@ endlessBtn.addEventListener('click', () => {
 /** Enemies killed so far this expedition. */
 function expeditionDead(): number {
   if (!expeditionActive || !engine) return 0;
-  return engine.getUnits().filter(u => u.team === 'red' && !u.alive).length;
+  return engine.expeditionKills;
 }
 
 /** Last evac state shown, to announce the call once. */
@@ -1107,8 +1111,9 @@ function expeditionDistanceLabel(): string {
 function checkEvacCall(): void {
   const status = engine?.evacStatus ?? 'none';
   if (status === expeditionEvacShown) return;
+  const firstCall = expeditionEvacShown === 'none';
   expeditionEvacShown = status;
-  if (status === 'inbound') {
+  if (firstCall) {
     flashBanner('Evac called', 'It lands at the end of next round. Hold the zone — everyone inside gets out.');
     audio.play('upgrade');
     pulse('heavy');
@@ -1152,14 +1157,14 @@ function showExpeditionResult(result: BattleResult): void {
   const won = engine?.wasExtracted ?? false;
   const out = engine?.extractedUnits ?? 0;
   const kills = expeditionDead();
-  const units = engine?.getUnits() ?? [];
+  const closest = engine?.closestToExtraction ?? 0;
   const before = getExpeditionRecord();
   engine?.stop();
   const rounds = currentRound;
   if (won) {
     setResultHeading('Extracted', `${out} of ${result.blueTotal} made it out`, 'var(--color-result-horde-win)');
   } else {
-    setResultHeading('Overrun', `${distanceToExtraction(units, extractionZone())} m short of extraction`, 'var(--color-result-red)');
+    setResultHeading('Overrun', closest > 0 ? `Got within ${closest} m of extraction` : 'Fell at the extraction zone', 'var(--color-result-red)');
   }
   audio.play(won ? 'victory' : 'defeat');
   pulse('heavy');

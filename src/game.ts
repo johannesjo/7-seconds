@@ -17,7 +17,7 @@ import { planTeamOrders } from './ai-planner';
 import { createRng } from './rng';
 import { clampPathLength, validPoints } from './path-orders';
 import {
-  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, STALL_DISTANCE, centroid, spawnPursuers, unitsInZone, wakeLurkers,
+  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, STALL_DISTANCE, centroid, distanceToExtraction, spawnPursuers, unitsInZone, wakeLurkers,
   type ExpeditionSetup,
 } from './expedition';
 
@@ -86,8 +86,16 @@ export class GameEngine {
   private finalSlowMo = false;
   private lastKillPos: Vec2 | null = null;
   private expedition: ExpeditionSetup | null = null;
-  /** Expedition: the squad's centre when the last round began (stall check). */
-  private expeditionLastY: number | null = null;
+  /** Expedition: the furthest north (lowest y) any blue unit had reached at
+   *  the start of a round, for the stall check. */
+  private expeditionBestY: number | null = null;
+  /** Expedition: enemies killed and pruned from `units` between rounds. */
+  private expeditionPrunedKills = 0;
+  /** Expedition: the squad's closest approach to the zone (for the defeat screen). */
+  private expeditionClosest = Infinity;
+  /** Expedition: the planning view as the plan was confirmed, for the battle
+   *  camera to start from (the drawer resets the stage when it's disabled). */
+  private handoffView: { zoom: number; x: number; y: number } | null = null;
   /** Expedition: the round in which a unit first reached the zone (the evac
    *  lands at the end of the round after), and how many it took out. */
   private evacCalledRound: number | null = null;
@@ -288,6 +296,7 @@ export class GameEngine {
       this.pathDrawer?.enable('blue', this.units, this.elevationZones);
       if (this.expedition) this.focusPlanningView(battleView);
     } else if (phase === 'cover') {
+      if (this.expedition) this.handoffView = this.renderer?.stageView() ?? null;
       this.pathDrawer?.disable();
       if (this.onlineHostMode) {
         // Online host: skip cover, go to red-planning without local path drawing
@@ -312,7 +321,10 @@ export class GameEngine {
       // When onlineHostMode, we wait for external setRedPaths() + confirmPlan()
     } else if (phase === 'playing') {
       // Hand the planning view to the battle camera without a jump
-      if (this.expedition) this.renderer?.seedCameraFromStage();
+      if (this.expedition) {
+        this.renderer?.seedCamera(this.handoffView ?? this.renderer.stageView());
+        this.handoffView = null;
+      }
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
       this.roundTimer = ROUND_DURATION_S;
@@ -330,13 +342,21 @@ export class GameEngine {
   /** Expedition: from round 2, a new group of the horde arrives behind the
    *  squad — bigger when it hasn't gained ground since last round. */
   private spawnExpeditionPursuers(): void {
+    // The dead are done animating by now; drop them so per-step scans stay short
+    const before = this.units.length;
+    this.units = this.units.filter(u => u.alive || u.team === 'blue');
+    this.expeditionPrunedKills += before - this.units.length;
+
     const blue = this.units.filter(u => u.alive && u.team === 'blue');
     if (blue.length === 0) return;
-    const y = centroid(blue.map(u => u.pos)).y;
-    const lastY = this.expeditionLastY;
-    this.expeditionLastY = y;
-    if (this.roundNumber < 2 || lastY === null) return;
-    const stalled = lastY - y < STALL_DISTANCE;
+    // Front-most unit, measured against the best so far: losing the lead unit
+    // isn't a stall, and losing a straggler isn't progress
+    const front = Math.min(...blue.map(u => u.pos.y));
+    const best = this.expeditionBestY;
+    this.expeditionBestY = best === null ? front : Math.min(best, front);
+    if (this.roundNumber < 2 || best === null) return;
+    // Holding the zone for the evac is what the game asked for: no penalty
+    const stalled = this.evacCalledRound === null && best - front < STALL_DISTANCE;
     const aliveRed = this.units.filter(u => u.alive && u.team === 'red').length;
     const arrivals = spawnPursuers(this.roundNumber, this.units, aliveRed, stalled, this.obstacles);
     this.units.push(...arrivals);
@@ -365,6 +385,23 @@ export class GameEngine {
   get evacStatus(): 'none' | 'inbound' | 'landing' {
     if (this.evacCalledRound === null) return 'none';
     return this.roundNumber > this.evacCalledRound ? 'landing' : 'inbound';
+  }
+
+  /** Expedition: remember the squad's closest approach (while it lives; an
+   *  empty squad measures as 0). */
+  private noteExpeditionProgress(): void {
+    if (!this.expedition || !this.units.some(u => u.alive && u.team === 'blue')) return;
+    this.expeditionClosest = Math.min(this.expeditionClosest, distanceToExtraction(this.units, this.expedition.extraction));
+  }
+
+  /** Expedition: enemies killed so far. */
+  get expeditionKills(): number {
+    return this.expeditionPrunedKills + this.units.filter(u => u.team === 'red' && !u.alive).length;
+  }
+
+  /** Expedition: the squad's closest approach to the extraction zone. */
+  get closestToExtraction(): number {
+    return Number.isFinite(this.expeditionClosest) ? this.expeditionClosest : 0;
   }
 
   /** Expedition: units the evac took out (0 until it has). */
@@ -490,8 +527,10 @@ export class GameEngine {
     this.dispatchHitEffects(hits);
     this.handleBomberChainExplosions(hits);
 
-    // Record replay frame after all state updates
-    this.recordFrame();
+    // Record replay frame after all state updates. Expedition has no replay
+    // (and its long, crowded runs would pile up frames)
+    if (this.expedition) this.noteExpeditionProgress();
+    else this.recordFrame();
 
     if (this.checkCtfCapture()) return;
     if (this.checkElimination()) return;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createRng } from './rng';
 import { createUnit } from './units';
 import {
-  EXPEDITION_MAP_HEIGHT, EXPEDITION_MAP_WIDTH, LURKER_WAKE_RADIUS, MAX_ALIVE_ENEMIES,
+  EXPEDITION_MAP_HEIGHT, EXPEDITION_MAP_WIDTH, LURKER_WAKE_RADIUS, MAX_ALIVE_ENEMIES, MIN_SPAWN_DISTANCE,
   createExpeditionSquad, distanceToExtraction, extractionZone, generateExpeditionMap, pursuitComposition,
   spawnLurkers, spawnPursuers, unitsInZone, wakeLurkers,
 } from './expedition';
@@ -87,6 +87,24 @@ describe('pursuers', () => {
       expect(u.pos.y).toBeGreaterThan(1200);
     }
     expect(spawnPursuers(10, squad, MAX_ALIVE_ENEMIES - 2, true, [], createRng(1))).toHaveLength(2);
+  });
+
+  it('never land on top of a squad with no room behind it', () => {
+    const squad = [420, 480, 540, 600, 660].map((x, i) => createUnit(`blue_${i}`, 'soldier', 'blue', { x, y: EXPEDITION_MAP_HEIGHT - 60 }));
+    for (let seed = 1; seed <= 20; seed++) {
+      for (const p of spawnPursuers(6, squad, 0, true, [], createRng(seed))) {
+        for (const b of squad) expect(Math.hypot(p.pos.x - b.pos.x, p.pos.y - b.pos.y)).toBeGreaterThanOrEqual(MIN_SPAWN_DISTANCE);
+      }
+    }
+  });
+
+  it('measure the squad from blue units only', () => {
+    const squad = [createUnit('blue_s', 'soldier', 'blue', { x: 540, y: 900 })];
+    // A red straggler at the bottom must not drag the spawn line down there
+    const red = createUnit('red_x', 'zombie', 'red', { x: 540, y: 2100 });
+    for (const u of spawnPursuers(2, [...squad, red], 1, false, [], createRng(2))) {
+      expect(u.pos.y).toBeLessThan(1500);
+    }
   });
 
   it('use ids no other round shares', () => {

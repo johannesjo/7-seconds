@@ -162,9 +162,12 @@ export class Renderer {
 
   /** Ease the camera in on a point (e.g. the final kill). */
   focusCamera(pos: Vec2, zoom: number): void {
-    this.camera.focus = { x: pos.x, y: pos.y };
-    this.camera.targetZoom = zoom;
-    this.camera.active = true;
+    const cam = this.camera;
+    cam.follow = null;
+    cam.focus = { x: pos.x, y: pos.y };
+    // Always push in from where the camera is (it may already be zoomed in)
+    cam.targetZoom = Math.max(zoom, cam.active ? cam.zoom * 1.2 : zoom);
+    cam.active = true;
   }
 
   /**
@@ -200,10 +203,9 @@ export class Renderer {
     return { zoom: stage.scale.x, x: stage.position.x, y: stage.position.y };
   }
 
-  /** Start the camera from whatever the stage shows now (e.g. the planning
-   *  view), so the battle camera takes over without a jump. */
-  seedCameraFromStage(): void {
-    const v = this.stageView();
+  /** Start the camera from a given view (e.g. the planning view as the plan
+   *  was confirmed), so the battle camera takes over without a jump. */
+  seedCamera(v: ZoomView): void {
     if (v.zoom <= 1.001) return;
     const cam = this.camera;
     cam.zoom = v.zoom;

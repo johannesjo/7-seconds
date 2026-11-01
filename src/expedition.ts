@@ -9,6 +9,7 @@
  */
 import type { ElevationZone, Obstacle, Unit, UnitType, Vec2 } from './types';
 import { createUnit, nudgeOutOfBlocks } from './units';
+import { UNIT_STATS } from './constants';
 
 /** Three times the standard map's width, and a phone-like 1:2 shape. A
  *  soldier covers ~600px in a round, a sniper ~420, so the trip takes several. */
@@ -24,6 +25,9 @@ export const LURKER_WAKE_RADIUS = 200;
 const PACK_WAKE_RADIUS = 140;
 /** Pursuers appear this far behind the squad's rearmost unit. */
 const PURSUIT_DISTANCE = 380;
+/** ...and never closer than this to any blue unit (e.g. near the bottom
+ *  edge, where there's no room behind; they come from the sides instead). */
+export const MIN_SPAWN_DISTANCE = 300;
 /** The squad must gain this much ground per round or the horde grows faster. */
 export const STALL_DISTANCE = 150;
 /** Never let more enemies than this be alive at once. */
@@ -145,7 +149,7 @@ export function spawnLurkers(map: ExpeditionMap, rng: Rng = Math.random): Unit[]
       if (k === 0 && depth > 0.4 && rng() < 0.6) type = rng() < 0.5 ? 'bomber' : 'shielder';
       const angle = (k / size) * Math.PI * 2 + rng();
       const r = 18 + rng() * 34;
-      const pos = nudgeOutOfBlocks({ x: center.x + Math.cos(angle) * r, y: center.y + Math.sin(angle) * r }, map.obstacles);
+      const pos = nudgeOutOfBlocks({ x: center.x + Math.cos(angle) * r, y: center.y + Math.sin(angle) * r }, map.obstacles, UNIT_STATS[type].radius + 4);
       const unit = createUnit(`red_lurk_${n++}`, type, 'red', clampToMap(pos));
       unit.dormant = true;
       units.push(unit);
@@ -167,39 +171,50 @@ export function pursuitComposition(round: number, stalled: boolean): { type: Uni
 
 /**
  * Enemies arriving at the start of `round` (2 and up): behind the squad, and
- * from round 4 also from the sides. Capped so the alive total stays under
- * MAX_ALIVE_ENEMIES.
+ * from round 4 also from the sides, never within MIN_SPAWN_DISTANCE of a blue
+ * unit. Capped so the alive total stays under MAX_ALIVE_ENEMIES. `units` may
+ * hold both teams; only living blue units count as the squad.
  */
 export function spawnPursuers(
   round: number,
-  blue: Unit[],
+  units: Unit[],
   aliveEnemies: number,
   stalled: boolean,
   blocks: Obstacle[],
   rng: Rng = Math.random,
 ): Unit[] {
-  const squad = blue.filter(u => u.alive);
+  const squad = units.filter(u => u.alive && u.team === 'blue');
   if (squad.length === 0) return [];
   const center = centroid(squad.map(u => u.pos));
   const rearY = Math.max(...squad.map(u => u.pos.y));
   const budget = Math.max(0, MAX_ALIVE_ENEMIES - aliveEnemies);
-  const units: Unit[] = [];
+  const tooClose = (p: Vec2) => squad.some(b => dist(b.pos, p) < MIN_SPAWN_DISTANCE);
+  const behind = (): Vec2 => ({
+    x: center.x + range(rng, -220, 220),
+    y: rearY + PURSUIT_DISTANCE + range(rng, 0, 80),
+  });
+  const side = (): Vec2 => ({
+    x: rng() < 0.5 ? 25 : EXPEDITION_MAP_WIDTH - 25,
+    y: center.y + range(rng, -40, 220),
+  });
+  const arrivals: Unit[] = [];
   let n = 0;
   for (const { type, count } of pursuitComposition(round, stalled)) {
-    for (let k = 0; k < count && units.length < budget; k++) {
-      const fromSide = round >= 4 && rng() < 0.35;
-      let pos: Vec2;
-      if (fromSide) {
-        const left = rng() < 0.5;
-        pos = { x: left ? 25 : EXPEDITION_MAP_WIDTH - 25, y: center.y + range(rng, -40, 220) };
-      } else {
-        pos = { x: center.x + range(rng, -220, 220), y: Math.min(EXPEDITION_MAP_HEIGHT - 20, rearY + PURSUIT_DISTANCE + range(rng, 0, 80)) };
+    for (let k = 0; k < count && arrivals.length < budget; k++) {
+      const radius = UNIT_STATS[type].radius;
+      const preferSide = round >= 4 && rng() < 0.35;
+      // Try the preferred direction, then the other; a spot that lands too
+      // close (no room behind, or the squad hugging a side) is skipped
+      let pos: Vec2 | null = null;
+      for (let attempt = 0; attempt < 4 && !pos; attempt++) {
+        const fromSide = attempt % 2 === 0 ? preferSide : !preferSide;
+        const p = nudgeOutOfBlocks(clampToMap(fromSide ? side() : behind()), blocks, radius + 4);
+        if (!tooClose(p)) pos = p;
       }
-      pos = nudgeOutOfBlocks(clampToMap(pos), blocks);
-      units.push(createUnit(`red_r${round}_${n++}`, type, 'red', pos));
+      if (pos) arrivals.push(createUnit(`red_r${round}_${n++}`, type, 'red', pos));
     }
   }
-  return units;
+  return arrivals;
 }
 
 /** Wake lurkers that a blue unit came near or that took damage, and their

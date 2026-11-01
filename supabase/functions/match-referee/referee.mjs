@@ -1360,6 +1360,7 @@ var EXPEDITION_START = { x: EXPEDITION_MAP_WIDTH / 2, y: EXPEDITION_MAP_HEIGHT -
 var LURKER_WAKE_RADIUS = 200;
 var PACK_WAKE_RADIUS = 140;
 var PURSUIT_DISTANCE = 380;
+var MIN_SPAWN_DISTANCE = 300;
 var STALL_DISTANCE = 150;
 var MAX_ALIVE_ENEMIES = 90;
 var range = (rng, min, max) => min + rng() * (max - min);
@@ -1371,29 +1372,37 @@ function pursuitComposition(round, stalled) {
   if (round >= 6 && round % 3 === 0) comp.push({ type: "blade", count: 1 });
   return comp.filter((c) => c.count > 0);
 }
-function spawnPursuers(round, blue, aliveEnemies, stalled, blocks, rng = Math.random) {
-  const squad = blue.filter((u) => u.alive);
+function spawnPursuers(round, units, aliveEnemies, stalled, blocks, rng = Math.random) {
+  const squad = units.filter((u) => u.alive && u.team === "blue");
   if (squad.length === 0) return [];
   const center = centroid(squad.map((u) => u.pos));
   const rearY = Math.max(...squad.map((u) => u.pos.y));
   const budget = Math.max(0, MAX_ALIVE_ENEMIES - aliveEnemies);
-  const units = [];
+  const tooClose = (p) => squad.some((b) => dist3(b.pos, p) < MIN_SPAWN_DISTANCE);
+  const behind = () => ({
+    x: center.x + range(rng, -220, 220),
+    y: rearY + PURSUIT_DISTANCE + range(rng, 0, 80)
+  });
+  const side = () => ({
+    x: rng() < 0.5 ? 25 : EXPEDITION_MAP_WIDTH - 25,
+    y: center.y + range(rng, -40, 220)
+  });
+  const arrivals = [];
   let n = 0;
   for (const { type, count } of pursuitComposition(round, stalled)) {
-    for (let k = 0; k < count && units.length < budget; k++) {
-      const fromSide = round >= 4 && rng() < 0.35;
-      let pos;
-      if (fromSide) {
-        const left = rng() < 0.5;
-        pos = { x: left ? 25 : EXPEDITION_MAP_WIDTH - 25, y: center.y + range(rng, -40, 220) };
-      } else {
-        pos = { x: center.x + range(rng, -220, 220), y: Math.min(EXPEDITION_MAP_HEIGHT - 20, rearY + PURSUIT_DISTANCE + range(rng, 0, 80)) };
+    for (let k = 0; k < count && arrivals.length < budget; k++) {
+      const radius = UNIT_STATS[type].radius;
+      const preferSide = round >= 4 && rng() < 0.35;
+      let pos = null;
+      for (let attempt = 0; attempt < 4 && !pos; attempt++) {
+        const fromSide = attempt % 2 === 0 ? preferSide : !preferSide;
+        const p = nudgeOutOfBlocks(clampToMap(fromSide ? side() : behind()), blocks, radius + 4);
+        if (!tooClose(p)) pos = p;
       }
-      pos = nudgeOutOfBlocks(clampToMap(pos), blocks);
-      units.push(createUnit(`red_r${round}_${n++}`, type, "red", pos));
+      if (pos) arrivals.push(createUnit(`red_r${round}_${n++}`, type, "red", pos));
     }
   }
-  return units;
+  return arrivals;
 }
 function wakeLurkers(units) {
   const blue = units.filter((u) => u.alive && u.team === "blue");
@@ -1419,6 +1428,14 @@ function inside(p, r) {
 }
 function unitsInZone(units, extraction) {
   return units.filter((u) => u.alive && u.team === "blue" && inside(u.pos, extraction));
+}
+function distanceToExtraction(units, extraction) {
+  const blue = units.filter((u) => u.alive && u.team === "blue");
+  if (blue.length === 0) return 0;
+  const c = centroid(blue.map((u) => u.pos));
+  const dx = Math.max(extraction.x - c.x, 0, c.x - (extraction.x + extraction.w));
+  const dy = Math.max(extraction.y - c.y, 0, c.y - (extraction.y + extraction.h));
+  return Math.round(Math.hypot(dx, dy));
 }
 function centroid(points) {
   if (points.length === 0) return { x: 0, y: 0 };
@@ -1494,8 +1511,16 @@ var GameEngine = class _GameEngine {
   finalSlowMo = false;
   lastKillPos = null;
   expedition = null;
-  /** Expedition: the squad's centre when the last round began (stall check). */
-  expeditionLastY = null;
+  /** Expedition: the furthest north (lowest y) any blue unit had reached at
+   *  the start of a round, for the stall check. */
+  expeditionBestY = null;
+  /** Expedition: enemies killed and pruned from `units` between rounds. */
+  expeditionPrunedKills = 0;
+  /** Expedition: the squad's closest approach to the zone (for the defeat screen). */
+  expeditionClosest = Infinity;
+  /** Expedition: the planning view as the plan was confirmed, for the battle
+   *  camera to start from (the drawer resets the stage when it's disabled). */
+  handoffView = null;
   /** Expedition: the round in which a unit first reached the zone (the evac
    *  lands at the end of the round after), and how many it took out. */
   evacCalledRound = null;
@@ -1640,6 +1665,7 @@ var GameEngine = class _GameEngine {
       this.pathDrawer?.enable("blue", this.units, this.elevationZones);
       if (this.expedition) this.focusPlanningView(battleView);
     } else if (phase === "cover") {
+      if (this.expedition) this.handoffView = this.renderer?.stageView() ?? null;
       this.pathDrawer?.disable();
       if (this.onlineHostMode) {
         this.onEvent("phase-change", { phase, round: this.roundNumber });
@@ -1660,7 +1686,10 @@ var GameEngine = class _GameEngine {
         this.pathDrawer?.enable("red", this.units, this.elevationZones);
       }
     } else if (phase === "playing") {
-      if (this.expedition) this.renderer?.seedCameraFromStage();
+      if (this.expedition) {
+        this.renderer?.seedCamera(this.handoffView ?? this.renderer.stageView());
+        this.handoffView = null;
+      }
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
       this.roundTimer = ROUND_DURATION_S;
@@ -1676,13 +1705,16 @@ var GameEngine = class _GameEngine {
   /** Expedition: from round 2, a new group of the horde arrives behind the
    *  squad — bigger when it hasn't gained ground since last round. */
   spawnExpeditionPursuers() {
+    const before = this.units.length;
+    this.units = this.units.filter((u) => u.alive || u.team === "blue");
+    this.expeditionPrunedKills += before - this.units.length;
     const blue = this.units.filter((u) => u.alive && u.team === "blue");
     if (blue.length === 0) return;
-    const y = centroid(blue.map((u) => u.pos)).y;
-    const lastY = this.expeditionLastY;
-    this.expeditionLastY = y;
-    if (this.roundNumber < 2 || lastY === null) return;
-    const stalled = lastY - y < STALL_DISTANCE;
+    const front = Math.min(...blue.map((u) => u.pos.y));
+    const best = this.expeditionBestY;
+    this.expeditionBestY = best === null ? front : Math.min(best, front);
+    if (this.roundNumber < 2 || best === null) return;
+    const stalled = this.evacCalledRound === null && best - front < STALL_DISTANCE;
     const aliveRed = this.units.filter((u) => u.alive && u.team === "red").length;
     const arrivals = spawnPursuers(this.roundNumber, this.units, aliveRed, stalled, this.obstacles);
     this.units.push(...arrivals);
@@ -1709,6 +1741,20 @@ var GameEngine = class _GameEngine {
   get evacStatus() {
     if (this.evacCalledRound === null) return "none";
     return this.roundNumber > this.evacCalledRound ? "landing" : "inbound";
+  }
+  /** Expedition: remember the squad's closest approach (while it lives; an
+   *  empty squad measures as 0). */
+  noteExpeditionProgress() {
+    if (!this.expedition || !this.units.some((u) => u.alive && u.team === "blue")) return;
+    this.expeditionClosest = Math.min(this.expeditionClosest, distanceToExtraction(this.units, this.expedition.extraction));
+  }
+  /** Expedition: enemies killed so far. */
+  get expeditionKills() {
+    return this.expeditionPrunedKills + this.units.filter((u) => u.team === "red" && !u.alive).length;
+  }
+  /** Expedition: the squad's closest approach to the extraction zone. */
+  get closestToExtraction() {
+    return Number.isFinite(this.expeditionClosest) ? this.expeditionClosest : 0;
   }
   /** Expedition: units the evac took out (0 until it has). */
   get extractedUnits() {
@@ -1799,7 +1845,8 @@ var GameEngine = class _GameEngine {
     const hits = this.updateProjectiles(dt);
     this.dispatchHitEffects(hits);
     this.handleBomberChainExplosions(hits);
-    this.recordFrame();
+    if (this.expedition) this.noteExpeditionProgress();
+    else this.recordFrame();
     if (this.checkCtfCapture()) return;
     if (this.checkElimination()) return;
     this.checkRoundEnd(dt);
