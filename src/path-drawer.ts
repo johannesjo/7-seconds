@@ -86,14 +86,22 @@ function resetOrders(unit: Unit): void {
   unit.rocketFired = false;
 }
 
-/** Units whose auto-targeting a focus order steers: gunners, mortars, and
- *  shielders (which turn their shield toward the focus). Rocketeers and
- *  bombers have no auto weapon; blades cut everything around them. */
+/** Units whose auto-targeting a focus order steers: ranged gunners and
+ *  mortars. Melee units (blade, shielder, zombie) fight whatever is next to
+ *  them, and rocketeers and bombers have no auto weapon. */
 function canFocus(unit: Unit): boolean {
-  return unit.type !== 'rocketeer' && unit.type !== 'bomber' && unit.type !== 'blade';
+  return unit.type === 'soldier' || unit.type === 'sniper' || unit.type === 'mortar';
 }
 
-type Orders = Pick<Unit, 'waypoints' | 'moveTarget' | 'rocketPath' | 'rocketFired'>;
+const FOCUS_HINT_KEY = '7s-focus-hint-seen';
+/** Taps that wander further than this are drags, not focus taps. */
+const TAP_SLOP = 12;
+
+function focusHintSeen(): boolean {
+  try { return localStorage.getItem(FOCUS_HINT_KEY) === '1'; } catch { return false; }
+}
+
+type Orders = Pick<Unit, 'waypoints' | 'moveTarget' | 'rocketPath' | 'rocketFired' | 'attackTargetId'>;
 
 function copyOrders(unit: Unit): Orders {
   return {
@@ -101,6 +109,7 @@ function copyOrders(unit: Unit): Orders {
     moveTarget: unit.moveTarget,
     rocketPath: unit.rocketPath && [...unit.rocketPath],
     rocketFired: unit.rocketFired,
+    attackTargetId: unit.attackTargetId,
   };
 }
 
@@ -120,7 +129,12 @@ export class PathDrawer {
   private rawRocket: Vec2[] = [];
   private enabled = false;
   private canvas: HTMLCanvasElement | null = null;
-  theme: Theme = NIGHT_THEME;
+  private _theme: Theme = NIGHT_THEME;
+  get theme(): Theme { return this._theme; }
+  set theme(theme: Theme) {
+    this._theme = theme;
+    this.styleFocusHint();
+  }
   private labelContainer: Container;
   private labelPool: Text[] = [];
   private labelIndex = 0;
@@ -135,7 +149,12 @@ export class PathDrawer {
   focusFire = false;
   /** The own unit whose orders were given last; tapping an enemy now sets its focus. */
   private armedUnit: Unit | null = null;
+  /** An enemy tap that sets the armed unit's focus once the finger lifts
+   *  without dragging or pinching. */
+  private pendingFocus: { unit: Unit; enemy: Unit; at: Vec2 } | null = null;
   private focusHint: Text;
+  /** The hint teaches the gesture; once used, it stays hidden. */
+  private focusHintDone = focusHintSeen();
   /** Pinch zoom became available for this planning phase (map shown small). */
   onZoomAvailable: (() => void) | null = null;
   private zoom: PinchZoom | null = null;
@@ -167,9 +186,10 @@ export class PathDrawer {
     this.hoverLabel = new Text({ text: '', style: hoverStyle });
     this.hoverLabel.anchor.set(0.5, 1);
     this.hoverLabel.visible = false;
-    this.focusHint = new Text({ text: 'tap an enemy to focus fire', style: { ...hoverStyle, fontSize: 10 } });
+    this.focusHint = new Text({ text: 'tap an enemy to focus fire', style: { fontSize: 10, fontFamily: 'monospace', fontWeight: 'bold' } });
     this.focusHint.anchor.set(0.5, 0);
     this.focusHint.visible = false;
+    this.styleFocusHint();
     this.stage.addChild(this.gfx);
     this.stage.addChild(this.hoverGfx);
     this.stage.addChild(this.labelContainer);
@@ -195,6 +215,20 @@ export class PathDrawer {
     this.stage.on('pointerup', this.onPointerUp);
     this.stage.on('pointerupoutside', this.onPointerUp);
     this.stage.on('rightdown', this.onRightDown);
+  }
+
+  private markFocusHintDone(): void {
+    if (this.focusHintDone) return;
+    this.focusHintDone = true;
+    try { localStorage.setItem(FOCUS_HINT_KEY, '1'); } catch { /* unavailable */ }
+  }
+
+  private styleFocusHint(): void {
+    if (!this.focusHint) return; // theme set before construction finished
+    this.focusHint.style.fill = this._theme.labelFill;
+    this.focusHint.style.stroke = this._theme.labelStroke === null
+      ? { width: 0 }
+      : { color: this._theme.labelStroke, width: this._theme.labelStrokeWidth };
   }
 
   private acquireLabel(): Text {
@@ -449,6 +483,7 @@ export class PathDrawer {
     this.elevationZones = elevationZones;
     this.enabled = true;
     this.armedUnit = null;
+    this.pendingFocus = null;
     // Forget focus on enemies that died last round.
     for (const u of units) {
       if (u.attackTargetId && !units.some(t => t.id === u.attackTargetId && t.alive)) u.attackTargetId = null;
@@ -471,6 +506,7 @@ export class PathDrawer {
     this.strokeBackup = null;
     this.team = null;
     this.armedUnit = null;
+    this.pendingFocus = null;
     this.focusHint.visible = false;
     this.selectedUnit = null;
     this.hoveredUnit = null;
@@ -603,12 +639,7 @@ export class PathDrawer {
       const at = armed.waypoints.length > 0
         ? this.prediction(armed, [armed.pos, ...armed.waypoints]).position
         : armed.pos;
-      if (!armed.attackTargetId) {
-        // Styled here: the theme is assigned after construction.
-        this.focusHint.style.fill = this.theme.labelFill;
-        if (this.theme.labelStroke !== null) {
-          this.focusHint.style.stroke = { color: this.theme.labelStroke, width: this.theme.labelStrokeWidth };
-        }
+      if (!armed.attackTargetId && !this.focusHintDone) {
         this.focusHint.position.set(
           Math.max(70, Math.min(MAP_WIDTH - 70, at.x)),
           Math.min(MAP_HEIGHT - 14, at.y + armed.radius + 6),
@@ -855,6 +886,7 @@ export class PathDrawer {
     this.strokePointer = null;
     this.selectedUnit = null;
     this.armedUnit = null;
+    this.pendingFocus = null;
     this.hoveredUnit = null;
     this.hoveredEnemy = null;
     this.rocketUnit = null;
@@ -906,6 +938,8 @@ export class PathDrawer {
       this.strokeBackup = { unit: closest, orders: copyOrders(closest) };
       this.armedUnit = null;
       resetOrders(closest);
+      // New orders start clean, as with right-click: the focus goes too.
+      closest.attackTargetId = null;
       this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
       this.renderPaths();
       return;
@@ -915,11 +949,10 @@ export class PathDrawer {
     const enemy = this.findNearestEnemy(pos.x, pos.y);
     const armed = this.armedUnit;
     if (this.focusFire && enemy && armed?.alive) {
-      armed.attackTargetId = armed.attackTargetId === enemy.id ? null : enemy.id;
-      this.onPathDrawn?.();
-      this.renderPaths();
+      this.pendingFocus = { unit: armed, enemy, at: pos };
+      this.strokePointer = e.pointerId ?? null;
     }
-    // Tapping open ground (or after focusing) ends the unit's turn for orders.
+    // Tapping open ground (or an enemy) ends the unit's turn for orders.
     this.armedUnit = null;
     this.hoveredUnit = null;
     this.hoveredEnemy = enemy;
@@ -930,6 +963,8 @@ export class PathDrawer {
     if (!this.enabled) return;
     if (this.ignorePointer(e.pointerId)) return;
     const pos = this.toLocal(e.global);
+
+    if (this.pendingFocus && distancePt(pos, this.pendingFocus.at) > TAP_SLOP) this.pendingFocus = null;
 
     // Update hover state
     if (!this.selectedUnit && !this.rocketUnit) {
@@ -963,6 +998,17 @@ export class PathDrawer {
     if (this.strokePointer !== null && e.pointerId !== this.strokePointer) return;
     this.strokePointer = null;
     this.strokeBackup = null;
+    const pending = this.pendingFocus;
+    this.pendingFocus = null;
+    if (pending) {
+      if (pending.unit.alive && pending.enemy.alive) {
+        pending.unit.attackTargetId = pending.enemy.id;
+        this.markFocusHintDone();
+        this.onPathDrawn?.();
+        this.renderPaths();
+      }
+      return;
+    }
     if (this.rocketUnit) {
       const unit = this.rocketUnit;
       const sampled = samplePath(this.rawRocket, PATH_SAMPLE_DISTANCE).slice(1);
@@ -982,7 +1028,10 @@ export class PathDrawer {
     if (this.selectedUnit.waypoints.length > 0) this.onPathDrawn?.();
 
     this.hoveredUnit = this.selectedUnit;
-    if (this.focusFire && canFocus(this.selectedUnit)) this.armedUnit = this.selectedUnit;
+    // Only a drawn path arms the unit: a plain tap on it is an inspect.
+    if (this.focusFire && canFocus(this.selectedUnit) && this.selectedUnit.waypoints.length > 0) {
+      this.armedUnit = this.selectedUnit;
+    }
     this.selectedUnit = null;
     this.rawPoints = [];
     this.renderPaths();

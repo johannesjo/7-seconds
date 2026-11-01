@@ -1017,7 +1017,7 @@ function dist2(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 function findMortarTarget(mortar, allUnits, elevationZones) {
-  const focus = mortar.attackTargetId ? allUnits.find((u) => u.id === mortar.attackTargetId && u.alive && u.team !== mortar.team) : void 0;
+  const focus = focusTarget(mortar, allUnits);
   if (focus && mortarCanReach(mortar, focus, elevationZones)) return focus;
   let best = null;
   let bestDist = Infinity;
@@ -1499,7 +1499,7 @@ var GameEngine = class _GameEngine {
     this.running = true;
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer.highlightZonesAt(pos));
-      this.pathDrawer.focusFire = true;
+      this.pathDrawer.focusFire = !this.practice && !this.onlineHostMode;
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
       this.renderer.renderElevationZones(this.elevationZones);
       this.renderer.renderObstacles(this.obstacles);
@@ -1756,7 +1756,7 @@ var GameEngine = class _GameEngine {
   /** Mortar: lob shells at any enemy in its firing band, over obstacles. */
   updateMortar(unit, dt) {
     const target = findMortarTarget(unit, this.units, this.elevationZones);
-    const facing = target ?? findTarget(unit, this.units, null, this.obstacles);
+    const facing = target ?? focusTarget(unit, this.units) ?? findTarget(unit, this.units, null, this.obstacles);
     if (facing) {
       updateGunAngle(unit, Math.atan2(facing.pos.y - unit.pos.y, facing.pos.x - unit.pos.x), dt);
     }

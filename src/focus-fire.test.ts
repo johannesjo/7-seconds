@@ -60,6 +60,7 @@ describe('focus fire', () => {
     const friend = createUnit('friend', 'soldier', 'blue', { x: 100, y: 240 });
     me.attackTargetId = 'friend';
     expect(focusTarget(me, [me, friend])).toBeNull();
+    expect(me.attackTargetId).toBeNull();
   });
 
   it('mortar shells its focus when it is in the firing band', () => {

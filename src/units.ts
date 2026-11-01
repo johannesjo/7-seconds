@@ -803,9 +803,9 @@ export function focusTarget(unit: Unit, allUnits: Unit[]): Unit | null {
 }
 
 /** Who a gun unit shoots at (or faces). Focus fire never makes a unit hold
- *  its fire: it shoots its focus whenever it can, otherwise the usual nearest
- *  enemy it can hit, and only when it can hit nothing it turns toward its
- *  focus (if seen) so its gun is already on it. */
+ *  its fire: it shoots its focus whenever it can, otherwise its usual target
+ *  (the nearest enemy in sight) if it can hit that, and when it can hit
+ *  neither it turns toward its focus (if seen) so its gun is already on it. */
 export function findCombatTarget(unit: Unit, allUnits: Unit[], obstacles: Obstacle[], elevationZones: ElevationZone[]): Unit | null {
   const canShoot = (t: Unit) => isInRange(unit, t, elevationZones)
     && hasLineOfSight(unit.pos, t.pos, obstacles, unit.projectileRadius);
