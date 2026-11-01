@@ -29,7 +29,7 @@ describe('generateExpeditionMap', () => {
   it('starts the squad clear of walls, far from extraction', () => {
     const map = generateExpeditionMap(createRng(7));
     const squad = createExpeditionSquad(map.obstacles);
-    expect(squad).toHaveLength(5);
+    expect(squad).toHaveLength(4);
     for (const u of squad) {
       expect(map.obstacles.some(o => inRect(u.pos, o))).toBe(false);
     }
