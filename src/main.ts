@@ -12,6 +12,10 @@ import {
   type HordeWavePlan, type Pact,
 } from './horde-waves';
 import { getHordeRecord, recordHordeProgress, recordHordeClear, type HordeRecord } from './horde-stats';
+import {
+  generateExpeditionMap, createExpeditionSquad, spawnLurkers, distanceToExtraction, getExpeditionRecord, recordExtraction,
+  extractionZone,
+} from './expedition';
 import { ReplayPlayer } from './replay';
 import { DAY_THEME, NIGHT_THEME } from './theme';
 import { AsyncGameController, sessionIO, type PlayRoundInput, type AsyncGameHooks } from './online-async-game';
@@ -50,6 +54,8 @@ const battleBtn = document.getElementById('battle-btn')!;
 const aiBtn = document.getElementById('ai-btn')!;
 const tutorialBtn = document.getElementById('tutorial-btn')!;
 const hordeBtn = document.getElementById('horde-btn')!;
+const expeditionBtn = document.getElementById('expedition-btn')!;
+const expeditionBadge = document.getElementById('expedition-badge')!;
 
 const battleHud = document.getElementById('battle-hud')!;
 const blueCountEl = document.getElementById('blue-count')!;
@@ -275,6 +281,11 @@ let difficulty: Difficulty = (() => {
 
 // Horde state
 let hordeActive = false;
+/** Expedition: cross the large map to extraction. */
+let expeditionActive = false;
+/** Enemies dead when the current round's fight began (pursuers keep arriving,
+ *  so alive counts can't tell kills). */
+let expeditionDeadAtRoundStart = 0;
 let ctfActive = false;
 let ctfHotseat = false;
 let hordeWave = 0;
@@ -408,12 +419,14 @@ let roundBannerTimer: number | undefined;
 
 /** Brief "Round N" card between rounds summing up who fell. */
 function showRoundBanner(round: number, before: { blue: number; red: number }, after: { blue: number; red: number }): void {
-  const vsComputer = aiMode || hordeActive;
+  const vsComputer = aiMode || hordeActive || expeditionActive;
   const blueLost = before.blue - after.blue;
-  const redLost = before.red - after.red;
+  const redLost = expeditionActive ? expeditionDead() - expeditionDeadAtRoundStart : before.red - after.red;
   const parts: string[] = [];
   if (blueLost > 0) parts.push(`${vsComputer ? 'You' : 'Blue'} lost ${blueLost}`);
   if (redLost > 0) parts.push(`${vsComputer ? 'Enemy' : 'Red'} lost ${redLost}`);
+  const news = expeditionActive ? engine?.takePursuitNews() : null;
+  if (news && news.count > 0) parts.push(`${news.count} more on your trail${news.stalled ? ' — you stalled' : ''}`);
   flashBanner(`Round ${round - 1} over`, parts.length > 0 ? parts.join(' · ') : 'No casualties');
   audio.play('round-end');
 }
@@ -453,6 +466,7 @@ function onPhaseChange(phase: TurnPhase): void {
       const detail = describePlan(hordePlan);
       planningLabel.textContent = `Wave ${hordePlan.wave}${detail ? ` · ${detail}` : ''}`;
     }
+    if (expeditionActive) planningLabel.textContent = `Expedition · ${expeditionDistanceLabel()}`;
     planningLabel.style.color = color;
     planningOverlay.classList.add('active');
     confirmBtn.classList.add('active');
@@ -463,7 +477,7 @@ function onPhaseChange(phase: TurnPhase): void {
   }
 
   // Cover screen — skip in horde mode (no red planning)
-  coverScreen.classList.toggle('active', phase === 'cover' && !hordeActive);
+  coverScreen.classList.toggle('active', phase === 'cover' && !hordeActive && !expeditionActive);
 }
 
 function finishTutorialRound(): void {
@@ -503,8 +517,9 @@ function onGameEvent(
       roundCounterEl.textContent = `Round ${data.round}`;
     }
     if (data.phase === 'playing') {
-      if (aiMode && tutorialLesson === null && !playingRetry && !ctfActive && !hordeActive) trackedBattleLive = true;
+      if (aiMode && tutorialLesson === null && !playingRetry && !ctfActive && !hordeActive && !expeditionActive) trackedBattleLive = true;
       roundStartCounts = engine?.getAliveCount() ?? null;
+      expeditionDeadAtRoundStart = expeditionDead();
       lastTickSecond = null;
       hideRoundBanner();
       audio.play('round-start');
@@ -528,6 +543,10 @@ function onGameEvent(
     // Update wave HUD with live enemy count during horde
     if (hordeActive) {
       waveCounterEl.textContent = hordeWaveLabel();
+    }
+    if (expeditionActive) {
+      waveCounterEl.textContent = expeditionDistanceLabel();
+      checkEvacCall();
     }
 
     if (ctfActive && engine) {
@@ -588,6 +607,11 @@ function onGameEvent(
     // Horde defeat
     if (hordeActive) {
       showHordeResult(false);
+      return;
+    }
+
+    if (expeditionActive) {
+      showExpeditionResult(result);
       return;
     }
 
@@ -1060,6 +1084,109 @@ endlessBtn.addEventListener('click', () => {
   showUpgradeSelection();
 });
 
+// --- Expedition mode ---
+
+/** Enemies killed so far this expedition. */
+function expeditionDead(): number {
+  if (!expeditionActive || !engine) return 0;
+  return engine.getUnits().filter(u => u.team === 'red' && !u.alive).length;
+}
+
+/** Last evac state shown, to announce the call once. */
+let expeditionEvacShown: 'none' | 'inbound' | 'landing' = 'none';
+
+function expeditionDistanceLabel(): string {
+  const status = engine?.evacStatus ?? 'none';
+  if (status === 'inbound') return 'Evac called · lands after next round';
+  if (status === 'landing') return 'Evac lands this round · be in the zone';
+  const units = engine?.getUnits() ?? [];
+  return `${distanceToExtraction(units, extractionZone())} m to extraction`;
+}
+
+/** Announce the evac call the moment a unit reaches the zone. */
+function checkEvacCall(): void {
+  const status = engine?.evacStatus ?? 'none';
+  if (status === expeditionEvacShown) return;
+  expeditionEvacShown = status;
+  if (status === 'inbound') {
+    flashBanner('Evac called', 'It lands at the end of next round. Hold the zone — everyone inside gets out.');
+    audio.play('upgrade');
+    pulse('heavy');
+  }
+}
+
+function startExpedition(): void {
+  expeditionActive = true;
+  expeditionEvacShown = 'none';
+  lastReplayData = null;
+  engine?.stop();
+  applyTheme();
+
+  const map = generateExpeditionMap();
+  const units = [...createExpeditionSquad(map.obstacles), ...spawnLurkers(map)];
+  engine = new GameEngine(renderer!, onGameEvent, {
+    aiMode: true,
+    cinematic: !getSettings().reducedMotion,
+    expedition: { ...map, units },
+    onInspectUnit: showUnitInfo,
+  });
+
+  resetRoundTracking();
+  expeditionDeadAtRoundStart = 0;
+  showScreen('battle');
+  speedToggle.classList.remove('active');
+  speedToggle.dataset.speed = '1';
+  speedToggle.textContent = '3x';
+  roundCounterEl.textContent = 'Round 1';
+  waveCounterEl.style.display = '';
+  const touch = matchMedia('(pointer: coarse)').matches;
+  planningInstructions.textContent = touch
+    ? 'Drag from a unit to draw its path. Pinch to zoom; hold near an edge while drawing to scroll.'
+    : 'Drag from a unit to draw its path. Scroll to zoom; hold near an edge while drawing to scroll.';
+  engine.startBattle();
+  waveCounterEl.textContent = expeditionDistanceLabel();
+  flashBanner('Expedition', 'Reach the extraction zone to call the evac. Don\'t stall — the horde follows.');
+}
+
+function showExpeditionResult(result: BattleResult): void {
+  const won = engine?.wasExtracted ?? false;
+  const out = engine?.extractedUnits ?? 0;
+  const kills = expeditionDead();
+  const units = engine?.getUnits() ?? [];
+  const before = getExpeditionRecord();
+  engine?.stop();
+  const rounds = currentRound;
+  if (won) {
+    setResultHeading('Extracted', `${out} of ${result.blueTotal} made it out`, 'var(--color-result-horde-win)');
+  } else {
+    setResultHeading('Overrun', `${distanceToExtraction(units, extractionZone())} m short of extraction`, 'var(--color-result-red)');
+  }
+  audio.play(won ? 'victory' : 'defeat');
+  pulse('heavy');
+
+  resultStatsEl.innerHTML = [
+    `${rounds} round${rounds === 1 ? '' : 's'}`,
+    won ? `Extracted: ${out}/${result.blueTotal}${result.blueAlive > out ? ` (${result.blueAlive - out} left behind)` : ''}` : `Survivors: 0/${result.blueTotal}`,
+    `Enemies killed: ${kills}`,
+  ].join('<br>');
+
+  if (won) {
+    const record = recordExtraction(rounds);
+    resultRecordEl.textContent = before.bestRounds === 0 || rounds < before.bestRounds
+      ? '🏆 New best!'
+      : `Best: ${record.bestRounds} rounds`;
+  } else {
+    resultRecordEl.textContent = before.bestRounds > 0 ? `Best: ${before.bestRounds} rounds` : '';
+  }
+
+  rematchBtn.textContent = 'New expedition';
+  newBattleBtn.textContent = 'Back';
+  // Replays play back on the standard map
+  replayBtn.style.display = 'none';
+  returnToScreen = 'result';
+  showScreen('result');
+}
+
 // --- Menu: settings, difficulty, daily challenge ---
 
 function syncSettingsUi(settings: Readonly<Settings>): void {
@@ -1166,6 +1293,8 @@ function refreshMenuMeta(): void {
         + (record.bestStreak > 1 ? ` · best ${record.bestStreak}` : '')
       : '';
   }
+  const expedition = getExpeditionRecord();
+  expeditionBadge.textContent = expedition.bestRounds > 0 ? `best ${expedition.bestRounds} rounds` : 'new';
   const horde = getHordeRecord();
   hordeBadge.hidden = horde.bestWave === 0;
   hordeBadge.textContent = `best wave ${horde.bestWave}`;
@@ -1234,6 +1363,11 @@ hordeBtn.addEventListener('click', async () => {
   startHorde();
 });
 
+expeditionBtn.addEventListener('click', async () => {
+  await initRenderer();
+  startExpedition();
+});
+
 ctfAiBtn.addEventListener('click', async () => {
   ctfHotseat = false;
   ctfActive = true;
@@ -1299,6 +1433,8 @@ rematchBtn.addEventListener('click', async () => {
     startCtfGame();
   } else if (hordeActive) {
     startHorde(); // restart from wave 1
+  } else if (expeditionActive) {
+    startExpedition();
   } else {
     startGame();
   }
@@ -1340,6 +1476,9 @@ newBattleBtn.addEventListener('click', () => {
   // The other funnel back to the menu (a match just ended — e.g. an open-match
   // forfeit). Recount so the menu badge doesn't keep a stale count.
   void refreshMatchesBadge();
+
+  expeditionActive = false;
+  expeditionDeadAtRoundStart = 0;
 
   // Reset horde state
   hordeActive = false;

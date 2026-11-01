@@ -14,11 +14,16 @@ export const STANDARD_MAP_HEIGHT = 640;
 export let MAP_WIDTH = STANDARD_MAP_WIDTH;
 export let MAP_HEIGHT = STANDARD_MAP_HEIGHT;
 
+/** Expedition's large map may exceed what an online match can claim. */
+const MAX_LARGE_MAP_WIDTH = 1080;
+const MAX_LARGE_MAP_HEIGHT = 2160;
+
 /** Switch to another map size, for a match recorded on one (online state
- *  carries its own size). */
-export function setMapSize(w: number, h: number): void {
-  MAP_WIDTH = Math.max(MIN_MAP_WIDTH, Math.min(MAX_MAP_WIDTH, w));
-  MAP_HEIGHT = Math.max(MIN_MAP_HEIGHT, Math.min(MAX_MAP_HEIGHT, h));
+ *  carries its own size). `large` lifts the cap for local modes with a bigger
+ *  map (Expedition); sizes from online peers keep the normal cap. */
+export function setMapSize(w: number, h: number, large = false): void {
+  MAP_WIDTH = Math.max(MIN_MAP_WIDTH, Math.min(large ? MAX_LARGE_MAP_WIDTH : MAX_MAP_WIDTH, w));
+  MAP_HEIGHT = Math.max(MIN_MAP_HEIGHT, Math.min(large ? MAX_LARGE_MAP_HEIGHT : MAX_MAP_HEIGHT, h));
 }
 
 export const UNIT_STATS: Record<UnitType, UnitStats> = {

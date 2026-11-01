@@ -9,9 +9,11 @@ var STANDARD_MAP_WIDTH = 360;
 var STANDARD_MAP_HEIGHT = 640;
 var MAP_WIDTH = STANDARD_MAP_WIDTH;
 var MAP_HEIGHT = STANDARD_MAP_HEIGHT;
-function setMapSize(w, h) {
-  MAP_WIDTH = Math.max(MIN_MAP_WIDTH, Math.min(MAX_MAP_WIDTH, w));
-  MAP_HEIGHT = Math.max(MIN_MAP_HEIGHT, Math.min(MAX_MAP_HEIGHT, h));
+var MAX_LARGE_MAP_WIDTH = 1080;
+var MAX_LARGE_MAP_HEIGHT = 2160;
+function setMapSize(w, h, large = false) {
+  MAP_WIDTH = Math.max(MIN_MAP_WIDTH, Math.min(large ? MAX_LARGE_MAP_WIDTH : MAX_MAP_WIDTH, w));
+  MAP_HEIGHT = Math.max(MIN_MAP_HEIGHT, Math.min(large ? MAX_LARGE_MAP_HEIGHT : MAX_MAP_HEIGHT, h));
 }
 var UNIT_STATS = {
   soldier: { hp: 60, speed: 100, damage: 10, range: 120, radius: 10, fireCooldown: 1, projectileSpeed: 300, projectileRadius: 5, turnSpeed: 2.5 },
@@ -163,9 +165,9 @@ function detourWaypoints(a, b, obstacles, padding, depth = 0) {
   let bestCorner = validCorners[0];
   let bestDist = Infinity;
   for (const c of validCorners) {
-    const dist3 = Math.hypot(c.x - a.x, c.y - a.y) + Math.hypot(b.x - c.x, b.y - c.y);
-    if (dist3 < bestDist) {
-      bestDist = dist3;
+    const dist4 = Math.hypot(c.x - a.x, c.y - a.y) + Math.hypot(b.x - c.x, b.y - c.y);
+    if (dist4 < bestDist) {
+      bestDist = dist4;
       bestCorner = c;
     }
   }
@@ -371,10 +373,10 @@ function pushOutOfObstacles(pos, radius, obstacles) {
       const dy = pos.y - closestY;
       const dist22 = dx * dx + dy * dy;
       if (dist22 < radius * radius && dist22 > 1e-3) {
-        const dist3 = Math.sqrt(dist22);
-        const push = radius - dist3 + 0.5;
-        pos.x += dx / dist3 * push;
-        pos.y += dy / dist3 * push;
+        const dist4 = Math.sqrt(dist22);
+        const push = radius - dist4 + 0.5;
+        pos.x += dx / dist4 * push;
+        pos.y += dy / dist4 * push;
         pushed = true;
       } else if (dist22 <= 1e-3) {
         const toLeft = pos.x - obs.x;
@@ -415,16 +417,16 @@ function moveUnit(unit, dt, obstacles, allUnits = [], rng) {
   }
   const dx = unit.moveTarget.x - unit.pos.x;
   const dy = unit.moveTarget.y - unit.pos.y;
-  const dist3 = Math.sqrt(dx * dx + dy * dy);
-  if (dist3 < 2) {
+  const dist4 = Math.sqrt(dx * dx + dy * dy);
+  if (dist4 < 2) {
     unit.pos.x = unit.moveTarget.x;
     unit.pos.y = unit.moveTarget.y;
     unit.vel = { x: 0, y: 0 };
     if (unit.type === "blade") unit.momentum = 0;
     return;
   }
-  let dirX = dx / dist3;
-  let dirY = dy / dist3;
+  let dirX = dx / dist4;
+  let dirY = dy / dist4;
   if (unit.type === "blade") {
     const actualSpeed = Math.sqrt(unit.vel.x ** 2 + unit.vel.y ** 2);
     const forwardDot = actualSpeed > 1 ? unit.vel.x / actualSpeed * dirX + unit.vel.y / actualSpeed * dirY : 0;
@@ -494,8 +496,8 @@ function moveUnit(unit, dt, obstacles, allUnits = [], rng) {
       dirY /= len;
     }
   }
-  const moveX = dirX * Math.min(step, dist3);
-  const moveY = dirY * Math.min(step, dist3);
+  const moveX = dirX * Math.min(step, dist4);
+  const moveY = dirY * Math.min(step, dist4);
   const oldX = unit.pos.x;
   const oldY = unit.pos.y;
   let newX = oldX + moveX;
@@ -563,12 +565,12 @@ function separateUnits(units, obstacles = []) {
         const b = alive[j];
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
-        const dist3 = Math.sqrt(dx * dx + dy * dy);
+        const dist4 = Math.sqrt(dx * dx + dy * dy);
         const minDist = a.radius + b.radius + 1;
-        if (dist3 < minDist && dist3 > 0.01) {
-          const overlap = (minDist - dist3) / 2;
-          const nx = dx / dist3;
-          const ny = dy / dist3;
+        if (dist4 < minDist && dist4 > 0.01) {
+          const overlap = (minDist - dist4) / 2;
+          const nx = dx / dist4;
+          const ny = dy / dist4;
           const aNewX = a.pos.x - nx * overlap;
           const aNewY = a.pos.y - ny * overlap;
           const bNewX = b.pos.x + nx * overlap;
@@ -599,7 +601,7 @@ function separateUnits(units, obstacles = []) {
           a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
           b.pos.x = clamp(b.pos.x, b.radius, MAP_WIDTH - b.radius);
           b.pos.y = clamp(b.pos.y, b.radius, MAP_HEIGHT - b.radius);
-        } else if (dist3 <= 0.01) {
+        } else if (dist4 <= 0.01) {
           a.pos.x -= 1;
           a.pos.y -= 1;
           b.pos.x += 1;
@@ -658,8 +660,8 @@ function getElevationLevel(pos, zones) {
 function isInRange(attacker, target, elevationZones = []) {
   const level = getElevationLevel(attacker.pos, elevationZones);
   const bonus = attacker.type === "blade" ? 0 : ELEVATION_RANGE_BONUS;
-  const range = attacker.range * (1 + bonus * level);
-  return distance(attacker.pos, target.pos) <= range + attacker.radius + target.radius;
+  const range2 = attacker.range * (1 + bonus * level);
+  return distance(attacker.pos, target.pos) <= range2 + attacker.radius + target.radius;
 }
 function isFlanked(projectileVelAngle, targetGunAngle) {
   const incomingAngle = projectileVelAngle + Math.PI;
@@ -690,9 +692,9 @@ function bladeAoeAttack(unit, units, dt) {
     if (!enemy.alive || enemy.team === unit.team) continue;
     const dx = enemy.pos.x - unit.pos.x;
     const dy = enemy.pos.y - unit.pos.y;
-    const dist3 = Math.sqrt(dx * dx + dy * dy);
+    const dist4 = Math.sqrt(dx * dx + dy * dy);
     const hitRange = unit.range + unit.radius + enemy.radius;
-    if (dist3 <= hitRange) {
+    if (dist4 <= hitRange) {
       const wasBefore = enemy.hp;
       applyDamage(enemy, scaledDamage);
       hits.push({
@@ -702,11 +704,11 @@ function bladeAoeAttack(unit, units, dt) {
         team: unit.team,
         damage: scaledDamage
       });
-      if (dist3 > 0) {
+      if (dist4 > 0) {
         const kbSpeed = knockback / 0.15;
         enemy.knockbackVel = {
-          x: dx / dist3 * kbSpeed,
-          y: dy / dist3 * kbSpeed
+          x: dx / dist4 * kbSpeed,
+          y: dy / dist4 * kbSpeed
         };
         const selfKbSpeed = (20 + speedRatio * 60) / 0.15;
         const velSpeed = Math.sqrt(unit.vel.x ** 2 + unit.vel.y ** 2);
@@ -731,8 +733,8 @@ function bomberExplode(bomber, allUnits) {
     if (!u.alive || u.id === bomber.id) continue;
     const dx = u.pos.x - bomber.pos.x;
     const dy = u.pos.y - bomber.pos.y;
-    const dist3 = Math.sqrt(dx * dx + dy * dy);
-    if (dist3 <= EXPLOSION_RADIUS + u.radius) {
+    const dist4 = Math.sqrt(dx * dx + dy * dy);
+    if (dist4 <= EXPLOSION_RADIUS + u.radius) {
       const before = u.hp;
       applyDamage(u, EXPLOSION_DAMAGE);
       hits.push({
@@ -1157,9 +1159,9 @@ function scorePosition(ctx) {
   const w = WEIGHTS[unit.type];
   const dx = candidate.x - unit.pos.x;
   const dy = candidate.y - unit.pos.y;
-  const dist3 = Math.sqrt(dx * dx + dy * dy);
+  const dist4 = Math.sqrt(dx * dx + dy * dy);
   const maxDist = unit.speed * ROUND_DURATION_S;
-  if (dist3 > maxDist) return -Infinity;
+  if (dist4 > maxDist) return -Infinity;
   let score = 0;
   let nearestEnemy = null;
   let nearestDist = Infinity;
@@ -1351,6 +1353,93 @@ function createRng(seed) {
   };
 }
 
+// src/expedition.ts
+var EXPEDITION_MAP_WIDTH = 1080;
+var EXPEDITION_MAP_HEIGHT = 2160;
+var EXPEDITION_START = { x: EXPEDITION_MAP_WIDTH / 2, y: EXPEDITION_MAP_HEIGHT - 120 };
+var LURKER_WAKE_RADIUS = 200;
+var PACK_WAKE_RADIUS = 140;
+var PURSUIT_DISTANCE = 380;
+var STALL_DISTANCE = 150;
+var MAX_ALIVE_ENEMIES = 90;
+var range = (rng, min, max) => min + rng() * (max - min);
+function pursuitComposition(round, stalled) {
+  const zombies = Math.round((3 + round * 1.3) * (stalled ? 1.5 : 1));
+  const comp = [{ type: "zombie", count: zombies }];
+  if (round >= 3 && round % 2 === 1) comp.push({ type: "bomber", count: 1 + Math.floor(round / 6) });
+  if (round >= 5) comp.push({ type: "shielder", count: Math.floor((round - 3) / 2) });
+  if (round >= 6 && round % 3 === 0) comp.push({ type: "blade", count: 1 });
+  return comp.filter((c) => c.count > 0);
+}
+function spawnPursuers(round, blue, aliveEnemies, stalled, blocks, rng = Math.random) {
+  const squad = blue.filter((u) => u.alive);
+  if (squad.length === 0) return [];
+  const center = centroid(squad.map((u) => u.pos));
+  const rearY = Math.max(...squad.map((u) => u.pos.y));
+  const budget = Math.max(0, MAX_ALIVE_ENEMIES - aliveEnemies);
+  const units = [];
+  let n = 0;
+  for (const { type, count } of pursuitComposition(round, stalled)) {
+    for (let k = 0; k < count && units.length < budget; k++) {
+      const fromSide = round >= 4 && rng() < 0.35;
+      let pos;
+      if (fromSide) {
+        const left = rng() < 0.5;
+        pos = { x: left ? 25 : EXPEDITION_MAP_WIDTH - 25, y: center.y + range(rng, -40, 220) };
+      } else {
+        pos = { x: center.x + range(rng, -220, 220), y: Math.min(EXPEDITION_MAP_HEIGHT - 20, rearY + PURSUIT_DISTANCE + range(rng, 0, 80)) };
+      }
+      pos = nudgeOutOfBlocks(clampToMap(pos), blocks);
+      units.push(createUnit(`red_r${round}_${n++}`, type, "red", pos));
+    }
+  }
+  return units;
+}
+function wakeLurkers(units) {
+  const blue = units.filter((u) => u.alive && u.team === "blue");
+  const woken = [];
+  for (const u of units) {
+    if (!u.dormant || !u.alive) continue;
+    const hurt = u.hp < u.maxHp;
+    if (hurt || blue.some((b) => dist3(b.pos, u.pos) < LURKER_WAKE_RADIUS)) {
+      u.dormant = false;
+      woken.push(u);
+    }
+  }
+  for (const w of woken) {
+    for (const u of units) {
+      if (u.dormant && u.alive && dist3(u.pos, w.pos) < PACK_WAKE_RADIUS) u.dormant = false;
+    }
+  }
+  for (const u of units) if (u.dormant && !u.alive) u.dormant = false;
+  return woken.length;
+}
+function inside(p, r) {
+  return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+}
+function unitsInZone(units, extraction) {
+  return units.filter((u) => u.alive && u.team === "blue" && inside(u.pos, extraction));
+}
+function centroid(points) {
+  if (points.length === 0) return { x: 0, y: 0 };
+  let x = 0;
+  let y = 0;
+  for (const p of points) {
+    x += p.x;
+    y += p.y;
+  }
+  return { x: x / points.length, y: y / points.length };
+}
+function dist3(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+function clampToMap(p) {
+  return {
+    x: Math.max(15, Math.min(EXPEDITION_MAP_WIDTH - 15, p.x)),
+    y: Math.max(15, Math.min(EXPEDITION_MAP_HEIGHT - 15, p.y))
+  };
+}
+
 // src/game.ts
 var FIXED_DT = 1 / 60;
 var HIT_STOP = { scale: 0.15, seconds: 0.06 };
@@ -1404,6 +1493,14 @@ var GameEngine = class _GameEngine {
   slowMoScale = 1;
   finalSlowMo = false;
   lastKillPos = null;
+  expedition = null;
+  /** Expedition: the squad's centre when the last round began (stall check). */
+  expeditionLastY = null;
+  /** Expedition: the round in which a unit first reached the zone (the evac
+   *  lands at the end of the round after), and how many it took out. */
+  evacCalledRound = null;
+  extracted = false;
+  extractedCount = 0;
   constructor(renderer, onEvent, opts) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -1422,6 +1519,7 @@ var GameEngine = class _GameEngine {
     this.difficulty = opts?.difficulty ?? "normal";
     this.layoutIndex = opts?.layoutIndex;
     this.composition = opts?.composition;
+    this.expedition = opts?.expedition ?? null;
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
   get phase() {
@@ -1437,7 +1535,10 @@ var GameEngine = class _GameEngine {
     return this.seed + this.roundNumber;
   }
   startBattle() {
-    if (!this.initialState && (MAP_WIDTH !== STANDARD_MAP_WIDTH || MAP_HEIGHT !== STANDARD_MAP_HEIGHT)) {
+    if (this.expedition) {
+      this.renderer?.useLargeMap(EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT);
+      setMapSize(EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, true);
+    } else if (!this.initialState && (MAP_WIDTH !== STANDARD_MAP_WIDTH || MAP_HEIGHT !== STANDARD_MAP_HEIGHT)) {
       this.renderer?.useStandardMap();
       setMapSize(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
     }
@@ -1452,6 +1553,10 @@ var GameEngine = class _GameEngine {
       this.elevationZones = generateCtfElevationZones();
       this.units = [...createCtfArmy("blue", this.obstacles), ...createCtfArmy("red", this.obstacles)];
       this.ctfState = createCtfState();
+    } else if (this.expedition) {
+      this.obstacles = this.expedition.obstacles;
+      this.elevationZones = this.expedition.elevationZones;
+      this.units = this.expedition.units;
     } else if (this.hordeMap) {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
@@ -1461,7 +1566,7 @@ var GameEngine = class _GameEngine {
       this.elevationZones = battlefield.elevationZones;
     }
     const allBlocks = this.obstacles;
-    if (!this.ctfMode && !this.practice && !this.initialState) {
+    if (!this.ctfMode && !this.practice && !this.initialState && !this.expedition) {
       if (this.hordeMode && this.hordeBlueUnits && this.hordeRedUnits) {
         const redUnits = this.hordeRedUnits;
         const waveTag = `w${Date.now() % 1e4}`;
@@ -1487,6 +1592,7 @@ var GameEngine = class _GameEngine {
       if (this.ctfMode) {
         this.renderer.renderBaseZones();
       }
+      this.renderer.renderExtractionZone(this.expedition?.extraction ?? null);
       this.renderer.renderUnits(this.units);
       this.renderer.ticker.add(this.tick, this);
     }
@@ -1522,6 +1628,8 @@ var GameEngine = class _GameEngine {
   setPhase(phase) {
     this._phase = phase;
     if (phase === "blue-planning") {
+      const battleView = this.expedition ? this.renderer?.stageView() : void 0;
+      if (this.expedition) this.spawnExpeditionPursuers();
       this.renderer?.resetCamera();
       for (const u of this.units) {
         u.rocketFired = false;
@@ -1530,6 +1638,7 @@ var GameEngine = class _GameEngine {
       this.pathDrawer?.clearPaths("blue");
       if (this.hordeMode) this.generateAiPaths();
       this.pathDrawer?.enable("blue", this.units, this.elevationZones);
+      if (this.expedition) this.focusPlanningView(battleView);
     } else if (phase === "cover") {
       this.pathDrawer?.disable();
       if (this.onlineHostMode) {
@@ -1551,6 +1660,7 @@ var GameEngine = class _GameEngine {
         this.pathDrawer?.enable("red", this.units, this.elevationZones);
       }
     } else if (phase === "playing") {
+      if (this.expedition) this.renderer?.seedCameraFromStage();
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
       this.roundTimer = ROUND_DURATION_S;
@@ -1562,6 +1672,68 @@ var GameEngine = class _GameEngine {
     }
     this.onEvent("phase-change", { phase, round: this.roundNumber });
     this.onPhaseChangeCallback?.(phase);
+  }
+  /** Expedition: from round 2, a new group of the horde arrives behind the
+   *  squad — bigger when it hasn't gained ground since last round. */
+  spawnExpeditionPursuers() {
+    const blue = this.units.filter((u) => u.alive && u.team === "blue");
+    if (blue.length === 0) return;
+    const y = centroid(blue.map((u) => u.pos)).y;
+    const lastY = this.expeditionLastY;
+    this.expeditionLastY = y;
+    if (this.roundNumber < 2 || lastY === null) return;
+    const stalled = lastY - y < STALL_DISTANCE;
+    const aliveRed = this.units.filter((u) => u.alive && u.team === "red").length;
+    const arrivals = spawnPursuers(this.roundNumber, this.units, aliveRed, stalled, this.obstacles);
+    this.units.push(...arrivals);
+    this.lastPursuit = { count: arrivals.length, stalled };
+  }
+  /** Expedition: at a round's end once the evac is due, take out everyone in
+   *  the zone. With nobody inside it waits for the next round's end. */
+  tryEvac() {
+    if (!this.expedition || this.evacStatus !== "landing") return false;
+    const aboard = unitsInZone(this.units, this.expedition.extraction);
+    if (aboard.length === 0) return false;
+    this.extracted = true;
+    this.extractedCount = aboard.length;
+    this.endingBattle = true;
+    this.endDelayTimer = END_DELAY_S * 2;
+    this.pendingWinner = "blue";
+    this.projectiles = [];
+    this.renderer?.renderProjectiles([]);
+    this.renderer?.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
+    return true;
+  }
+  /** Expedition evac: not called yet, called (lands after the next round),
+   *  or landing at the end of the current round. */
+  get evacStatus() {
+    if (this.evacCalledRound === null) return "none";
+    return this.roundNumber > this.evacCalledRound ? "landing" : "inbound";
+  }
+  /** Expedition: units the evac took out (0 until it has). */
+  get extractedUnits() {
+    return this.extractedCount;
+  }
+  /** Expedition: the size of the group that just arrived, for the HUD. */
+  lastPursuit = null;
+  /** The latest pursuit group (Expedition), once per round; null when none came. */
+  takePursuitNews() {
+    const news = this.lastPursuit;
+    this.lastPursuit = null;
+    return news;
+  }
+  /** Expedition planning: zoomed in on the squad, or where the battle left off. */
+  focusPlanningView(battleView) {
+    const drawer = this.pathDrawer;
+    if (!drawer) return;
+    if (battleView && battleView.zoom > 1.001) {
+      drawer.setView(battleView);
+      return;
+    }
+    const blue = this.units.filter((u) => u.alive && u.team === "blue");
+    if (blue.length === 0) return;
+    const c = centroid(blue.map((u) => u.pos));
+    drawer.focusOn({ x: c.x, y: c.y - 260 }, Math.max(1, drawer.zoomLimit * 0.72));
   }
   /** Generate AI paths for red units using position-scoring system. Zombies,
    *  shielders, and bombers are left to the real-time chase AI. */
@@ -1608,6 +1780,9 @@ var GameEngine = class _GameEngine {
       this.accumulator -= FIXED_DT;
       if (!this.running || this._phase !== "playing" || this.endingBattle) break;
     }
+    if (this.expedition && this._phase === "playing" && !this.endingBattle) {
+      this.renderer?.followCamera(this.units.filter((u) => u.alive && u.team === "blue").map((u) => u.pos));
+    }
     this.renderer?.renderProjectiles(this.projectiles);
     this.renderer?.effects?.update(rawDt * timeScale);
     this.onEvent("update", { phase: "playing", timeLeft: Math.max(0, this.roundTimer) });
@@ -1639,7 +1814,9 @@ var GameEngine = class _GameEngine {
    *  closest enemy. Gated by aiMode at the call site — never overrides the paths
    *  of a human-controlled red team. */
   updateChaseAI() {
+    if (this.expedition) wakeLurkers(this.units);
     for (const unit of this.units) {
+      if (unit.dormant) continue;
       if (!unit.alive || unit.team !== "red" || unit.type !== "zombie" && unit.type !== "shielder" && unit.type !== "bomber") continue;
       const target = findTarget(unit, this.units, null, this.obstacles);
       if (target) {
@@ -1661,7 +1838,7 @@ var GameEngine = class _GameEngine {
   /** Auto-target nearest enemy, fire projectiles, handle melee blades. */
   updateCombat(dt) {
     for (const unit of this.units) {
-      if (!unit.alive) continue;
+      if (!unit.alive || unit.dormant) continue;
       if (unit.type === "mortar") {
         this.updateMortar(unit, dt);
         continue;
@@ -1890,6 +2067,19 @@ var GameEngine = class _GameEngine {
   checkElimination() {
     const blueAlive2 = this.units.filter((u) => u.alive && u.team === "blue").length;
     const redAlive2 = this.units.filter((u) => u.alive && u.team === "red").length;
+    if (this.expedition) {
+      if (this.evacCalledRound === null && unitsInZone(this.units, this.expedition.extraction).length > 0) {
+        this.evacCalledRound = this.roundNumber;
+      }
+      if (blueAlive2 > 0) return false;
+      this.endingBattle = true;
+      this.endDelayTimer = END_DELAY_S;
+      this.pendingWinner = "red";
+      this.projectiles = [];
+      this.renderer?.renderProjectiles([]);
+      this.startFinalKillMoment();
+      return true;
+    }
     if (blueAlive2 === 0 || redAlive2 === 0) {
       if (redAlive2 === 0 && blueAlive2 > 0 && this.hordeMode) {
         this.projectiles = [];
@@ -1927,6 +2117,7 @@ var GameEngine = class _GameEngine {
     });
     this.idleTime = idle ? this.idleTime + dt : 0;
     if (this.roundTimer <= 0 || this.idleTime >= 0.5) {
+      if (this.tryEvac()) return;
       this.projectiles = [];
       this.renderer?.renderProjectiles([]);
       this.roundNumber++;
@@ -2096,6 +2287,10 @@ var GameEngine = class _GameEngine {
       red: this.units.filter((u) => u.alive && u.team === "red").length
     };
   }
+  /** Expedition: true when the battle ended with the squad extracted. */
+  get wasExtracted() {
+    return this.extracted;
+  }
   getCtfState() {
     return this.ctfState;
   }
@@ -2175,6 +2370,7 @@ var GameEngine = class _GameEngine {
     this.pathDrawer = null;
     this.renderer?.effects?.clear();
     this.renderer?.clearCtfGraphics();
+    if (this.expedition) this.renderer?.renderExtractionZone(null);
     this.renderer?.resetCamera();
   }
   /** Remember where the latest kill happened and briefly freeze the action. */

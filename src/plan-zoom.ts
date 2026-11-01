@@ -38,6 +38,28 @@ export function pinchView(
   return clampView({ zoom, x: mid.x - localX * zoom, y: mid.y - localY * zoom }, mapW, mapH, maxZoom);
 }
 
+/** Share of the view's shorter side, at each edge, that scrolls a drawn path. */
+const EDGE_BAND = 0.14;
+/** Scroll speed at the very edge, in view widths per second. */
+const EDGE_SPEED = 0.9;
+
+/** The view after `dt` seconds of edge-scrolling with the pointer at `p`
+ *  (canvas coordinates): the deeper into an edge band, the faster. */
+export function edgePanView(view: ZoomView, p: Vec2, dt: number, mapW: number, mapH: number, maxZoom: number): ZoomView {
+  const band = Math.min(mapW, mapH) * EDGE_BAND;
+  const push = (v: number, size: number): number => {
+    if (v < band) return Math.min(1, (band - v) / band);
+    if (v > size - band) return -Math.min(1, (v - (size - band)) / band);
+    return 0;
+  };
+  const speed = mapW * EDGE_SPEED * dt;
+  return clampView({
+    zoom: view.zoom,
+    x: view.x + push(p.x, mapW) * speed,
+    y: view.y + push(p.y, mapH) * speed,
+  }, mapW, mapH, maxZoom);
+}
+
 interface Transformable {
   scale: { set(v: number): void };
   position: { set(x: number, y: number): void };
@@ -75,6 +97,7 @@ export class PinchZoom {
     if (this.maxZoom <= 1) return;
     this.attached = true;
     this.canvas.addEventListener('pointerdown', this.onDown, true);
+    this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('pointermove', this.onMove, true);
     window.addEventListener('pointerup', this.onUp, true);
     window.addEventListener('pointercancel', this.onUp, true);
@@ -85,6 +108,7 @@ export class PinchZoom {
   detach(): void {
     if (this.attached) {
       this.canvas.removeEventListener('pointerdown', this.onDown, true);
+      this.canvas.removeEventListener('wheel', this.onWheel);
       window.removeEventListener('pointermove', this.onMove, true);
       window.removeEventListener('pointerup', this.onUp, true);
       window.removeEventListener('pointercancel', this.onUp, true);
@@ -97,8 +121,48 @@ export class PinchZoom {
     if (v.zoom !== 1 || v.x !== 0 || v.y !== 0) this.apply({ zoom: 1, x: 0, y: 0 });
   }
 
+  /** Highest zoom this planning phase allows (1 when zoom is off). */
+  get zoomLimit(): number {
+    return this.attached ? this.maxZoom : 1;
+  }
+
+  /** Show `view` (e.g. carried over from the battle camera), clamped. */
+  setView(view: ZoomView): void {
+    if (!this.attached) return;
+    this.apply(clampView(view, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
+  }
+
+  /** Centre the view on a map point at `zoom` (clamped to what's allowed). */
+  focusOn(center: Vec2, zoom: number): void {
+    if (!this.attached) return;
+    const z = Math.max(1, Math.min(this.maxZoom, zoom));
+    this.setView({ zoom: z, x: MAP_WIDTH / 2 - center.x * z, y: MAP_HEIGHT / 2 - center.y * z });
+  }
+
+  /**
+   * While a path is drawn with the finger (or mouse) held near an edge of the
+   * zoomed view, scroll the view that way so the path can run off-screen.
+   * `p` is in canvas coordinates. Returns true if the view moved.
+   */
+  edgePan(p: Vec2, dt: number): boolean {
+    if (!this.attached || this.gesture || this.view.zoom <= 1.001) return false;
+    const v = edgePanView(this.view, p, dt, MAP_WIDTH, MAP_HEIGHT, this.maxZoom);
+    if (v.x === this.view.x && v.y === this.view.y) return false;
+    this.apply(v);
+    return true;
+  }
+
+  /** Mouse wheel / trackpad: zoom about the pointer. */
+  private onWheel = (e: WheelEvent): void => {
+    e.preventDefault();
+    if (this.gesture) return;
+    const p = this.toCanvas(e);
+    const factor = Math.exp(-Math.max(-100, Math.min(100, e.deltaY)) * 0.004);
+    this.apply(pinchView(this.view, p, 1, p, factor, MAP_WIDTH, MAP_HEIGHT, this.maxZoom));
+  };
+
   /** Client coordinates → canvas (Pixi "global") coordinates. */
-  private toCanvas(e: PointerEvent): Vec2 {
+  private toCanvas(e: { clientX: number; clientY: number }): Vec2 {
     const rect = this.canvas.getBoundingClientRect();
     return {
       x: (e.clientX - rect.left) * (MAP_WIDTH / rect.width),

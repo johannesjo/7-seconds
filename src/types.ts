@@ -56,6 +56,8 @@ export interface Unit {
   shieldHits?: number;
   /** Horde boss: an oversized, renamed version of its base type. */
   boss?: BossId;
+  /** Expedition lurker: stands still until a blue unit comes near or it is hurt. */
+  dormant?: boolean;
 }
 
 export interface Projectile {

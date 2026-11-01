@@ -400,6 +400,7 @@ export class PathDrawer {
     this.rawPoints = [];
     this.strokePointer = null;
     this.strokeBackup = null;
+    this.strokeGlobal = null;
     this.predictionCache = new WeakMap();
     this.zoom?.attach();
     this.renderPaths();
@@ -410,6 +411,7 @@ export class PathDrawer {
     this.zoom?.detach();
     this.strokePointer = null;
     this.strokeBackup = null;
+    this.strokeGlobal = null;
     this.team = null;
     this.selectedUnit = null;
     this.hoveredUnit = null;
@@ -643,7 +645,43 @@ export class PathDrawer {
 
   /** Call each frame to animate pulsing indicators during planning. */
   updateHover(): void {
-    if (this.enabled) this.renderHoverLayer();
+    if (!this.enabled) return;
+    this.edgeScroll();
+    this.renderHoverLayer();
+  }
+
+  /** Where the drawing pointer last was (canvas coordinates), for edge-scroll. */
+  private strokeGlobal: Vec2 | null = null;
+  private lastFrameAt = 0;
+
+  /** Held near an edge of a zoomed view while drawing: scroll, and keep the
+   *  path going under the (still) pointer as the map slides beneath it. */
+  private edgeScroll(): void {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - (this.lastFrameAt || now)) / 1000);
+    this.lastFrameAt = now;
+    const drawing = this.selectedUnit !== null || this.rocketUnit !== null;
+    if (!drawing || !this.strokeGlobal || !this.zoom || dt <= 0) return;
+    if (!this.zoom.edgePan(this.strokeGlobal, dt)) return;
+    const pos = this.toLocal(this.strokeGlobal);
+    if (this.rocketUnit) this.rawRocket.push({ x: pos.x, y: pos.y });
+    else this.rawPoints.push({ x: pos.x, y: pos.y });
+    this.renderPaths();
+  }
+
+  /** Highest zoom available this planning phase (1 when the map fits). */
+  get zoomLimit(): number {
+    return this.zoom?.zoomLimit ?? 1;
+  }
+
+  /** Show a given view of the map (e.g. carried over from the battle). */
+  setView(view: { zoom: number; x: number; y: number }): void {
+    this.zoom?.setView(view);
+  }
+
+  /** Centre the planning view on a map point. */
+  focusOn(center: Vec2, zoom: number): void {
+    this.zoom?.focusOn(center, zoom);
   }
 
   private drawRangeCircle(unit: Unit, pos: Vec2, color: number): void {
@@ -759,6 +797,7 @@ export class PathDrawer {
     const backup = this.strokeBackup;
     if (backup) Object.assign(backup.unit, backup.orders);
     this.strokeBackup = null;
+    this.strokeGlobal = null;
     this.strokePointer = null;
     this.selectedUnit = null;
     this.hoveredUnit = null;
@@ -797,6 +836,7 @@ export class PathDrawer {
       this.strokeBackup = { unit: rocketeer, orders: copyOrders(rocketeer) };
       rocketeer.rocketPath = [];
       rocketeer.rocketFired = false;
+      this.strokeGlobal = { x: e.global.x, y: e.global.y };
       this.rawRocket = [{ ...launchPoint(rocketeer) }];
       this.renderPaths();
       return;
@@ -810,6 +850,7 @@ export class PathDrawer {
       this.strokePointer = e.pointerId ?? null;
       this.strokeBackup = { unit: closest, orders: copyOrders(closest) };
       resetOrders(closest);
+      this.strokeGlobal = { x: e.global.x, y: e.global.y };
       this.rawPoints = [{ x: closest.pos.x, y: closest.pos.y }];
       this.renderPaths();
       return;
@@ -826,6 +867,9 @@ export class PathDrawer {
     if (!this.enabled) return;
     if (this.ignorePointer(e.pointerId)) return;
     const pos = this.toLocal(e.global);
+    if (this.strokePointer !== null || this.selectedUnit || this.rocketUnit) {
+      this.strokeGlobal = { x: e.global.x, y: e.global.y };
+    }
 
     // Update hover state
     if (!this.selectedUnit && !this.rocketUnit) {
@@ -859,6 +903,7 @@ export class PathDrawer {
     if (this.strokePointer !== null && e.pointerId !== this.strokePointer) return;
     this.strokePointer = null;
     this.strokeBackup = null;
+    this.strokeGlobal = null;
     if (this.rocketUnit) {
       const unit = this.rocketUnit;
       const sampled = samplePath(this.rawRocket, PATH_SAMPLE_DISTANCE).slice(1);

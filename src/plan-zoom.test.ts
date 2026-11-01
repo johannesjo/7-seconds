@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setMapSize } from './constants';
-import { clampView, maxPlanZoom, pinchView, PinchZoom, PLAN_ZOOM_THRESHOLD } from './plan-zoom';
+import { clampView, edgePanView, maxPlanZoom, pinchView, PinchZoom, PLAN_ZOOM_THRESHOLD } from './plan-zoom';
 
 describe('maxPlanZoom', () => {
   it('stays off when the map is shown near full size', () => {
@@ -130,5 +130,26 @@ describe('PinchZoom', () => {
     canvas.dispatchEvent(pointer('pointerdown', 7, 100, 100)); // never lifted
     canvas.dispatchEvent(pointer('pointerdown', 1, 200, 200)); // new touch sequence
     expect(zoom.gesturing).toBe(false);
+  });
+});
+
+describe('edgePanView', () => {
+  const view = { zoom: 2, x: -360, y: -640 };
+
+  it('leaves the view alone away from the edges', () => {
+    expect(edgePanView(view, { x: 360, y: 640 }, 0.1, 720, 1280, 3)).toEqual(view);
+  });
+
+  it('scrolls toward the edge the pointer is held at', () => {
+    const right = edgePanView(view, { x: 715, y: 640 }, 0.1, 720, 1280, 3);
+    expect(right.x).toBeLessThan(view.x);
+    expect(right.y).toBe(view.y);
+    const top = edgePanView(view, { x: 360, y: 5 }, 0.1, 720, 1280, 3);
+    expect(top.y).toBeGreaterThan(view.y);
+  });
+
+  it('stops at the map edge', () => {
+    const atTop = { zoom: 2, x: -360, y: 0 };
+    expect(edgePanView(atTop, { x: 360, y: 5 }, 0.1, 720, 1280, 3).y).toBe(0);
   });
 });

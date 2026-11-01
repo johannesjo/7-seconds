@@ -1,5 +1,6 @@
 import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
 import { PathDrawer } from './path-drawer';
+import { maxPlanZoom, type ZoomView } from './plan-zoom';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState } from './types';
 import { MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS, MORTAR_BLAST_RADIUS } from './constants';
 import { EffectsManager } from './effects';
@@ -45,7 +46,12 @@ export class Renderer {
   /** CSS pixels from the content box's top to the map's, as last fitted. */
   private viewTop = 0;
   /** Camera: zoom eases toward its target around `focus`; shake decays. */
-  private camera = { zoom: 1, targetZoom: 1, focus: { x: 0, y: 0 }, shake: 0, active: false };
+  private camera = {
+    zoom: 1, targetZoom: 1, focus: { x: 0, y: 0 }, shake: 0, active: false,
+    /** Follow mode: the focus eases toward this point instead of snapping. */
+    follow: null as Vec2 | null,
+  };
+  private extractionGraphics: Container | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
 
@@ -161,9 +167,55 @@ export class Renderer {
     this.camera.active = true;
   }
 
+  /**
+   * Keep the camera on a group of points (e.g. the squad on a large map):
+   * zoomed in as far as fits them with room around, up to the zoom at which
+   * units show at native size, easing as they move.
+   */
+  followCamera(points: Vec2[], margin = 230): void {
+    if (points.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of points) {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+    const fit = Math.min(MAP_WIDTH / (maxX - minX + margin * 2), MAP_HEIGHT / (maxY - minY + margin * 2));
+    const cam = this.camera;
+    cam.targetZoom = Math.max(1, Math.min(this.followZoomLimit, fit));
+    cam.follow = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    if (!cam.active) {
+      cam.focus = { ...cam.follow };
+      cam.active = true;
+    }
+  }
+
+  /** Zoom at which units show at about native size (1 when the map already does). */
+  get followZoomLimit(): number {
+    return maxPlanZoom(this.viewScale);
+  }
+
+  /** The stage's current pan and zoom (planning view or battle camera). */
+  stageView(): ZoomView {
+    const stage = this.app.stage;
+    return { zoom: stage.scale.x, x: stage.position.x, y: stage.position.y };
+  }
+
+  /** Start the camera from whatever the stage shows now (e.g. the planning
+   *  view), so the battle camera takes over without a jump. */
+  seedCameraFromStage(): void {
+    const v = this.stageView();
+    if (v.zoom <= 1.001) return;
+    const cam = this.camera;
+    cam.zoom = v.zoom;
+    cam.targetZoom = v.zoom;
+    cam.focus = { x: (MAP_WIDTH / 2 - v.x) / v.zoom, y: (MAP_HEIGHT / 2 - v.y) / v.zoom };
+    cam.active = true;
+  }
+
   /** Snap back to the full, unshaken map (planning needs exact coordinates). */
   resetCamera(): void {
     const cam = this.camera;
+    cam.follow = null;
     if (!cam.active) return;
     cam.zoom = 1;
     cam.targetZoom = 1;
@@ -178,9 +230,16 @@ export class Renderer {
     if (!cam.active) return;
     const dt = Math.min(0.05, ticker.deltaMS / 1000);
     cam.zoom += (cam.targetZoom - cam.zoom) * Math.min(1, dt * 6);
+    if (cam.follow) {
+      const k = Math.min(1, dt * 4);
+      cam.focus.x += (cam.follow.x - cam.focus.x) * k;
+      cam.focus.y += (cam.follow.y - cam.focus.y) * k;
+    }
     cam.shake = Math.max(0, cam.shake - dt * 40);
     if (cam.shake === 0 && cam.targetZoom === 1 && Math.abs(cam.zoom - 1) < 0.002) {
+      const follow = cam.follow;
       this.resetCamera();
+      cam.follow = follow;
       return;
     }
     // Zoom about the focus point, clamped so the map always fills the view.
@@ -520,6 +579,9 @@ export class Renderer {
       if (ctfState) {
         const carrying = ctfState.blueFlag.carrierId === unit.id || ctfState.redFlag.carrierId === unit.id;
         container.alpha = carrying ? 0.8 + 0.2 * Math.sin(Date.now() / 200) : 1;
+      } else {
+        // Expedition lurkers fade while asleep, so packs read as avoidable
+        container.alpha = unit.dormant ? 0.45 : 1;
       }
 
       // Rotate gun barrel
@@ -872,13 +934,57 @@ export class Renderer {
 
   /** Switch to the map size a match was recorded on (online state carries
    *  its own) and refit the canvas to it. */
-  adaptToRemoteMap(remoteWidth: number, remoteHeight: number): void {
-    setMapSize(remoteWidth, remoteHeight);
+  adaptToRemoteMap(remoteWidth: number, remoteHeight: number, large = false): void {
+    setMapSize(remoteWidth, remoteHeight, large);
     this.fitToContainer();
     this.resetCamera();
     this.app.stage.scale.set(1);
     this.app.stage.position.set(0, 0);
     this.drawBackground();
+  }
+
+  /** Switch to a local mode's large map (Expedition), above the online cap. */
+  useLargeMap(width: number, height: number): void {
+    if (MAP_WIDTH === width && MAP_HEIGHT === height) return;
+    this.adaptToRemoteMap(width, height, true);
+  }
+
+  /** Mark the extraction zone (Expedition); null clears it. */
+  renderExtractionZone(zone: Obstacle | null): void {
+    if (this.extractionGraphics) {
+      this.app.stage.removeChild(this.extractionGraphics);
+      this.extractionGraphics.destroy({ children: true });
+      this.extractionGraphics = null;
+    }
+    if (!zone) return;
+    const c = new Container();
+    const g = new Graphics();
+    const color = 0x3ccf7a;
+    g.roundRect(zone.x, zone.y, zone.w, zone.h, 10);
+    g.fill({ color, alpha: 0.14 });
+    g.roundRect(zone.x, zone.y, zone.w, zone.h, 10);
+    g.stroke({ width: 3, color, alpha: 0.7 });
+    // Hatched corners so it reads as a landing zone, not a hill
+    const t = 22;
+    for (const [x, y, dx, dy] of [
+      [zone.x, zone.y, 1, 1], [zone.x + zone.w, zone.y, -1, 1],
+      [zone.x, zone.y + zone.h, 1, -1], [zone.x + zone.w, zone.y + zone.h, -1, -1],
+    ]) {
+      g.moveTo(x + dx * 8, y + dy * (8 + t)).lineTo(x + dx * 8, y + dy * 8).lineTo(x + dx * (8 + t), y + dy * 8);
+    }
+    g.stroke({ width: 4, color, alpha: 0.9 });
+    c.addChild(g);
+    const label = new Text({
+      text: 'EXTRACTION',
+      style: { fontSize: 22, fontFamily: 'monospace', fontWeight: 'bold', fill: color, letterSpacing: 3 },
+    });
+    label.anchor.set(0.5);
+    label.alpha = 0.85;
+    label.position.set(zone.x + zone.w / 2, zone.y + zone.h / 2);
+    c.addChild(label);
+    // Under units and paths, over the ground
+    this.app.stage.addChildAt(c, Math.min(2, this.app.stage.children.length));
+    this.extractionGraphics = c;
   }
 
   /** Back to the standard map, e.g. after an online match recorded on another size. */

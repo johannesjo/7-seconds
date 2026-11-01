@@ -16,6 +16,10 @@ import type { PathList } from './online-async-core';
 import { planTeamOrders } from './ai-planner';
 import { createRng } from './rng';
 import { clampPathLength, validPoints } from './path-orders';
+import {
+  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, STALL_DISTANCE, centroid, spawnPursuers, unitsInZone, wakeLurkers,
+  type ExpeditionSetup,
+} from './expedition';
 
 const FIXED_DT = 1 / 60;
 
@@ -81,6 +85,14 @@ export class GameEngine {
   private slowMoScale = 1;
   private finalSlowMo = false;
   private lastKillPos: Vec2 | null = null;
+  private expedition: ExpeditionSetup | null = null;
+  /** Expedition: the squad's centre when the last round began (stall check). */
+  private expeditionLastY: number | null = null;
+  /** Expedition: the round in which a unit first reached the zone (the evac
+   *  lands at the end of the round after), and how many it took out. */
+  private evacCalledRound: number | null = null;
+  private extracted = false;
+  private extractedCount = 0;
 
   constructor(renderer: Renderer | null, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
@@ -104,6 +116,8 @@ export class GameEngine {
     /** Fixed battlefield layout and armies (e.g. the daily challenge). */
     layoutIndex?: number;
     composition?: { type: UnitType; count: number }[];
+    /** Expedition: a large map to cross; win by reaching its extraction zone. */
+    expedition?: ExpeditionSetup;
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -122,6 +136,7 @@ export class GameEngine {
     this.difficulty = opts?.difficulty ?? 'normal';
     this.layoutIndex = opts?.layoutIndex;
     this.composition = opts?.composition;
+    this.expedition = opts?.expedition ?? null;
 
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
@@ -144,8 +159,11 @@ export class GameEngine {
   startBattle(): void {
 
     // New battles are fought on the standard map, even after an online match
-    // recorded on another size
-    if (!this.initialState && (MAP_WIDTH !== STANDARD_MAP_WIDTH || MAP_HEIGHT !== STANDARD_MAP_HEIGHT)) {
+    // recorded on another size; Expedition brings its own large map
+    if (this.expedition) {
+      this.renderer?.useLargeMap(EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT);
+      setMapSize(EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, true);
+    } else if (!this.initialState && (MAP_WIDTH !== STANDARD_MAP_WIDTH || MAP_HEIGHT !== STANDARD_MAP_HEIGHT)) {
       this.renderer?.useStandardMap();
       setMapSize(STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT);
     }
@@ -162,6 +180,10 @@ export class GameEngine {
       this.elevationZones = generateCtfElevationZones();
       this.units = [...createCtfArmy('blue', this.obstacles), ...createCtfArmy('red', this.obstacles)];
       this.ctfState = createCtfState();
+    } else if (this.expedition) {
+      this.obstacles = this.expedition.obstacles;
+      this.elevationZones = this.expedition.elevationZones;
+      this.units = this.expedition.units;
     } else if (this.hordeMap) {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
@@ -173,7 +195,7 @@ export class GameEngine {
 
     const allBlocks = this.obstacles;
 
-    if (!this.ctfMode && !this.practice && !this.initialState) {
+    if (!this.ctfMode && !this.practice && !this.initialState && !this.expedition) {
       if (this.hordeMode && this.hordeBlueUnits && this.hordeRedUnits) {
         // Horde mode: carried-over blue units + the wave's enemies
         const redUnits = this.hordeRedUnits;
@@ -204,6 +226,7 @@ export class GameEngine {
       if (this.ctfMode) {
         this.renderer.renderBaseZones();
       }
+      this.renderer.renderExtractionZone(this.expedition?.extraction ?? null);
       this.renderer.renderUnits(this.units);
 
       // Start ticker for rendering during planning
@@ -249,6 +272,9 @@ export class GameEngine {
     this._phase = phase;
 
     if (phase === 'blue-planning') {
+      // Expedition: keep looking where the battle camera was
+      const battleView = this.expedition ? this.renderer?.stageView() : undefined;
+      if (this.expedition) this.spawnExpeditionPursuers();
       this.renderer?.resetCamera();
       // Reload every rocketeer and drop blue's old rocket orders here rather
       // than relying on the drawer: Horde carries units into a fresh engine
@@ -260,6 +286,7 @@ export class GameEngine {
       this.pathDrawer?.clearPaths('blue');
       if (this.hordeMode) this.generateAiPaths();
       this.pathDrawer?.enable('blue', this.units, this.elevationZones);
+      if (this.expedition) this.focusPlanningView(battleView);
     } else if (phase === 'cover') {
       this.pathDrawer?.disable();
       if (this.onlineHostMode) {
@@ -284,6 +311,8 @@ export class GameEngine {
       }
       // When onlineHostMode, we wait for external setRedPaths() + confirmPlan()
     } else if (phase === 'playing') {
+      // Hand the planning view to the battle camera without a jump
+      if (this.expedition) this.renderer?.seedCameraFromStage();
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
       this.roundTimer = ROUND_DURATION_S;
@@ -296,6 +325,77 @@ export class GameEngine {
 
     this.onEvent('phase-change', { phase, round: this.roundNumber });
     this.onPhaseChangeCallback?.(phase);
+  }
+
+  /** Expedition: from round 2, a new group of the horde arrives behind the
+   *  squad — bigger when it hasn't gained ground since last round. */
+  private spawnExpeditionPursuers(): void {
+    const blue = this.units.filter(u => u.alive && u.team === 'blue');
+    if (blue.length === 0) return;
+    const y = centroid(blue.map(u => u.pos)).y;
+    const lastY = this.expeditionLastY;
+    this.expeditionLastY = y;
+    if (this.roundNumber < 2 || lastY === null) return;
+    const stalled = lastY - y < STALL_DISTANCE;
+    const aliveRed = this.units.filter(u => u.alive && u.team === 'red').length;
+    const arrivals = spawnPursuers(this.roundNumber, this.units, aliveRed, stalled, this.obstacles);
+    this.units.push(...arrivals);
+    this.lastPursuit = { count: arrivals.length, stalled };
+  }
+
+  /** Expedition: at a round's end once the evac is due, take out everyone in
+   *  the zone. With nobody inside it waits for the next round's end. */
+  private tryEvac(): boolean {
+    if (!this.expedition || this.evacStatus !== 'landing') return false;
+    const aboard = unitsInZone(this.units, this.expedition.extraction);
+    if (aboard.length === 0) return false;
+    this.extracted = true;
+    this.extractedCount = aboard.length;
+    this.endingBattle = true;
+    this.endDelayTimer = END_DELAY_S * 2;
+    this.pendingWinner = 'blue';
+    this.projectiles = [];
+    this.renderer?.renderProjectiles([]);
+    this.renderer?.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
+    return true;
+  }
+
+  /** Expedition evac: not called yet, called (lands after the next round),
+   *  or landing at the end of the current round. */
+  get evacStatus(): 'none' | 'inbound' | 'landing' {
+    if (this.evacCalledRound === null) return 'none';
+    return this.roundNumber > this.evacCalledRound ? 'landing' : 'inbound';
+  }
+
+  /** Expedition: units the evac took out (0 until it has). */
+  get extractedUnits(): number {
+    return this.extractedCount;
+  }
+
+  /** Expedition: the size of the group that just arrived, for the HUD. */
+  private lastPursuit: { count: number; stalled: boolean } | null = null;
+
+  /** The latest pursuit group (Expedition), once per round; null when none came. */
+  takePursuitNews(): { count: number; stalled: boolean } | null {
+    const news = this.lastPursuit;
+    this.lastPursuit = null;
+    return news;
+  }
+
+  /** Expedition planning: zoomed in on the squad, or where the battle left off. */
+  private focusPlanningView(battleView?: { zoom: number; x: number; y: number }): void {
+    const drawer = this.pathDrawer;
+    if (!drawer) return;
+    if (battleView && battleView.zoom > 1.001) {
+      drawer.setView(battleView);
+      return;
+    }
+    const blue = this.units.filter(u => u.alive && u.team === 'blue');
+    if (blue.length === 0) return;
+    const c = centroid(blue.map(u => u.pos));
+    // Ahead of the squad (that's where the paths go), zoomed in enough to
+    // draw but out enough to see the packs in the way
+    drawer.focusOn({ x: c.x, y: c.y - 260 }, Math.max(1, drawer.zoomLimit * 0.72));
   }
 
   /** Generate AI paths for red units using position-scoring system. Zombies,
@@ -361,6 +461,12 @@ export class GameEngine {
       if (!this.running || this._phase !== 'playing' || this.endingBattle) break;
     }
 
+    // Only while the round plays: a step may just have switched to planning,
+    // whose view belongs to the pinch zoom
+    if (this.expedition && this._phase === 'playing' && !this.endingBattle) {
+      this.renderer?.followCamera(this.units.filter(u => u.alive && u.team === 'blue').map(u => u.pos));
+    }
+
     // Render at display rate (after all simulation steps)
     this.renderer?.renderProjectiles(this.projectiles);
     this.renderer?.effects?.update(rawDt * timeScale);
@@ -403,7 +509,9 @@ export class GameEngine {
    *  closest enemy. Gated by aiMode at the call site — never overrides the paths
    *  of a human-controlled red team. */
   private updateChaseAI(): void {
+    if (this.expedition) wakeLurkers(this.units);
     for (const unit of this.units) {
+      if (unit.dormant) continue;
       if (!unit.alive || unit.team !== 'red' || (unit.type !== 'zombie' && unit.type !== 'shielder' && unit.type !== 'bomber')) continue;
       const target = findTarget(unit, this.units, null, this.obstacles);
       if (target) {
@@ -427,7 +535,7 @@ export class GameEngine {
   /** Auto-target nearest enemy, fire projectiles, handle melee blades. */
   private updateCombat(dt: number): void {
     for (const unit of this.units) {
-      if (!unit.alive) continue;
+      if (!unit.alive || unit.dormant) continue;
 
       if (unit.type === 'mortar') {
         this.updateMortar(unit, dt);
@@ -678,6 +786,21 @@ export class GameEngine {
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
 
+    if (this.expedition) {
+      // Clearing the map doesn't win an expedition: only the evac does
+      if (this.evacCalledRound === null && unitsInZone(this.units, this.expedition.extraction).length > 0) {
+        this.evacCalledRound = this.roundNumber;
+      }
+      if (blueAlive > 0) return false;
+      this.endingBattle = true;
+      this.endDelayTimer = END_DELAY_S;
+      this.pendingWinner = 'red';
+      this.projectiles = [];
+      this.renderer?.renderProjectiles([]);
+      this.startFinalKillMoment();
+      return true;
+    }
+
     if (blueAlive === 0 || redAlive === 0) {
       // Wave cleared only if blue survived — a mutual wipe is a horde defeat
       if (redAlive === 0 && blueAlive > 0 && this.hordeMode) {
@@ -726,6 +849,7 @@ export class GameEngine {
 
     // Round over → back to planning
     if (this.roundTimer <= 0 || this.idleTime >= 0.5) {
+      if (this.tryEvac()) return;
       this.projectiles = [];
       this.renderer?.renderProjectiles([]);
       this.roundNumber++;
@@ -914,6 +1038,11 @@ export class GameEngine {
     };
   }
 
+  /** Expedition: true when the battle ended with the squad extracted. */
+  get wasExtracted(): boolean {
+    return this.extracted;
+  }
+
   getCtfState(): CtfState | null {
     return this.ctfState;
   }
@@ -1001,6 +1130,7 @@ export class GameEngine {
     this.pathDrawer = null;
     this.renderer?.effects?.clear();
     this.renderer?.clearCtfGraphics();
+    if (this.expedition) this.renderer?.renderExtractionZone(null);
     this.renderer?.resetCamera();
   }
 

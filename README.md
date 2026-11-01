@@ -25,6 +25,7 @@ Every battle is fought on the same 360×640 map, whatever the device; the board 
 - **Play vs AI** — Single player against AI opponents; pick Easy, Normal or Hard after tapping Play (Easy gives the AI one unit fewer and looser planning; Hard gives it an extra soldier). Your win/loss record and streak are kept per difficulty.
 - **Daily challenge** — The same map, armies and battle seed for everyone each day. Your first finished attempt counts; share the result as a spoiler-free emoji summary.
 - **Horde** — Survive 10 waves of increasingly difficult enemies, choosing upgrades between waves
+- **Expedition** (prototype) — Cross a map three times as wide as the standard one, pinching to zoom (scroll on desktop) and holding near an edge while drawing to scroll. Sleeping packs wake when you get close, the horde keeps arriving behind you (more if you stall), and reaching the extraction zone calls an evac that lands a round later: whoever is inside gets out
 - **Online: Random** — Matched with a random opponent; if nobody is searching, an AI commander takes the seat
 - **Online: Friend** — Share a link and play against a friend, at your own pace
 - **Ranked** (Android) — Elo ladder with Google Play Games sign-in
