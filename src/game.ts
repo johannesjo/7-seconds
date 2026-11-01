@@ -20,6 +20,7 @@ import {
   EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, STALL_DISTANCE, centroid, distanceToExtraction, spawnPursuers, unitsInZone, wakeLurkers,
   type ExpeditionSetup,
 } from './expedition';
+import { NightVision } from './night';
 
 const FIXED_DT = 1 / 60;
 
@@ -101,6 +102,9 @@ export class GameEngine {
   private evacCalledRound: number | null = null;
   private extracted = false;
   private extractedCount = 0;
+  /** Night battle (vs AI only): limited sight, see src/night.ts. */
+  private nightMode = false;
+  private night: NightVision | null = null;
 
   constructor(renderer: Renderer | null, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
@@ -126,6 +130,9 @@ export class GameEngine {
     composition?: { type: UnitType; count: number }[];
     /** Expedition: a large map to cross; win by reaching its extraction zone. */
     expedition?: ExpeditionSetup;
+    /** Night battle: units only target what their team can see. vs AI only —
+     *  never set for online play, whose rules must match the referee. */
+    night?: boolean;
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -145,6 +152,7 @@ export class GameEngine {
     this.layoutIndex = opts?.layoutIndex;
     this.composition = opts?.composition;
     this.expedition = opts?.expedition ?? null;
+    this.nightMode = opts?.night ?? false;
 
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
@@ -224,12 +232,21 @@ export class GameEngine {
     this.roundTimer = 0;
     this.running = true;
 
+    if (this.nightMode) {
+      this.night = new NightVision();
+      this.night.seedDeployment(this.units);
+      this.night.update(this.units, this.obstacles, this.elevationZones);
+    }
+
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer!.highlightZonesAt(pos));
       // Off in tutorial lessons (they teach other things) and wherever orders
       // go over the network, which doesn't carry focus yet.
       this.pathDrawer.focusFire = !this.practice && !this.onlineHostMode;
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
+      const night = this.night;
+      this.pathDrawer.canSeeEnemy = night ? night.canSee.blue : null;
+      this.renderer.setNightView(night ? { team: 'blue', vision: night } : null);
 
       // Render initial state — hills under obstacles
       this.renderer.renderElevationZones(this.elevationZones);
@@ -287,6 +304,15 @@ export class GameEngine {
       const battleView = this.expedition ? this.renderer?.stageView() : undefined;
       if (this.expedition) this.spawnExpeditionPursuers();
       this.renderer?.resetCamera();
+      // Plan from what was in sight when the round ended: record where the
+      // last shooters flashed, let the flashes fade, and let dawn widen sight
+      // for the coming round (planning shows that wider sight).
+      if (this.night) {
+        this.night.update(this.units, this.obstacles, this.elevationZones);
+        this.night.endRound();
+        this.night.setRound(this.roundNumber);
+        this.night.update(this.units, this.obstacles, this.elevationZones);
+      }
       // Reload every rocketeer and drop blue's old rocket orders here rather
       // than relying on the drawer: Horde carries units into a fresh engine
       // whose drawer doesn't know them yet.
@@ -525,6 +551,10 @@ export class GameEngine {
     // get overwritten and units appear to move on their own.
     if (this.aiMode) this.updateChaseAI();
     this.updateMovement(dt, redDelayed);
+    if (this.night) {
+      this.night.tick(dt);
+      this.night.update(this.units, this.obstacles, this.elevationZones);
+    }
     this.updateCombat(dt);
     const hits = this.updateProjectiles(dt);
     this.dispatchHitEffects(hits);
@@ -555,6 +585,8 @@ export class GameEngine {
     for (const unit of this.units) {
       if (unit.dormant) continue;
       if (!unit.alive || unit.team !== 'red' || (unit.type !== 'zombie' && unit.type !== 'shielder' && unit.type !== 'bomber')) continue;
+      // At night the chase AI still homes in on unseen enemies (an AI cheat;
+      // they can only attack what their team sees).
       const target = findTarget(unit, this.units, null, this.obstacles);
       if (target) {
         unit.waypoints = [];
@@ -588,7 +620,7 @@ export class GameEngine {
         continue;
       }
 
-      const target = findCombatTarget(unit, this.units, this.obstacles, this.elevationZones);
+      const target = findCombatTarget(unit, this.units, this.obstacles, this.elevationZones, this.sightFilter(unit));
 
       // Blade uses AoE melee attack instead of projectiles
       if (unit.type === 'blade') {
@@ -631,6 +663,7 @@ export class GameEngine {
         const projectiles = tryFireProjectile(unit, target, dt, this.elevationZones);
         if (projectiles.length > 0) {
           this.projectiles.push(...projectiles);
+          this.night?.noteFire(unit);
           this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, projectiles[0].damage);
           this.replayEvents.push({
             frame: this.replayFrames.length,
@@ -661,8 +694,9 @@ export class GameEngine {
 
   /** Mortar: lob shells at any enemy in its firing band, over obstacles. */
   private updateMortar(unit: Unit, dt: number): void {
-    const target = findMortarTarget(unit, this.units, this.elevationZones);
-    const facing = target ?? focusTarget(unit, this.units) ?? findTarget(unit, this.units, null, this.obstacles);
+    const canSee = this.sightFilter(unit);
+    const target = findMortarTarget(unit, this.units, this.elevationZones, canSee);
+    const facing = target ?? focusTarget(unit, this.units, canSee) ?? findTarget(unit, this.units, null, this.obstacles, canSee);
     if (facing) {
       updateGunAngle(unit, Math.atan2(facing.pos.y - unit.pos.y, facing.pos.x - unit.pos.x), dt);
     }
@@ -673,6 +707,7 @@ export class GameEngine {
     const shells = fireMortar(unit, target, dt);
     if (shells.length === 0) return;
     this.projectiles.push(...shells);
+    this.night?.noteFire(unit);
     this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, shells[0].damage, 'shell');
     this.recordFire(unit, shells[0].damage, 'shell');
   }
@@ -683,12 +718,18 @@ export class GameEngine {
       const rocket = launchRocket(unit);
       if (!rocket) return;
       this.projectiles.push(rocket);
+      this.night?.noteFire(unit);
       this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, rocket.damage, 'rocket');
       this.recordFire(unit, rocket.damage, 'rocket');
       return;
     }
-    const target = findTarget(unit, this.units, null, this.obstacles);
+    const target = findTarget(unit, this.units, null, this.obstacles, this.sightFilter(unit));
     if (target) updateGunAngle(unit, Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x), dt);
+  }
+
+  /** Night: which enemies `unit`'s team may target. Undefined (all) by day. */
+  private sightFilter(unit: Unit): ((enemy: Unit) => boolean) | undefined {
+    return this.night?.canSee[unit.team];
   }
 
   private recordFire(unit: Unit, damage: number, weapon: 'shell' | 'rocket'): void {
@@ -880,9 +921,11 @@ export class GameEngine {
       if (speed > 1 || u.waypoints.length > 0) return false;
       // About to launch a drawn rocket is not idle.
       if (u.type === 'rocketeer' && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
-      // A mortar is busy while any enemy sits in its firing band, seen or not.
-      if (u.type === 'mortar') return !findMortarTarget(u, this.units, this.elevationZones);
-      const target = findTarget(u, this.units, null, this.obstacles);
+      // A mortar is busy while any enemy sits in its firing band, seen or not
+      // (at night: seen by its team).
+      const canSee = this.sightFilter(u);
+      if (u.type === 'mortar') return !findMortarTarget(u, this.units, this.elevationZones, canSee);
+      const target = findTarget(u, this.units, null, this.obstacles, canSee);
       return !target || !isInRange(u, target, this.elevationZones);
     });
 
@@ -971,6 +1014,8 @@ export class GameEngine {
 
   private endBattle(winner: Team): void {
     this.running = false;
+    // Lights up: the result screen shows where everyone really was.
+    if (this.night) this.renderer?.setNightView(null, this.units);
     this.renderer?.ticker.remove(this.tick, this);
     this.projectiles = [];
     this.renderer?.renderProjectiles([]);
@@ -1173,6 +1218,7 @@ export class GameEngine {
     this.renderer?.effects?.clear();
     this.renderer?.clearCtfGraphics();
     if (this.expedition) this.renderer?.renderExtractionZone(null);
+    this.renderer?.setNightView(null);
     this.renderer?.resetCamera();
   }
 

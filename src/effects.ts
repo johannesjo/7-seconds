@@ -492,6 +492,11 @@ export class EffectsManager {
   private flankCueTimes = new Map<string, number>();
   onCue: ((cue: FeedbackCue) => void) | null = null;
 
+  /** The ground-stain layer, which sits right above the terrain. */
+  get groundLayer(): Container {
+    return this.stainLayer;
+  }
+
   /** Without a pixiRenderer (headless/tests) stains stay as plain Graphics. */
   constructor(stage: Container, private pixiRenderer: PixiRenderer | null = null) {
     this.stainLayer = new Container();

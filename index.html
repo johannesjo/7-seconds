@@ -169,6 +169,10 @@
     .difficulty-option strong { font-size: 17px; }
     .difficulty-detail, .difficulty-record { font-size: 13px; color: var(--color-online-status); }
     .difficulty-record:empty { display: none; }
+    #difficulty-screen .night-toggle { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 56px; margin-top: 18px; text-align: left; }
+    #difficulty-screen .night-toggle > span { display: flex; flex-direction: column; gap: 4px; }
+    #difficulty-screen .night-toggle::after { content: 'Off' / ''; font-size: 13px; opacity: 0.6; }
+    #difficulty-screen .night-toggle[aria-pressed="true"]::after { content: 'On' / ''; opacity: 1; font-weight: bold; color: var(--color-btn-green-text); }
     .settings-list { display: flex; flex-direction: column; gap: 10px; margin: 20px 0 28px; }
     #settings-screen .setting-toggle { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 48px; text-align: left; font-size: 15px; }
     #settings-screen .setting-toggle[aria-pressed]::after { content: 'Off' / ''; font-size: 13px; opacity: 0.6; }
@@ -820,6 +824,7 @@
         <button type="button" class="difficulty-option" data-difficulty="normal"><strong>Normal</strong><span class="difficulty-detail">Even armies</span><span class="difficulty-record"></span></button>
         <button type="button" class="difficulty-option" data-difficulty="hard"><strong>Hard</strong><span class="difficulty-detail">One extra enemy</span><span class="difficulty-record"></span></button>
       </div>
+      <button type="button" id="night-toggle" class="night-toggle" aria-pressed="false"><span><strong>Night battle</strong><span class="difficulty-detail">Experimental: units only see nearby, firing gives them away</span></span></button>
     </div>
   </div>
 

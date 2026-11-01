@@ -619,8 +619,8 @@ function separateUnits(units, obstacles = []) {
 function hasLineOfSight(a, b, obstacles, padding = 0) {
   return !obstacles.some((o) => segmentHitsRect(a, b, o, padding));
 }
-function findTarget(attacker, allUnits, preferredId, obstacles = []) {
-  const enemies = allUnits.filter((u) => u.alive && u.team !== attacker.team);
+function findTarget(attacker, allUnits, preferredId, obstacles = [], canSee) {
+  const enemies = allUnits.filter((u) => u.alive && u.team !== attacker.team && (!canSee || canSee(u)));
   if (enemies.length === 0) return null;
   if (preferredId) {
     const preferred = enemies.find((u) => u.id === preferredId);
@@ -643,18 +643,19 @@ function findTarget(attacker, allUnits, preferredId, obstacles = []) {
   }
   return nearestVisible ?? nearestAny;
 }
-function focusTarget(unit, allUnits) {
+function focusTarget(unit, allUnits, canSee) {
   const id = unit.attackTargetId;
   if (!id) return null;
   const target = allUnits.find((u) => u.id === id && u.alive && u.team !== unit.team) ?? null;
   if (!target) unit.attackTargetId = null;
+  if (target && canSee && !canSee(target)) return null;
   return target;
 }
-function findCombatTarget(unit, allUnits, obstacles, elevationZones) {
+function findCombatTarget(unit, allUnits, obstacles, elevationZones, canSee) {
   const canShoot = (t) => isInRange(unit, t, elevationZones) && hasLineOfSight(unit.pos, t.pos, obstacles, unit.projectileRadius);
-  const focus = focusTarget(unit, allUnits);
+  const focus = focusTarget(unit, allUnits, canSee);
   if (focus && canShoot(focus)) return focus;
-  const nearest = findTarget(unit, allUnits, null, obstacles);
+  const nearest = findTarget(unit, allUnits, null, obstacles, canSee);
   if (nearest && canShoot(nearest)) return nearest;
   if (focus && hasLineOfSight(unit.pos, focus.pos, obstacles)) return focus;
   return nearest;
@@ -1018,13 +1019,14 @@ function checkCtfCapture(state) {
 function dist2(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
-function findMortarTarget(mortar, allUnits, elevationZones) {
-  const focus = focusTarget(mortar, allUnits);
+function findMortarTarget(mortar, allUnits, elevationZones, canSee) {
+  const focus = focusTarget(mortar, allUnits, canSee);
   if (focus && mortarCanReach(mortar, focus, elevationZones)) return focus;
   let best = null;
   let bestDist = Infinity;
   for (const u of allUnits) {
     if (!u.alive || u.team === mortar.team || !mortarCanReach(mortar, u, elevationZones)) continue;
+    if (canSee && !canSee(u)) continue;
     const d = dist2(mortar.pos, u.pos);
     if (d < bestDist) {
       best = u;
@@ -1475,6 +1477,105 @@ function clampToMap(p) {
   };
 }
 
+// src/night.ts
+var NIGHT_SIGHT = {
+  soldier: 140,
+  sniper: 170,
+  blade: 125,
+  zombie: 120,
+  shielder: 130,
+  bomber: 110,
+  mortar: 110,
+  rocketeer: 140
+};
+var MUZZLE_REVEAL_S = 1;
+var DAWN = { fromRound: 5, stepPerRound: 0.15 };
+function dawnScale(round) {
+  return 1 + DAWN.stepPerRound * Math.max(0, round - DAWN.fromRound + 1);
+}
+function sightRadius(unit, zones = [], scale = 1) {
+  const level = getElevationLevel(unit.pos, zones);
+  return NIGHT_SIGHT[unit.type] * scale * (1 + ELEVATION_RANGE_BONUS * level);
+}
+function unitSees(viewer, target, obstacles, zones = [], scale = 1) {
+  if (!viewer.alive || !target.alive) return false;
+  const d = Math.hypot(target.pos.x - viewer.pos.x, target.pos.y - viewer.pos.y);
+  if (d > sightRadius(viewer, zones, scale) + target.radius) return false;
+  return hasLineOfSight(viewer.pos, target.pos, obstacles);
+}
+function teamVisibleEnemies(team, units, obstacles, zones = [], revealed = /* @__PURE__ */ new Map(), scale = 1) {
+  const seen = /* @__PURE__ */ new Set();
+  const friends = units.filter((u) => u.alive && u.team === team);
+  for (const enemy of units) {
+    if (!enemy.alive || enemy.team === team) continue;
+    if ((revealed.get(enemy.id) ?? 0) > 0 || friends.some((f) => unitSees(f, enemy, obstacles, zones, scale))) {
+      seen.add(enemy.id);
+    }
+  }
+  return seen;
+}
+var NightVision = class {
+  /** Seconds of muzzle-flash reveal left, by unit id. */
+  revealed = /* @__PURE__ */ new Map();
+  /** Enemies each team sees right now. */
+  visible = { blue: /* @__PURE__ */ new Set(), red: /* @__PURE__ */ new Set() };
+  /** Where each team last saw each enemy (by enemy id). */
+  lastSeen = { blue: /* @__PURE__ */ new Map(), red: /* @__PURE__ */ new Map() };
+  /** Sight multiplier for the current round (see dawnScale). */
+  sightScale = 1;
+  /** Per-team targeting filters (built once; the engine asks every tick). */
+  canSee = {
+    blue: (enemy) => this.visible.blue.has(enemy.id),
+    red: (enemy) => this.visible.red.has(enemy.id)
+  };
+  /** A new round starts: dawn may have pushed sight further. */
+  setRound(round) {
+    this.sightScale = dawnScale(round);
+  }
+  /** Start of battle: scouts report the enemy's deployment, so round 1 can
+   *  be planned against real (soon stale) positions. */
+  seedDeployment(units) {
+    for (const u of units) {
+      if (!u.alive) continue;
+      const viewer = u.team === "blue" ? "red" : "blue";
+      this.lastSeen[viewer].set(u.id, { x: u.pos.x, y: u.pos.y });
+    }
+  }
+  /** A unit fired: it stands out for MUZZLE_REVEAL_S. */
+  noteFire(unit) {
+    this.revealed.set(unit.id, MUZZLE_REVEAL_S);
+  }
+  /** Round over: muzzle flashes fade. Where the shooters stood is kept as
+   *  their last-known position (call after a final update). */
+  endRound() {
+    this.revealed.clear();
+  }
+  /** Advance reveal timers by one fixed step. */
+  tick(dt) {
+    for (const [id, t] of this.revealed) {
+      if (t - dt <= 0) this.revealed.delete(id);
+      else this.revealed.set(id, t - dt);
+    }
+  }
+  /** Recompute what both teams see, and remember where seen enemies are. */
+  update(units, obstacles, zones = []) {
+    for (const team of ["blue", "red"]) {
+      const seen = teamVisibleEnemies(team, units, obstacles, zones, this.revealed, this.sightScale);
+      this.visible[team] = seen;
+      const memory = this.lastSeen[team];
+      for (const u of units) {
+        if (u.team === team) continue;
+        if (!u.alive) memory.delete(u.id);
+        else if (seen.has(u.id)) memory.set(u.id, { x: u.pos.x, y: u.pos.y });
+      }
+    }
+  }
+  /** Whether `team` may target `enemy` right now. */
+  canTarget(team, enemy) {
+    return this.visible[team].has(enemy.id);
+  }
+};
+
 // src/game.ts
 var FIXED_DT = 1 / 60;
 var HIT_STOP = { scale: 0.15, seconds: 0.06 };
@@ -1544,6 +1645,9 @@ var GameEngine = class _GameEngine {
   evacCalledRound = null;
   extracted = false;
   extractedCount = 0;
+  /** Night battle (vs AI only): limited sight, see src/night.ts. */
+  nightMode = false;
+  night = null;
   constructor(renderer, onEvent, opts) {
     this.renderer = renderer;
     this.onEvent = onEvent;
@@ -1563,6 +1667,7 @@ var GameEngine = class _GameEngine {
     this.layoutIndex = opts?.layoutIndex;
     this.composition = opts?.composition;
     this.expedition = opts?.expedition ?? null;
+    this.nightMode = opts?.night ?? false;
     this.onPhaseChangeCallback = opts?.onPhaseChange;
   }
   get phase() {
@@ -1627,10 +1732,18 @@ var GameEngine = class _GameEngine {
     this.elapsedTime = 0;
     this.roundTimer = 0;
     this.running = true;
+    if (this.nightMode) {
+      this.night = new NightVision();
+      this.night.seedDeployment(this.units);
+      this.night.update(this.units, this.obstacles, this.elevationZones);
+    }
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer.highlightZonesAt(pos));
       this.pathDrawer.focusFire = !this.practice && !this.onlineHostMode;
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
+      const night = this.night;
+      this.pathDrawer.canSeeEnemy = night ? night.canSee.blue : null;
+      this.renderer.setNightView(night ? { team: "blue", vision: night } : null);
       this.renderer.renderElevationZones(this.elevationZones);
       this.renderer.renderObstacles(this.obstacles);
       if (this.ctfMode) {
@@ -1675,6 +1788,12 @@ var GameEngine = class _GameEngine {
       const battleView = this.expedition ? this.renderer?.stageView() : void 0;
       if (this.expedition) this.spawnExpeditionPursuers();
       this.renderer?.resetCamera();
+      if (this.night) {
+        this.night.update(this.units, this.obstacles, this.elevationZones);
+        this.night.endRound();
+        this.night.setRound(this.roundNumber);
+        this.night.update(this.units, this.obstacles, this.elevationZones);
+      }
       for (const u of this.units) {
         u.rocketFired = false;
         if (u.team === "blue") u.rocketPath = [];
@@ -1860,6 +1979,10 @@ var GameEngine = class _GameEngine {
     const redDelayed = this.updateHordeDelay(dt);
     if (this.aiMode) this.updateChaseAI();
     this.updateMovement(dt, redDelayed);
+    if (this.night) {
+      this.night.tick(dt);
+      this.night.update(this.units, this.obstacles, this.elevationZones);
+    }
     this.updateCombat(dt);
     const hits = this.updateProjectiles(dt);
     this.dispatchHitEffects(hits);
@@ -1913,7 +2036,7 @@ var GameEngine = class _GameEngine {
         this.updateRocketeer(unit, dt);
         continue;
       }
-      const target = findCombatTarget(unit, this.units, this.obstacles, this.elevationZones);
+      const target = findCombatTarget(unit, this.units, this.obstacles, this.elevationZones, this.sightFilter(unit));
       if (unit.type === "blade") {
         if (target) {
           const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
@@ -1951,6 +2074,7 @@ var GameEngine = class _GameEngine {
         const projectiles = tryFireProjectile(unit, target, dt, this.elevationZones);
         if (projectiles.length > 0) {
           this.projectiles.push(...projectiles);
+          this.night?.noteFire(unit);
           this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, projectiles[0].damage);
           this.replayEvents.push({
             frame: this.replayFrames.length,
@@ -1979,8 +2103,9 @@ var GameEngine = class _GameEngine {
   }
   /** Mortar: lob shells at any enemy in its firing band, over obstacles. */
   updateMortar(unit, dt) {
-    const target = findMortarTarget(unit, this.units, this.elevationZones);
-    const facing = target ?? focusTarget(unit, this.units) ?? findTarget(unit, this.units, null, this.obstacles);
+    const canSee = this.sightFilter(unit);
+    const target = findMortarTarget(unit, this.units, this.elevationZones, canSee);
+    const facing = target ?? focusTarget(unit, this.units, canSee) ?? findTarget(unit, this.units, null, this.obstacles, canSee);
     if (facing) {
       updateGunAngle(unit, Math.atan2(facing.pos.y - unit.pos.y, facing.pos.x - unit.pos.x), dt);
     }
@@ -1991,6 +2116,7 @@ var GameEngine = class _GameEngine {
     const shells = fireMortar(unit, target, dt);
     if (shells.length === 0) return;
     this.projectiles.push(...shells);
+    this.night?.noteFire(unit);
     this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, shells[0].damage, "shell");
     this.recordFire(unit, shells[0].damage, "shell");
   }
@@ -2000,12 +2126,17 @@ var GameEngine = class _GameEngine {
       const rocket = launchRocket(unit);
       if (!rocket) return;
       this.projectiles.push(rocket);
+      this.night?.noteFire(unit);
       this.renderer?.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius, rocket.damage, "rocket");
       this.recordFire(unit, rocket.damage, "rocket");
       return;
     }
-    const target = findTarget(unit, this.units, null, this.obstacles);
+    const target = findTarget(unit, this.units, null, this.obstacles, this.sightFilter(unit));
     if (target) updateGunAngle(unit, Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x), dt);
+  }
+  /** Night: which enemies `unit`'s team may target. Undefined (all) by day. */
+  sightFilter(unit) {
+    return this.night?.canSee[unit.team];
   }
   recordFire(unit, damage, weapon) {
     this.replayEvents.push({
@@ -2177,8 +2308,9 @@ var GameEngine = class _GameEngine {
       const speed = u.vel.x * u.vel.x + u.vel.y * u.vel.y;
       if (speed > 1 || u.waypoints.length > 0) return false;
       if (u.type === "rocketeer" && !u.rocketFired && (u.rocketPath?.length ?? 0) > 0) return false;
-      if (u.type === "mortar") return !findMortarTarget(u, this.units, this.elevationZones);
-      const target = findTarget(u, this.units, null, this.obstacles);
+      const canSee = this.sightFilter(u);
+      if (u.type === "mortar") return !findMortarTarget(u, this.units, this.elevationZones, canSee);
+      const target = findTarget(u, this.units, null, this.obstacles, canSee);
       return !target || !isInRange(u, target, this.elevationZones);
     });
     this.idleTime = idle ? this.idleTime + dt : 0;
@@ -2260,6 +2392,7 @@ var GameEngine = class _GameEngine {
   }
   endBattle(winner) {
     this.running = false;
+    if (this.night) this.renderer?.setNightView(null, this.units);
     this.renderer?.ticker.remove(this.tick, this);
     this.projectiles = [];
     this.renderer?.renderProjectiles([]);
@@ -2437,6 +2570,7 @@ var GameEngine = class _GameEngine {
     this.renderer?.effects?.clear();
     this.renderer?.clearCtfGraphics();
     if (this.expedition) this.renderer?.renderExtractionZone(null);
+    this.renderer?.setNightView(null);
     this.renderer?.resetCamera();
   }
   /** Remember where the latest kill happened and briefly freeze the action. */
