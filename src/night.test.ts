@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createUnit, findTarget } from './units';
+import { createUnit, findTarget, findCombatTarget } from './units';
 import { findMortarTarget } from './ordnance';
 import { GameEngine } from './game';
 import { NIGHT_SIGHT, MUZZLE_REVEAL_S, DAWN, NightVision, dawnScale, sightRadius, sightPolygon, teamVisibleEnemies, unitSees } from './night';
@@ -139,6 +139,17 @@ describe('targeting at night', () => {
     expect(findTarget(blue, units, null, [])!.id).toBe('near');
     expect(findTarget(blue, units, null, [], u => u.id === 'far')!.id).toBe('far');
     expect(findTarget(blue, units, null, [], () => false)).toBeNull();
+  });
+
+  it('a focused enemy out of sight is skipped but stays focused', () => {
+    const blue = createUnit('b', 'soldier', 'blue', { x: 180, y: 400 });
+    const seen = createUnit('seen', 'soldier', 'red', { x: 180, y: 320 });
+    const hidden = createUnit('hidden', 'soldier', 'red', { x: 120, y: 330 });
+    blue.attackTargetId = 'hidden';
+    const units = [blue, seen, hidden];
+    expect(findCombatTarget(blue, units, [], [])!.id).toBe('hidden');
+    expect(findCombatTarget(blue, units, [], [], u => u.id === 'seen')!.id).toBe('seen');
+    expect(blue.attackTargetId).toBe('hidden');
   });
 
   it('mortars need a spotter', () => {

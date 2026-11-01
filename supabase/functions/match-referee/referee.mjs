@@ -641,6 +641,23 @@ function findTarget(attacker, allUnits, preferredId, obstacles = [], canSee) {
   }
   return nearestVisible ?? nearestAny;
 }
+function focusTarget(unit, allUnits, canSee) {
+  const id = unit.attackTargetId;
+  if (!id) return null;
+  const target = allUnits.find((u) => u.id === id && u.alive && u.team !== unit.team) ?? null;
+  if (!target) unit.attackTargetId = null;
+  if (target && canSee && !canSee(target)) return null;
+  return target;
+}
+function findCombatTarget(unit, allUnits, obstacles, elevationZones, canSee) {
+  const canShoot = (t) => isInRange(unit, t, elevationZones) && hasLineOfSight(unit.pos, t.pos, obstacles, unit.projectileRadius);
+  const focus = focusTarget(unit, allUnits, canSee);
+  if (focus && canShoot(focus)) return focus;
+  const nearest = findTarget(unit, allUnits, null, obstacles, canSee);
+  if (nearest && canShoot(nearest)) return nearest;
+  if (focus && hasLineOfSight(unit.pos, focus.pos, obstacles)) return focus;
+  return nearest;
+}
 function mortarCanReach(mortar, target, elevationZones) {
   const d = distance(mortar.pos, target.pos);
   const max = mortar.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(mortar.pos, elevationZones));
@@ -1001,6 +1018,8 @@ function dist2(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 function findMortarTarget(mortar, allUnits, elevationZones, canSee) {
+  const focus = focusTarget(mortar, allUnits, canSee);
+  if (focus && mortarCanReach(mortar, focus, elevationZones)) return focus;
   let best = null;
   let bestDist = Infinity;
   for (const u of allUnits) {
@@ -1590,6 +1609,7 @@ var GameEngine = class _GameEngine {
     }
     if (this.renderer) {
       this.pathDrawer = this.renderer.createPathDrawer((pos) => this.renderer.highlightZonesAt(pos));
+      this.pathDrawer.focusFire = !this.practice && !this.onlineHostMode;
       this.pathDrawer.onInspectUnit = this.onInspectUnit ?? null;
       const night = this.night;
       this.pathDrawer.canSeeEnemy = night ? night.canSee.blue : null;
@@ -1792,7 +1812,7 @@ var GameEngine = class _GameEngine {
         this.updateRocketeer(unit, dt);
         continue;
       }
-      const target = findTarget(unit, this.units, null, this.obstacles, this.sightFilter(unit));
+      const target = findCombatTarget(unit, this.units, this.obstacles, this.elevationZones, this.sightFilter(unit));
       if (unit.type === "blade") {
         if (target) {
           const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
@@ -1861,7 +1881,7 @@ var GameEngine = class _GameEngine {
   updateMortar(unit, dt) {
     const canSee = this.sightFilter(unit);
     const target = findMortarTarget(unit, this.units, this.elevationZones, canSee);
-    const facing = target ?? findTarget(unit, this.units, null, this.obstacles, canSee);
+    const facing = target ?? focusTarget(unit, this.units, canSee) ?? findTarget(unit, this.units, null, this.obstacles, canSee);
     if (facing) {
       updateGunAngle(unit, Math.atan2(facing.pos.y - unit.pos.y, facing.pos.x - unit.pos.x), dt);
     }

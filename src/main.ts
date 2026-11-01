@@ -715,8 +715,8 @@ function startGame(retry = false): void {
   planningOverlay.classList.toggle('tutorial', tutorialLesson !== null);
   planningInstructions.textContent = tutorialLesson === null
     ? nightActive
-      ? 'Click a unit, drag to draw a path. Night: you only see what your units see; faded enemies are where they were last seen.'
-      : 'Click a unit, drag to draw a path. Repeat for each unit.'
+      ? 'Drag from a unit to draw its path. Night: you only see what your units see; faded enemies are where they were last seen.'
+      : 'Drag from a unit to draw its path. Then tap an enemy to focus its fire.'
     : TUTORIAL_LESSONS[tutorialLesson].instruction;
   confirmBtn.textContent = tutorialLesson === null ? 'Done' : 'Fight';
   rematchBtn.textContent = 'Rematch';

@@ -8,7 +8,7 @@ import {
   MAP_WIDTH, MAP_HEIGHT, COLLISION_HITBOX_SCALE,
   MORTAR_BLAST_RADIUS, MORTAR_EDGE_DAMAGE, MORTAR_FLIGHT_S, ROCKET_BLAST_RADIUS, ROCKET_MAX_PATH,
 } from './constants';
-import { applyDamage, mortarCanReach, segmentHitsRect } from './units';
+import { applyDamage, focusTarget, mortarCanReach, segmentHitsRect } from './units';
 
 export interface OrdnanceHit {
   pos: Vec2;
@@ -33,6 +33,9 @@ function dist(a: Vec2, b: Vec2): number {
 /** The mortar's target: the nearest enemy inside its firing band. At night
  *  `canSee` limits it to enemies a spotter can see. */
 export function findMortarTarget(mortar: Unit, allUnits: Unit[], elevationZones: ElevationZone[], canSee?: (enemy: Unit) => boolean): Unit | null {
+  // A focused enemy inside the firing band takes priority over the nearest.
+  const focus = focusTarget(mortar, allUnits, canSee);
+  if (focus && mortarCanReach(mortar, focus, elevationZones)) return focus;
   let best: Unit | null = null;
   let bestDist = Infinity;
   for (const u of allUnits) {
