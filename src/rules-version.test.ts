@@ -53,7 +53,7 @@ function orders(state: OnlineGameState, team: Team, round: number): PathList {
 }
 
 function fingerprint(state: OnlineGameState): string {
-  return state.units.map(u => `${u.id}:${u.x.toFixed(2)},${u.y.toFixed(2)},${u.hp.toFixed(2)}`).join(';');
+  return state.units.map(u => `${u.id}:${u.x.toFixed(2)},${u.y.toFixed(2)},${u.hp.toFixed(2)},${(u.hunkerSetup ?? 0).toFixed(2)}`).join(';');
 }
 
 function fnv(text: string): string {
@@ -82,9 +82,9 @@ function outcomes(): string[] {
 }
 
 const GOLDEN: string[] = [
-  "47650fcb-5fb7700d-41f55768", "47650fcb-5fb7700d-41f55768", "47650fcb-5fb7700d-41f55768",
-  "5547cd8e-a85e0e7c-90f18790", "5547cd8e-a85e0e7c-90f18790", "5547cd8e-a85e0e7c-90f18790",
-  "3dc4bfdc-1e4f0e6f-08efe825", "3dc4bfdc-1e4f0e6f-08efe825", "3dc4bfdc-1e4f0e6f-08efe825",
+  "2b2674fd-bd771193-47115910", "2b2674fd-bd771193-47115910", "2b2674fd-bd771193-47115910",
+  "741bf1fa-709a7d7c-3c69304e", "741bf1fa-709a7d7c-3c69304e", "741bf1fa-709a7d7c-3c69304e",
+  "0e3919da-9ac68caf-6ed13a79", "0e3919da-9ac68caf-6ed13a79", "0e3919da-9ac68caf-6ed13a79",
 ];
 
 describe('online rules version', () => {

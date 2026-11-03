@@ -1,5 +1,6 @@
 import { Unit, UnitType, Team, Vec2, Obstacle, Projectile, ElevationZone, ReplayUnitSnapshot, ReplayProjectileSnapshot } from './types';
-import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE, SHIELD_MAX_HITS, MORTAR_MIN_RANGE } from './constants';
+import { UNIT_STATS, ARMY_COMPOSITION, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, FLANK_ANGLE_THRESHOLD, FLANK_DAMAGE_MULTIPLIER, CTF_BASE_ZONE_WIDTH, CTF_ARMY_COMPOSITION, COLLISION_HITBOX_SCALE, SHIELD_MAX_HITS, MORTAR_MIN_RANGE, HUNKER_FRONT_DAMAGE_REDUCTION, HUNKER_TURN_MULTIPLIER } from './constants';
+import { isHunkered } from './hunker';
 
 interface ProjectileHit {
   pos: Vec2;
@@ -178,7 +179,7 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
 }
 
 /** Create a Unit from an online game state snapshot (shared by engine + guest). */
-export function createUnitFromState(s: { id: string; type: UnitType; team: Team; x: number; y: number; hp: number; maxHp: number; radius: number; speed: number; range: number; gunAngle: number }): Unit {
+export function createUnitFromState(s: { id: string; type: UnitType; team: Team; x: number; y: number; hp: number; maxHp: number; radius: number; speed: number; range: number; gunAngle: number; hunkerSetup?: number }): Unit {
   const unit = createUnit(s.id, s.type, s.team, { x: s.x, y: s.y });
   unit.hp = s.hp;
   unit.maxHp = s.maxHp;
@@ -186,6 +187,7 @@ export function createUnitFromState(s: { id: string; type: UnitType; team: Team;
   unit.alive = s.hp > 0;
   unit.speed = s.speed;
   unit.range = s.range;
+  if (s.hunkerSetup) unit.hunkerSetup = s.hunkerSetup;
   return unit;
 }
 
@@ -378,7 +380,7 @@ export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): vo
   // Normalize to [-PI, PI] for shortest arc
   diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
   if (diff < -Math.PI) diff += 2 * Math.PI;
-  const maxStep = unit.turnSpeed * dt;
+  const maxStep = unit.turnSpeed * (isHunkered(unit) ? HUNKER_TURN_MULTIPLIER : 1) * dt;
   if (Math.abs(diff) <= maxStep) {
     unit.gunAngle = desiredAngle;
   } else {
@@ -416,6 +418,8 @@ export function advanceWaypoint(unit: Unit, dt: number = 0): void {
   const stuck = unit.moveTarget && (unit.stuckTime ?? 0) > 0.25;
 
   if (atTarget || stuck) {
+    // Giving up on the last point is not finishing the move: no hunker there.
+    if (!atTarget && unit.waypoints.length === 0) unit.pathBlocked = true;
     unit.stuckTime = 0;
     unit.moveTarget = unit.waypoints.length > 0
       ? unit.waypoints.shift()!
@@ -1106,7 +1110,10 @@ export function updateProjectiles(
         }
 
         const flanked = isFlanked(projAngle, unit.gunAngle);
-        let actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
+        // Hunkering only blunts frontal bullets; flank hits keep their bonus.
+        const actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER
+          : isHunkered(unit) ? p.damage * (1 - HUNKER_FRONT_DAMAGE_REDUCTION)
+          : p.damage;
         // Knockback — apply velocity impulse in projectile direction
         const knockback = p.knockback ?? p.damage * 0.4;
         const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
@@ -1163,6 +1170,7 @@ export function snapshotToUnit(s: ReplayUnitSnapshot): Unit {
     shieldHits: s.shieldHits,
     rocketFired: s.rocketFired,
     boss: s.boss,
+    hunkerSetup: s.hunkerSetup,
     speed: 0,
     damage: 0,
     range: 0,

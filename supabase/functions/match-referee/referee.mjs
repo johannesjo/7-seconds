@@ -43,6 +43,9 @@ var ELEVATION_RANGE_BONUS = 0.2;
 var FLANK_ANGLE_THRESHOLD = Math.PI / 3;
 var FLANK_DAMAGE_MULTIPLIER = 1.5;
 var SHIELD_MAX_HITS = 7;
+var HUNKER_SETUP_S = 0.75;
+var HUNKER_FRONT_DAMAGE_REDUCTION = 0.3;
+var HUNKER_TURN_MULTIPLIER = 0.5;
 var COLLISION_HITBOX_SCALE = 0.8;
 var CTF_FLAG_PICKUP_RADIUS = 25;
 var CTF_BASE_ZONE_WIDTH = 100;
@@ -62,10 +65,21 @@ function isValidRect(r) {
   return !!r && isFiniteNumber(r.x) && isFiniteNumber(r.y) && isFiniteNumber(r.w) && r.w >= 0 && isFiniteNumber(r.h) && r.h >= 0;
 }
 function isValidUnit(u) {
-  return !!u && typeof u.id === "string" && typeof u.type === "string" && Object.prototype.hasOwnProperty.call(UNIT_STATS, u.type) && VALID_TEAMS.has(u.team) && isFiniteNumber(u.x) && isFiniteNumber(u.y) && isFiniteNumber(u.hp) && u.hp >= 0 && isFiniteNumber(u.maxHp) && u.maxHp > 0 && isFiniteNumber(u.radius) && u.radius >= 0 && isFiniteNumber(u.speed) && u.speed >= 0 && isFiniteNumber(u.range) && u.range >= 0 && isFiniteNumber(u.gunAngle);
+  return !!u && typeof u.id === "string" && typeof u.type === "string" && Object.prototype.hasOwnProperty.call(UNIT_STATS, u.type) && VALID_TEAMS.has(u.team) && isFiniteNumber(u.x) && isFiniteNumber(u.y) && isFiniteNumber(u.hp) && u.hp >= 0 && isFiniteNumber(u.maxHp) && u.maxHp > 0 && isFiniteNumber(u.radius) && u.radius >= 0 && isFiniteNumber(u.speed) && u.speed >= 0 && isFiniteNumber(u.range) && u.range >= 0 && isFiniteNumber(u.gunAngle) && (u.hunkerSetup === void 0 || isFiniteNumber(u.hunkerSetup) && u.hunkerSetup >= 0);
 }
 function isPlausibleGameState(state) {
   return !!state && Array.isArray(state.units) && state.units.length <= MAX_ONLINE_UNITS && Array.isArray(state.obstacles) && state.obstacles.length <= MAX_ONLINE_OBSTACLES && Array.isArray(state.elevationZones) && state.elevationZones.length <= MAX_ONLINE_ELEVATION_ZONES && Number.isFinite(state.mapWidth) && state.mapWidth > 0 && Number.isFinite(state.mapHeight) && state.mapHeight > 0 && state.units.every(isValidUnit) && new Set(state.units.map((u) => u.id)).size === state.units.length && state.obstacles.every(isValidRect) && state.elevationZones.every(isValidRect);
+}
+
+// src/hunker.ts
+var EPSILON = 1e-6;
+function updateHunker(unit, dt) {
+  if (unit.type !== "soldier" || !unit.alive) return;
+  const moving = unit.moveTarget !== null || unit.waypoints.length > 0 || unit.pathBlocked === true;
+  unit.hunkerSetup = moving ? 0 : Math.min(HUNKER_SETUP_S, (unit.hunkerSetup ?? 0) + dt);
+}
+function isHunkered(unit) {
+  return (unit.hunkerSetup ?? 0) >= HUNKER_SETUP_S - EPSILON;
 }
 
 // src/units.ts
@@ -211,6 +225,7 @@ function createUnitFromState(s) {
   unit.alive = s.hp > 0;
   unit.speed = s.speed;
   unit.range = s.range;
+  if (s.hunkerSetup) unit.hunkerSetup = s.hunkerSetup;
   return unit;
 }
 function nudgeOutOfBlocks(pos, blocks, padding = 4) {
@@ -319,7 +334,7 @@ function updateGunAngle(unit, desiredAngle, dt) {
   let diff = desiredAngle - unit.gunAngle;
   diff = (diff + Math.PI) % (2 * Math.PI) - Math.PI;
   if (diff < -Math.PI) diff += 2 * Math.PI;
-  const maxStep = unit.turnSpeed * dt;
+  const maxStep = unit.turnSpeed * (isHunkered(unit) ? HUNKER_TURN_MULTIPLIER : 1) * dt;
   if (Math.abs(diff) <= maxStep) {
     unit.gunAngle = desiredAngle;
   } else {
@@ -344,6 +359,7 @@ function advanceWaypoint(unit, dt = 0) {
   }
   const stuck = unit.moveTarget && (unit.stuckTime ?? 0) > 0.25;
   if (atTarget || stuck) {
+    if (!atTarget && unit.waypoints.length === 0) unit.pathBlocked = true;
     unit.stuckTime = 0;
     unit.moveTarget = unit.waypoints.length > 0 ? unit.waypoints.shift() : null;
   }
@@ -856,7 +872,7 @@ function updateProjectiles(projectiles, units, dt, obstacles = []) {
           }
         }
         const flanked = isFlanked(projAngle, unit.gunAngle);
-        let actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
+        const actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : isHunkered(unit) ? p.damage * (1 - HUNKER_FRONT_DAMAGE_REDUCTION) : p.damage;
         const knockback = p.knockback ?? p.damage * 0.4;
         const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
         if (projSpeed > 0 && knockback > 0) {
@@ -1858,6 +1874,7 @@ var GameEngine = class _GameEngine {
       this.accumulator = 0;
       this.simulationTick = 0;
       this.rng = createRng(this.seed + this.roundNumber);
+      this.clearBlockedPaths();
       this.renderer?.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
     }
     this.onEvent("phase-change", { phase, round: this.roundNumber });
@@ -1939,6 +1956,10 @@ var GameEngine = class _GameEngine {
     if (blue.length === 0) return;
     const frame = planningFrame(blue.map((u) => u.pos), drawer.zoomLimit, MAP_WIDTH, MAP_HEIGHT);
     drawer.focusOn(frame.center, frame.zoom, battleView && battleView.zoom > 1.001 ? 450 : 800);
+  }
+  /** A move that ended stuck only cancels hunkering for its own round. */
+  clearBlockedPaths() {
+    for (const u of this.units) u.pathBlocked = false;
   }
   /** Generate AI paths for red units using position-scoring system. Zombies,
    *  shielders, and bombers are left to the real-time chase AI. */
@@ -2044,6 +2065,7 @@ var GameEngine = class _GameEngine {
       moveUnit(unit, dt, this.obstacles, this.units, this.rng);
     }
     separateUnits(this.units, this.obstacles);
+    for (const unit of this.units) updateHunker(unit, dt);
   }
   /** Auto-target nearest enemy, fire projectiles, handle melee blades. */
   updateCombat(dt) {
@@ -2360,7 +2382,8 @@ var GameEngine = class _GameEngine {
         radius: u.radius,
         shieldHits: u.shieldHits,
         ...u.rocketFired ? { rocketFired: true } : {},
-        ...u.boss ? { boss: u.boss } : {}
+        ...u.boss ? { boss: u.boss } : {},
+        ...u.hunkerSetup ? { hunkerSetup: u.hunkerSetup } : {}
       })),
       projectiles: this.projectiles.map((p) => ({
         x: p.pos.x,
@@ -2452,6 +2475,7 @@ var GameEngine = class _GameEngine {
     this.endingBattle = false;
     this.pendingWinner = null;
     this.rng = createRng(roundSeed ?? this.seed + this.roundNumber);
+    this.clearBlockedPaths();
     this.replayFrames = [];
     this.replayEvents = [];
   }
@@ -2539,7 +2563,9 @@ var GameEngine = class _GameEngine {
         radius: u.radius,
         speed: u.speed,
         range: u.range,
-        gunAngle: u.gunAngle
+        gunAngle: u.gunAngle,
+        // Hunkering carries into the next round, as it does in a live game.
+        ...u.hunkerSetup ? { hunkerSetup: u.hunkerSetup } : {}
       })),
       obstacles: this.obstacles,
       elevationZones: this.elevationZones,
@@ -2642,7 +2668,7 @@ function adjustForDifficulty(composition, difficulty) {
 }
 
 // src/online-plan.ts
-var RULES_VERSION = 3;
+var RULES_VERSION = 4;
 var MAX_PLAN_POINTS = 100;
 var MAX_COORD = 1e4;
 function quantize(v) {

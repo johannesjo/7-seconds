@@ -1,6 +1,6 @@
 import { Graphics, Container, Rectangle, Text } from 'pixi.js';
 import { Unit, Team, Vec2, ElevationZone } from './types';
-import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S, ROCKET_MAX_PATH, ROCKET_BLAST_RADIUS, MORTAR_BLAST_RADIUS, MORTAR_MIN_RANGE } from './constants';
+import { PATH_SAMPLE_DISTANCE, UNIT_SELECT_RADIUS, MAP_WIDTH, MAP_HEIGHT, ELEVATION_RANGE_BONUS, ROUND_DURATION_S, ROCKET_MAX_PATH, ROCKET_BLAST_RADIUS, MORTAR_BLAST_RADIUS, MORTAR_MIN_RANGE, FLANK_ANGLE_THRESHOLD } from './constants';
 import { samplePath, clampPathLength } from './path-orders';
 import { getElevationLevel, mortarCanReach } from './units';
 import { Theme, NIGHT_THEME } from './theme';
@@ -368,6 +368,21 @@ export class PathDrawer {
     gfx.stroke();
   }
 
+  /** "Move here and defend": a soldier that reaches the end of its path in
+   *  time hunkers there, so mark the end with the frontal arc it will hold,
+   *  facing the way it arrives (its gun still turns to the nearest enemy). */
+  private drawHoldMarker(unit: Unit, path: Vec2[], color: number, alpha: number): void {
+    if (unit.type !== 'soldier' || path.length < 2) return;
+    const end = path[path.length - 1];
+    const prev = path[path.length - 2];
+    const facing = Math.atan2(end.y - prev.y, end.x - prev.x);
+    const radius = unit.radius * 1.5;
+    const from = facing - FLANK_ANGLE_THRESHOLD;
+    this.gfx.moveTo(end.x + Math.cos(from) * radius, end.y + Math.sin(from) * radius);
+    this.gfx.arc(end.x, end.y, radius, from, facing + FLANK_ANGLE_THRESHOLD);
+    this.gfx.stroke({ width: 2.5, color, alpha: alpha * 0.9 });
+  }
+
   /** Rocket orders for the active team: each rocketeer's handle, its drawn
    *  flight path and the blast at the end. */
   private renderRockets(): void {
@@ -672,6 +687,7 @@ export class PathDrawer {
       }
 
       const overLimit = travelTime === null || travelTime > ROUND_DURATION_S;
+      if (!overLimit) this.drawHoldMarker(unit, fullPath, color, alpha);
       const timeLabel = this.acquireLabel();
       timeLabel.text = this.timeText(travelTime);
       timeLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.labelFill;
@@ -708,6 +724,7 @@ export class PathDrawer {
       const endpoint = this.rawPoints[this.rawPoints.length - 1];
       this.onZoneHighlight?.(position);
       const rawOverLimit = travelTime === null || travelTime > ROUND_DURATION_S;
+      if (!rawOverLimit) this.drawHoldMarker(this.selectedUnit, this.rawPoints, color, 1);
       const liveLabel = this.acquireLabel();
       liveLabel.text = this.timeText(travelTime);
       liveLabel.style.fill = rawOverLimit ? this.theme.labelWarn : this.theme.labelFill;

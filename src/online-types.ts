@@ -14,6 +14,8 @@ export interface OnlineGameState {
     speed: number;
     range: number;
     gunAngle: number;
+    /** Soldier hunker setup seconds; absent when 0. */
+    hunkerSetup?: number;
   }[];
   obstacles: Obstacle[];
   elevationZones: ElevationZone[];
@@ -72,7 +74,8 @@ function isValidUnit(u: OnlineGameState['units'][number] | null | undefined): bo
     && isFiniteNumber(u.radius) && u.radius >= 0
     && isFiniteNumber(u.speed) && u.speed >= 0
     && isFiniteNumber(u.range) && u.range >= 0
-    && isFiniteNumber(u.gunAngle);
+    && isFiniteNumber(u.gunAngle)
+    && (u.hunkerSetup === undefined || (isFiniteNumber(u.hunkerSetup) && u.hunkerSetup >= 0));
 }
 
 /** Validate a remote game-state snapshot before trusting it. Checks both array

@@ -58,6 +58,12 @@ export interface Unit {
   boss?: BossId;
   /** Expedition lurker: stands still until a blue unit comes near or it is hurt. */
   dormant?: boolean;
+  /** Soldier only: seconds spent setting up since its move ended, capped at
+   *  HUNKER_SETUP_S — reaching it means hunkered. Carries across rounds. */
+  hunkerSetup?: number;
+  /** This round's move ended stuck short of its last point rather than
+   *  completed, so the soldier can't hunker until next round. */
+  pathBlocked?: boolean;
 }
 
 export interface Projectile {
@@ -145,6 +151,8 @@ export interface ReplayUnitSnapshot {
   shieldHits?: number;
   rocketFired?: boolean;
   boss?: BossId;
+  /** Soldier hunker setup seconds (absent when 0). */
+  hunkerSetup?: number;
 }
 
 export interface ReplayProjectileSnapshot {

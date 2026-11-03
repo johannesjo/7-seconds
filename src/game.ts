@@ -2,6 +2,7 @@ import { Unit, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZon
 import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, ROCKET_MAX_PATH } from './constants';
 import { OnlineGameState, MAX_ONLINE_UNITS, MAX_ONLINE_OBSTACLES, MAX_ONLINE_ELEVATION_ZONES } from './online-types';
 import { createArmy, generateRandomComposition, createCtfArmy, createUnitFromState, moveUnit, separateUnits, findTarget, findCombatTarget, focusTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, bladeAoeAttack, bomberExplode } from './units';
+import { updateHunker } from './hunker';
 import { generateBattlefield, generateCtfObstacles, generateCtfElevationZones } from './battlefield';
 import { createCtfState, updateCtfFlags, checkCtfCapture } from './ctf';
 import { findMortarTarget, fireMortar, rocketReady, launchRocket, updateOrdnance, type Explosion } from './ordnance';
@@ -361,6 +362,7 @@ export class GameEngine {
       this.accumulator = 0;
       this.simulationTick = 0;
       this.rng = createRng(this.seed + this.roundNumber);
+      this.clearBlockedPaths();
       this.renderer?.effects?.addRoundStartFlash(MAP_WIDTH, MAP_HEIGHT);
     }
 
@@ -458,6 +460,11 @@ export class GameEngine {
     if (blue.length === 0) return;
     const frame = planningFrame(blue.map(u => u.pos), drawer.zoomLimit, MAP_WIDTH, MAP_HEIGHT);
     drawer.focusOn(frame.center, frame.zoom, battleView && battleView.zoom > 1.001 ? 450 : 800);
+  }
+
+  /** A move that ended stuck only cancels hunkering for its own round. */
+  private clearBlockedPaths(): void {
+    for (const u of this.units) u.pathBlocked = false;
   }
 
   /** Generate AI paths for red units using position-scoring system. Zombies,
@@ -600,6 +607,7 @@ export class GameEngine {
       moveUnit(unit, dt, this.obstacles, this.units, this.rng);
     }
     separateUnits(this.units, this.obstacles);
+    for (const unit of this.units) updateHunker(unit, dt);
   }
 
   /** Auto-target nearest enemy, fire projectiles, handle melee blades. */
@@ -956,6 +964,7 @@ export class GameEngine {
         shieldHits: u.shieldHits,
         ...(u.rocketFired ? { rocketFired: true } : {}),
         ...(u.boss ? { boss: u.boss } : {}),
+        ...(u.hunkerSetup ? { hunkerSetup: u.hunkerSetup } : {}),
       })),
       projectiles: this.projectiles.map(p => ({
         x: p.pos.x,
@@ -1053,6 +1062,7 @@ export class GameEngine {
     this.endingBattle = false;
     this.pendingWinner = null;
     this.rng = createRng(roundSeed ?? (this.seed + this.roundNumber));
+    this.clearBlockedPaths();
     this.replayFrames = [];
     this.replayEvents = [];
   }
@@ -1153,6 +1163,8 @@ export class GameEngine {
         x: u.pos.x, y: u.pos.y,
         hp: u.hp, maxHp: u.maxHp, radius: u.radius,
         speed: u.speed, range: u.range, gunAngle: u.gunAngle,
+        // Hunkering carries into the next round, as it does in a live game.
+        ...(u.hunkerSetup ? { hunkerSetup: u.hunkerSetup } : {}),
       })),
       obstacles: this.obstacles,
       elevationZones: this.elevationZones,

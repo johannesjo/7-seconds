@@ -3,8 +3,9 @@ import { PathDrawer } from './path-drawer';
 import { maxPlanZoom, type ZoomView } from './plan-zoom';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState, Team } from './types';
 import { sightPolygon, type NightVision } from './night';
-import { MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS, MORTAR_BLAST_RADIUS } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS, MORTAR_BLAST_RADIUS, FLANK_ANGLE_THRESHOLD } from './constants';
 import { EffectsManager } from './effects';
+import { hunkerProgress } from './hunker';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
 
@@ -663,6 +664,7 @@ export class Renderer {
           nose.stroke({ width: 1.5, color: this.theme.shieldGoldBright, alpha: 0.4 * integrity });
         }
       }
+      if (unit.type === 'soldier') this.drawHunkerArc(container.getChildAt(3) as Graphics, unit);
       // Rotate body with the gun for person-shaped units
       if (unit.type !== 'blade') {
         (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
@@ -829,8 +831,28 @@ export class Renderer {
       warhead.fill({ color: this.theme.bomber, alpha: 0.9 });
       container.addChild(warhead);
     }
+    if (unit.type === 'soldier') {
+      // Child 3: hunker arc, filled in by drawHunkerArc.
+      container.addChild(new Graphics());
+    }
 
     return container;
+  }
+
+  /** Frontal arc that grows while a soldier sets up and turns solid once it
+   *  is hunkered — it spans the cone that gets the damage reduction. */
+  private drawHunkerArc(g: Graphics, unit: Unit): void {
+    g.clear();
+    const progress = hunkerProgress(unit);
+    if (progress <= 0) return;
+    g.rotation = unit.gunAngle;
+    const half = FLANK_ANGLE_THRESHOLD * progress;
+    const radius = unit.radius * 1.5;
+    const done = progress >= 1;
+    const color = unit.team === 'blue' ? this.theme.bluePathBright : this.theme.redPathBright;
+    g.moveTo(Math.cos(-half) * radius, Math.sin(-half) * radius);
+    g.arc(0, 0, radius, -half, half);
+    g.stroke({ width: done ? 3 : 1.5, color, alpha: done ? 0.9 : 0.45 });
   }
 
   private updateHealthBar(bar: Graphics, unit: Unit): void {

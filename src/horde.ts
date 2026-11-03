@@ -360,6 +360,7 @@ export function repositionBlueUnits(units: Unit[], blocks?: Obstacle[]): void {
     u.moveTarget = null;
     u.vel = { x: 0, y: 0 };
     u.fireTimer = 0;
+    u.hunkerSetup = 0;
     u.gunAngle = -Math.PI / 2;
   }
 }

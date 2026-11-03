@@ -64,6 +64,12 @@ export const ELEVATION_RANGE_BONUS = 0.2;
 export const FLANK_ANGLE_THRESHOLD = Math.PI / 3; // 60° half-cone = 120° front
 export const FLANK_DAMAGE_MULTIPLIER = 1.5;
 export const SHIELD_MAX_HITS = 7;
+/** Soldier hunker — prototype values for playtesting. A soldier that finishes
+ *  its move (or has none) sets up for HUNKER_SETUP_S, then takes less damage
+ *  from frontal bullets but turns slower, so crossfire beats it. */
+export const HUNKER_SETUP_S = 0.75;
+export const HUNKER_FRONT_DAMAGE_REDUCTION = 0.3;
+export const HUNKER_TURN_MULTIPLIER = 0.5;
 export const HORDE_MAX_WAVES = 15;
 
 /** Shrink factor for projectile-vs-unit hit detection (1 = full radius, 0.8 = 80%). */

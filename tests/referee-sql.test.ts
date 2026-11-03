@@ -44,7 +44,11 @@ describeSql('referee database', () => {
       insert into matches(id, host_player, guest_player, initial_state, latest_state, status, rules) values
       ('rulev1', '${A}', '${B}', ${STATE}, ${STATE}, 'active', 2),
       ('rulev2', '${A}', null, ${STATE}, ${STATE}, 'open', 2),
-      ('rulev3', '${A}', '${B}', ${STATE}, ${STATE}, 'host_won', 2);` });
+      ('rulev3', '${A}', '${B}', ${STATE}, ${STATE}, 'host_won', 2);` }, { version: '0006', sql: `
+      insert into matches(id, host_player, guest_player, initial_state, latest_state, status, rules) values
+      ('rulew1', '${A}', '${B}', ${STATE}, ${STATE}, 'active', 3),
+      ('rulew2', '${A}', null, ${STATE}, ${STATE}, 'open', 3),
+      ('rulew3', '${A}', '${B}', ${STATE}, ${STATE}, 'host_won', 3);` });
   });
   afterAll(() => db?.drop());
 
@@ -56,6 +60,8 @@ describeSql('referee database', () => {
   it('ends matches still in play on an older rules version', () => {
     expect(run(`select id, status, coalesce(finish_reason, '-') from matches where id like 'rulev%' order by id;`)).toBe(
       'rulev1|abandoned|version\nrulev2|abandoned|version\nrulev3|host_won|-');
+    expect(run(`select id, status, coalesce(finish_reason, '-') from matches where id like 'rulew%' order by id;`)).toBe(
+      'rulew1|abandoned|version\nrulew2|abandoned|version\nrulew3|host_won|-');
   });
 
   it('leaves clients no way to write matches, turns or plans', () => {
