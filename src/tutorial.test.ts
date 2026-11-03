@@ -13,6 +13,7 @@ function intendedPlan(lesson: number): PathList {
   const y = MAP_HEIGHT / 2;
   if (lesson === 0) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 60 }] }];
   if (lesson === 1) return [{ unitId: 'blue_sniper', waypoints: [{ x, y: y + 125 }] }];
+  if (lesson === 4) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 10 }] }];
   if (lesson === 3) return [{ unitId: 'blue_rocketeer', waypoints: [], rocketPath: [
     { x: x + 110, y: y + 40 }, { x: x + 100, y: y - 90 }, { x: x + 10, y: y - 90 },
   ] }];
@@ -64,12 +65,12 @@ function playLesson(lesson: number, width: number, height: number, planned: bool
 describe.each([
   [STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT],
 ])('tutorial encounter at %ix%i', (width, height) => {
-  it.each([0, 1, 2, 3])('lesson %i succeeds with its intended plan and stationary red opponents', lesson => {
+  it.each([0, 1, 2, 3, 4])('lesson %i succeeds with its intended plan and stationary red opponents', lesson => {
     const result = playLesson(lesson, width, height, true);
     expect(result.met).toBe(true);
   });
 
-  it.each([0, 1, 2, 3])('lesson %i does not pass with an empty plan', lesson => {
+  it.each([0, 1, 2, 3, 4])('lesson %i does not pass with an empty plan', lesson => {
     const result = playLesson(lesson, width, height, false);
     expect(result.met).toBe(false);
     expect(result.redEnd).toEqual(result.redStart);
@@ -84,6 +85,24 @@ describe.each([
     engine.confirmPlan();
     for (let tick = 0; tick < 480 && engine.phase === 'playing'; tick++) engine.externalTick(1000 / 60);
     expect(tutorialObjectiveMet(3, engine.getUnits(), engine.getReplayData())).toBe(false);
+    engine.stop();
+  });
+
+  it('dig-in lesson does not pass when the soldier never stops moving', () => {
+    setMapSize(width, height);
+    const practice = createTutorialEncounter(4);
+    const x = MAP_WIDTH / 2;
+    const y = MAP_HEIGHT / 2 + 10;
+    // Pace back and forth in range for the whole round.
+    const pacing = Array.from({ length: 8 }, (_, i) => ({ x: x + (i % 2 ? 60 : -60), y }));
+    const engine = new GameEngine(null, () => {}, { practice, seed: 1 });
+    engine.startBattle();
+    engine.setBluePaths([{ unitId: 'blue_soldier', waypoints: pacing }]);
+    engine.confirmPlan();
+    for (let tick = 0; tick < 480 && engine.phase === 'playing'; tick++) engine.externalTick(1000 / 60);
+    const replay = engine.getReplayData();
+    expect(replay?.events.some(e => e.team === 'red' && e.type === 'hit' && e.targetId === 'blue_soldier')).toBe(true);
+    expect(tutorialObjectiveMet(4, engine.getUnits(), replay)).toBe(false);
     engine.stop();
   });
 

@@ -1,31 +1,37 @@
-import { MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT, HUNKER_SETUP_S } from './constants';
 import { createUnit, getElevationLevel } from './units';
 import type { Unit, ElevationZone, Obstacle, ReplayData } from './types';
 
 export const TUTORIAL_LESSONS = [
   {
-    title: '1/4 · Draw a move',
+    title: '1/5 · Draw a move',
     instruction: 'Drag your blue soldier toward the red soldier, then press Fight. Redraw the path to change your plan.',
     success: 'Your soldier followed your path and aimed automatically. You control movement; units handle firing.',
     retry: 'Try a longer path toward the red soldier, then press Fight.',
   },
   {
-    title: '2/4 · Take high ground',
+    title: '2/5 · Take high ground',
     instruction: 'Move your blue sniper onto the shaded hill. Stop there and fire with 20% extra range.',
     success: 'Your sniper fired from high ground. Hills extend firing range by 20% per level.',
     retry: 'End the sniper’s path inside the shaded hill and let it fire from there.',
   },
   {
-    title: '3/4 · Flank the shield',
+    title: '3/5 · Flank the shield',
     instruction: 'Leave the middle soldier in front. Draw the right soldier around the shield’s right side to attack from behind.',
     success: 'You landed a flanking hit! Side and rear shots bypass the frontal shield and deal 50% extra damage.',
     retry: 'Keep one soldier in front to hold the shield’s attention. Send the other around its side, staying a little farther away.',
   },
   {
-    title: '4/4 · Rocket around cover',
+    title: '4/5 · Rocket around cover',
     instruction: 'The rocketeer has no gun. Drag from the orange rocket icon ahead of it and draw a curve around the wall to the red soldier. The rocket flies your line.',
     success: 'Direct hit! Rockets fly exactly where you draw them, so they curve around cover, and the blast hurts every enemy in its circle.',
     retry: 'Start the drag on the orange rocket icon, not the unit, and route the line around the wall.',
+  },
+  {
+    title: '5/5 · Dig in',
+    instruction: 'A soldier digs in where its path ends. Draw a short move toward the red soldier that stops within its range, then let your soldier hold there.',
+    success: 'Your soldier dug in and shrugged off a frontal hit. Dug-in soldiers take 30% less from the front but turn slower. Moving breaks it, and flank shots and blasts still hit in full.',
+    retry: 'End the path within the red soldier’s range and let your soldier stand still until its arc turns solid.',
   },
 ];
 
@@ -44,6 +50,13 @@ export function createTutorialEncounter(lesson: number): { units: Unit[]; elevat
       units: [createUnit('blue_sniper', 'sniper', 'blue', { x: x - 90, y: y + 170 }),
         createUnit('red_soldier', 'soldier', 'red', { x, y: y - 210 })],
       elevationZones: [{ x: x - 50, y: y + 90, w: 100, h: 70 }],
+    };
+  }
+  if (lesson === 4) {
+    return {
+      units: [createUnit('blue_soldier', 'soldier', 'blue', { x, y: y + 140 }),
+        createUnit('red_soldier', 'soldier', 'red', { x, y: y - 100 })],
+      elevationZones: [],
     };
   }
   if (lesson === 3) {
@@ -74,6 +87,16 @@ export function tutorialObjectiveMet(lesson: number, units: Unit[], replay: Repl
       && getElevationLevel(event.pos, replay.elevationZones) > 0);
   }
   if (lesson === 2) return !!replay?.events.some(event => event.team === 'blue' && event.flanked);
+  if (lesson === 4) return !!replay && hunkeredFrontalHit(replay);
   return !!replay?.events.some(event => event.team === 'blue'
     && (event.type === 'hit' || event.type === 'kill') && event.targetId === 'red_soldier');
+}
+
+/** Red landed a frontal hit on the blue soldier while it was dug in. The
+ *  event's frame is recorded after the tick's hunker update, so it shows the
+ *  state the hit landed on. */
+function hunkeredFrontalHit(replay: ReplayData): boolean {
+  return replay.events.some(event => event.team === 'red' && !event.flanked
+    && (event.type === 'hit' || event.type === 'kill') && event.targetId === 'blue_soldier'
+    && (replay.frames[event.frame]?.units.find(u => u.id === 'blue_soldier')?.hunkerSetup ?? 0) >= HUNKER_SETUP_S);
 }
