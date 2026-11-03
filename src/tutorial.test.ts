@@ -13,10 +13,10 @@ function intendedPlan(lesson: number): PathList {
   const y = MAP_HEIGHT / 2;
   if (lesson === 0) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 60 }] }];
   if (lesson === 1) return [{ unitId: 'blue_sniper', waypoints: [{ x, y: y + 125 }] }];
-  if (lesson === 4) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 10 }] }];
   if (lesson === 3) return [{ unitId: 'blue_rocketeer', waypoints: [], rocketPath: [
     { x: x + 110, y: y + 40 }, { x: x + 100, y: y - 90 }, { x: x + 10, y: y - 90 },
   ] }];
+  if (lesson === 4) return [{ unitId: 'blue_soldier', waypoints: [{ x, y: y + 10 }] }];
   return [{ unitId: 'blue_flanker', waypoints: [
     { x: x + 110, y: y + 40 }, { x: x + 100, y: y - 50 },
   ] }];

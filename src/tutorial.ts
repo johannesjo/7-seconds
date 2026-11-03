@@ -29,7 +29,7 @@ export const TUTORIAL_LESSONS = [
   },
   {
     title: '5/5 · Dig in',
-    instruction: 'A soldier digs in where its path ends. Draw a short move toward the red soldier that stops within its range, then let your soldier hold there.',
+    instruction: 'A soldier digs in where its path ends. Draw a short move toward the red soldier that stops within the red soldier’s range, then let your soldier hold there.',
     success: 'Your soldier dug in and shrugged off a frontal hit. Dug-in soldiers take 30% less from the front but turn slower. Moving breaks it, and flank shots and blasts still hit in full.',
     retry: 'End the path within the red soldier’s range and let your soldier stand still until its arc turns solid.',
   },
