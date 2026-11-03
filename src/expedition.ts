@@ -1,9 +1,12 @@
 /**
  * Expedition: cross a large map to the extraction zone while the horde closes
  * in. Lurkers sleep along the way until you get near; pursuers spawn behind
- * the squad every round, and more of them when the squad stalls. Reaching the
- * zone calls the evac, which lands at the end of the next round: whoever is
- * inside then gets out.
+ * the squad every round, and more of them when the squad stalls. Stranded
+ * survivors off the direct route join the squad when a unit reaches them, but
+ * each has a sleeping guard that wakes on the way in. Once a unit stands in
+ * the zone the player chooses when to call the evac: it lands at the end of
+ * that round and takes whoever is inside. Waiting for stragglers counts as a
+ * stall, so the horde grows meanwhile. The score is how many get out.
  *
  * Pure logic only (no rendering), so it can be tested headlessly.
  */
@@ -45,9 +48,22 @@ export interface ExpeditionMap {
   extraction: Obstacle;
 }
 
+/** A friendly unit waiting to be picked up; not part of the battle until rescued. */
+export interface Survivor {
+  id: string;
+  type: UnitType;
+  pos: Vec2;
+}
+
 export interface ExpeditionSetup extends ExpeditionMap {
   units: Unit[];
+  survivors?: Survivor[];
 }
+
+/** A blue unit this close to a survivor picks it up. */
+export const RESCUE_RADIUS = 60;
+/** How many survivors each expedition strands. */
+export const SURVIVOR_COUNT = 3;
 
 type Rng = () => number;
 
@@ -155,6 +171,61 @@ export function spawnLurkers(map: ExpeditionMap, rng: Rng = Math.random): Unit[]
     }
   }
   return units;
+}
+
+/**
+ * Stranded survivors, one per stretch of the trip (near the start, midway,
+ * near the end), each against a side wall (alternating sides) so reaching
+ * it is a detour. A small
+ * sleeping guard stands close enough that a rescuer always wakes it; guards
+ * further north are bigger and heavier.
+ */
+export function placeSurvivors(map: ExpeditionMap, rng: Rng = Math.random): { survivors: Survivor[]; guards: Unit[] } {
+  const W = EXPEDITION_MAP_WIDTH;
+  const survivors: Survivor[] = [];
+  const guards: Unit[] = [];
+  const top = 420;
+  const bottom = EXPEDITION_START.y - 380;
+  // Alternate sides so no one flank collects them all
+  const firstLeft = rng() < 0.5;
+  for (let i = 0; i < SURVIVOR_COUNT; i++) {
+    // i = 0 is the stretch nearest the start
+    const y = bottom - ((i + 0.25 + rng() * 0.5) / SURVIVOR_COUNT) * (bottom - top);
+    const left = (i % 2 === 0) === firstLeft;
+    const x = left ? range(rng, 70, 200) : range(rng, W - 200, W - 70);
+    const type: UnitType = i === 1 ? 'sniper' : 'soldier';
+    const pos = clampToMap(nudgeOutOfBlocks({ x, y }, map.obstacles, UNIT_STATS[type].radius + 4));
+    survivors.push({ id: `blue_survivor_${i}`, type, pos });
+
+    const size = 2 + i;
+    for (let k = 0; k < size; k++) {
+      const guardType: UnitType = i === SURVIVOR_COUNT - 1 && k === 0 ? 'shielder' : 'zombie';
+      // Spread over the side facing the open map, between the survivor and the route
+      const angle = (left ? 0 : Math.PI) + ((k + 0.5) / size - 0.5) * Math.PI * 0.9;
+      const r = 80 + rng() * 25;
+      const at = nudgeOutOfBlocks({ x: pos.x + Math.cos(angle) * r, y: pos.y + Math.sin(angle) * r }, map.obstacles, UNIT_STATS[guardType].radius + 4);
+      const guard = createUnit(`red_guard_${i}_${k}`, guardType, 'red', clampToMap(at));
+      guard.dormant = true;
+      guards.push(guard);
+    }
+  }
+  return { survivors, guards };
+}
+
+/**
+ * Survivors a living blue unit has reached: removed from `survivors` and
+ * returned as squad units, ready to fight.
+ */
+export function rescueSurvivors(units: Unit[], survivors: Survivor[]): Unit[] {
+  const blue = units.filter(u => u.alive && u.team === 'blue');
+  const rescued: Unit[] = [];
+  for (let i = survivors.length - 1; i >= 0; i--) {
+    const s = survivors[i];
+    if (!blue.some(b => dist(b.pos, s.pos) < RESCUE_RADIUS)) continue;
+    survivors.splice(i, 1);
+    rescued.unshift(createUnit(s.id, s.type, 'blue', { x: s.pos.x, y: s.pos.y }));
+  }
+  return rescued;
 }
 
 /** What a round's pursuit group is made of. Grows each round, and by half
@@ -342,24 +413,37 @@ function clampToMap(p: Vec2): Vec2 {
   };
 }
 
-/** Best (fewest rounds) extraction, kept on this device. */
+/** The haul as stars: one for getting anyone out, a second for the whole
+ *  starting squad's worth, a third for bringing out every survivor too. */
+export function expeditionStars(out: number): string {
+  const squad = EXPEDITION_SQUAD.reduce((n, c) => n + c.count, 0);
+  const stars = out >= squad + SURVIVOR_COUNT ? 3 : out >= squad ? 2 : out > 0 ? 1 : 0;
+  return '★'.repeat(stars) + '☆'.repeat(3 - stars);
+}
+
+/** Best extractions, kept on this device: the most units brought out, and
+ *  the fewest rounds. */
 const RECORD_KEY = 'expedition-record';
 
-export interface ExpeditionRecord { extractions: number; bestRounds: number }
+export interface ExpeditionRecord { extractions: number; bestRounds: number; bestOut: number }
 
 export function getExpeditionRecord(): ExpeditionRecord {
   try {
     const raw = JSON.parse(localStorage.getItem(RECORD_KEY) ?? 'null');
-    if (raw && Number.isFinite(raw.extractions) && Number.isFinite(raw.bestRounds)) return raw;
+    if (raw && Number.isFinite(raw.extractions) && Number.isFinite(raw.bestRounds)) {
+      // Records from before scoring have no haul yet
+      return { extractions: raw.extractions, bestRounds: raw.bestRounds, bestOut: Number.isFinite(raw.bestOut) ? raw.bestOut : 0 };
+    }
   } catch { /* unavailable or corrupt */ }
-  return { extractions: 0, bestRounds: 0 };
+  return { extractions: 0, bestRounds: 0, bestOut: 0 };
 }
 
-export function recordExtraction(rounds: number): ExpeditionRecord {
+export function recordExtraction(rounds: number, out: number): ExpeditionRecord {
   const prev = getExpeditionRecord();
   const next = {
     extractions: prev.extractions + 1,
     bestRounds: prev.bestRounds === 0 ? rounds : Math.min(prev.bestRounds, rounds),
+    bestOut: Math.max(prev.bestOut, out),
   };
   try { localStorage.setItem(RECORD_KEY, JSON.stringify(next)); } catch { /* unavailable */ }
   return next;

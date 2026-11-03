@@ -6,6 +6,8 @@ import {
   EXPEDITION_MAP_HEIGHT, EXPEDITION_MAP_WIDTH, LURKER_WAKE_RADIUS, MAX_ALIVE_ENEMIES, MIN_SPAWN_DISTANCE,
   createExpeditionSquad, distanceToExtraction, extractionZone, generateExpeditionMap, pursuitComposition,
   planningFrame, spawnLurkers, spawnPursuers, unitsInZone, wakeLurkers, wakeRings,
+  EXPEDITION_START, RESCUE_RADIUS, SURVIVOR_COUNT, expeditionStars, placeSurvivors, rescueSurvivors,
+  type ExpeditionSetup,
 } from './expedition';
 import type { Obstacle, Vec2 } from './types';
 
@@ -222,5 +224,151 @@ describe('wake rings', () => {
     dead.alive = false;
     expect(wakeRings([path], [awake, dead], LURKER_WAKE_RADIUS)).toEqual([]);
     expect(wakeRings([], [sleeper(100, 750)], LURKER_WAKE_RADIUS)).toEqual([]);
+  });
+});
+
+describe('survivors', () => {
+  it('strands one per stretch of the trip, off the straight route, inside the map', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const map = generateExpeditionMap(createRng(seed));
+      const { survivors } = placeSurvivors(map, createRng(seed));
+      expect(survivors).toHaveLength(SURVIVOR_COUNT);
+      for (const s of survivors) {
+        expect(Math.abs(s.pos.x - EXPEDITION_START.x)).toBeGreaterThan(250);
+        expect(s.pos.y).toBeGreaterThan(map.extraction.y + map.extraction.h);
+        expect(s.pos.y).toBeLessThan(EXPEDITION_START.y - 300);
+        for (const o of map.obstacles) expect(inRect(s.pos, o)).toBe(false);
+      }
+      // Spread from near the start to near the end
+      const ys = survivors.map(s => s.pos.y);
+      expect(ys[0]).toBeGreaterThan(ys[1]);
+      expect(ys[1]).toBeGreaterThan(ys[2]);
+      expect(new Set(survivors.map(s => s.id)).size).toBe(SURVIVOR_COUNT);
+      // Sides alternate
+      const left = survivors.map(s => s.pos.x < EXPEDITION_START.x);
+      expect(left[0]).not.toBe(left[1]);
+      expect(left[1]).not.toBe(left[2]);
+    }
+  });
+
+  it('guards each one with a sleeping pack that a rescuer always wakes', () => {
+    const map = generateExpeditionMap(createRng(3));
+    const { survivors, guards } = placeSurvivors(map, createRng(3));
+    expect(guards.length).toBeGreaterThanOrEqual(SURVIVOR_COUNT * 2);
+    for (const g of guards) {
+      expect(g.team).toBe('red');
+      expect(g.dormant).toBe(true);
+    }
+    for (const s of survivors) {
+      const near = guards.filter(g => Math.hypot(g.pos.x - s.pos.x, g.pos.y - s.pos.y) + RESCUE_RADIUS < LURKER_WAKE_RADIUS);
+      expect(near.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('a unit that reaches a survivor brings it into the squad', () => {
+    const survivors = [
+      { id: 'blue_survivor_0', type: 'soldier' as const, pos: { x: 100, y: 1000 } },
+      { id: 'blue_survivor_1', type: 'sniper' as const, pos: { x: 900, y: 600 } },
+    ];
+    const near = createUnit('blue_a', 'soldier', 'blue', { x: 100 + RESCUE_RADIUS - 5, y: 1000 });
+    const dead = createUnit('blue_b', 'soldier', 'blue', { x: 900, y: 600 });
+    dead.alive = false;
+    const red = createUnit('red_z', 'zombie', 'red', { x: 900, y: 600 });
+    const rescued = rescueSurvivors([near, dead, red], survivors);
+    expect(rescued.map(u => [u.id, u.type, u.team])).toEqual([['blue_survivor_0', 'soldier', 'blue']]);
+    expect(rescued[0].alive).toBe(true);
+    expect(survivors.map(s => s.id)).toEqual(['blue_survivor_1']);
+    expect(rescueSurvivors([near], survivors)).toEqual([]);
+  });
+});
+
+describe('expeditionStars', () => {
+  it('rates the haul: anyone, the squad\'s worth, everyone including survivors', () => {
+    expect(expeditionStars(0)).toBe('☆☆☆');
+    expect(expeditionStars(1)).toBe('★☆☆');
+    expect(expeditionStars(4)).toBe('★★☆');
+    expect(expeditionStars(4 + SURVIVOR_COUNT)).toBe('★★★');
+  });
+});
+
+describe('evac', () => {
+  const zone = { x: 400, y: 50, w: 300, h: 150 };
+  const setup = (units: ExpeditionSetup['units'], survivors: ExpeditionSetup['survivors'] = []): GameEngine => {
+    const engine = new GameEngine(null, () => {}, {
+      aiMode: true, seed: 1,
+      expedition: { obstacles: [], elevationZones: [], extraction: zone, units, survivors },
+    });
+    engine.startBattle();
+    return engine;
+  };
+  const playRound = (engine: GameEngine) => {
+    engine.confirmPlan();
+    for (let tick = 0; tick < 9 * 60 && engine.phase === 'playing'; tick++) engine.externalTick(1000 / 60);
+  };
+
+  it('is not called just by reaching the zone', () => {
+    const engine = setup([createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 100 })]);
+    expect(engine.evacStatus).toBe('none');
+    expect(engine.evacButton).toBe('ready');
+    playRound(engine);
+    expect(engine.wasExtracted).toBe(false);
+    expect(engine.phase).toBe('blue-planning');
+    engine.stop();
+  });
+
+  it('can only be called with a unit in the zone', () => {
+    const engine = setup([createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 900 })]);
+    expect(engine.evacButton).toBe('hidden');
+    expect(engine.callEvac(true)).toBe(false);
+    engine.stop();
+  });
+
+  it('can be taken back while planning, then lands at the end of the round it was called for', () => {
+    const inside = createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 100 });
+    const outside = createUnit('blue_b', 'soldier', 'blue', { x: 500, y: 1200 });
+    const engine = setup([inside, outside]);
+    expect(engine.callEvac(true)).toBe(true);
+    expect(engine.evacButton).toBe('called');
+    expect(engine.callEvac(false)).toBe(false);
+    expect(engine.callEvac(true)).toBe(true);
+    playRound(engine);
+    // The battle is ending with the squad extracted; the straggler stays behind
+    expect(engine.wasExtracted).toBe(true);
+    expect(engine.extractedUnits).toBe(1);
+    engine.stop();
+  });
+
+  it('waiting in the zone without calling it counts as a stall', () => {
+    const waiting = setup([createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 100 })]);
+    playRound(waiting);
+    expect(waiting.takePursuitNews()?.stalled).toBe(true);
+    waiting.stop();
+  });
+
+  it('leaves empty when nobody is in the zone, and can be called again', () => {
+    const engine = setup([createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 100 })]);
+    engine.callEvac(true);
+    engine.getUnits()[0].pos = { x: 500, y: 600 };
+    playRound(engine);
+    expect(engine.wasExtracted).toBe(false);
+    expect(engine.evacStatus).toBe('none');
+    expect(engine.takeEvacMissed()).toBe(true);
+    expect(engine.takeEvacMissed()).toBe(false);
+    // The missed evac no longer shields the squad from the stall penalty
+    expect(engine.takePursuitNews()?.stalled).toBe(true);
+    engine.getUnits()[0].pos = { x: 500, y: 100 };
+    expect(engine.callEvac(true)).toBe(true);
+    engine.stop();
+  });
+
+  it('picks up survivors during a round, and they count toward the haul', () => {
+    const rescuer = createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 100 });
+    const engine = setup([rescuer], [{ id: 'blue_survivor_0', type: 'sniper', pos: { x: 520, y: 120 } }]);
+    engine.callEvac(true);
+    playRound(engine);
+    expect(engine.survivorsRescued).toBe(1);
+    expect(engine.survivorsWaiting).toBe(0);
+    expect(engine.extractedUnits).toBe(2);
+    engine.stop();
   });
 });

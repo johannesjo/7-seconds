@@ -5,6 +5,7 @@ import { Unit, Obstacle, Projectile, ElevationZone, Vec2, CtfState, Team } from 
 import { sightPolygon, type NightVision } from './night';
 import { MAP_WIDTH, MAP_HEIGHT, STANDARD_MAP_WIDTH, STANDARD_MAP_HEIGHT, setMapSize, CTF_BASE_ZONE_WIDTH, SHIELD_MAX_HITS, MORTAR_BLAST_RADIUS, FLANK_ANGLE_THRESHOLD } from './constants';
 import { EffectsManager } from './effects';
+import { RESCUE_RADIUS } from './expedition';
 import { hunkerProgress } from './hunker';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
@@ -71,6 +72,7 @@ export class Renderer {
     follow: null as Vec2 | null,
   };
   private extractionGraphics: Container | null = null;
+  private survivorGraphics: Container | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private nightView: NightView | null = null;
   private night: {
@@ -1164,6 +1166,41 @@ export class Renderer {
     // Under units and paths, over the ground
     this.app.stage.addChildAt(c, Math.min(2, this.app.stage.children.length));
     this.extractionGraphics = c;
+  }
+
+  /** Mark stranded survivors (Expedition): a faded friendly unit in a
+   *  rescue ring, with an SOS tag. An empty list clears them. */
+  renderSurvivors(survivors: { pos: Vec2 }[]): void {
+    if (this.survivorGraphics) {
+      this.app.stage.removeChild(this.survivorGraphics);
+      this.survivorGraphics.destroy({ children: true });
+      this.survivorGraphics = null;
+    }
+    if (survivors.length === 0) return;
+    const c = new Container();
+    const color = 0x4a9eff;
+    for (const s of survivors) {
+      const g = new Graphics();
+      g.circle(s.pos.x, s.pos.y, RESCUE_RADIUS);
+      g.fill({ color, alpha: 0.08 });
+      g.circle(s.pos.x, s.pos.y, RESCUE_RADIUS);
+      g.stroke({ width: 2, color, alpha: 0.55 });
+      g.circle(s.pos.x, s.pos.y, 12);
+      g.fill({ color, alpha: 0.45 });
+      g.circle(s.pos.x, s.pos.y, 12);
+      g.stroke({ width: 2, color: 0xffffff, alpha: 0.6 });
+      c.addChild(g);
+      const label = new Text({
+        text: 'SOS',
+        style: { fontSize: 14, fontFamily: 'monospace', fontWeight: 'bold', fill: color, letterSpacing: 2 },
+      });
+      label.anchor.set(0.5, 1);
+      label.position.set(s.pos.x, s.pos.y - 18);
+      c.addChild(label);
+    }
+    // Under units and paths, over the ground
+    this.app.stage.addChildAt(c, Math.min(2, this.app.stage.children.length));
+    this.survivorGraphics = c;
   }
 
   /** Back to the standard map, e.g. after an online match recorded on another size. */

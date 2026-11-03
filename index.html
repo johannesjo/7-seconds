@@ -368,6 +368,33 @@
       opacity: 0.7;
     }
     #confirm-btn.active { display: block; }
+    #evac-btn {
+      display: none;
+      position: fixed;
+      bottom: calc(40px + var(--sab));
+      left: 50%;
+      transform: translateX(-50%);
+      min-height: 44px;
+      padding: 6px 22px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      background: var(--color-btn-bg);
+      color: #3ccf7a;
+      border: 2px solid #3ccf7a;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      max-width: calc(100vw - 32px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      /* Over the unit-info panel, which can sit at the same height */
+      z-index: 13;
+    }
+    #evac-btn.active { display: block; }
+    #evac-btn[aria-pressed="true"] { background: #3ccf7a; color: #0b1a10; }
     #confirm-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-btn-hover-border); opacity: 1; }
     #async-back-btn { display: none; position: fixed; bottom: calc(4px + var(--sab)); left: 8px; min-height: 44px; padding: 8px 12px; font: inherit; font-size: 13px; background: var(--color-btn-bg); color: var(--color-text); border: 1px solid var(--color-btn-border); border-radius: 4px; cursor: pointer; z-index: 12; }
     #planning-overlay.tutorial { width: min(460px, calc(100% - 32px)); text-align: center; }
@@ -878,6 +905,7 @@
       <span id="planning-instructions">Click a unit, drag to draw a path. Repeat for each unit.</span>
     </div>
     <button id="confirm-btn">Done</button>
+    <button id="evac-btn" aria-pressed="false">Call evac</button>
     <button id="async-back-btn" aria-label="Back to matches">← Matches</button>
     <button id="skip-tutorial-btn">Back to menu</button>
     <div id="unit-info" hidden role="status" aria-live="polite">

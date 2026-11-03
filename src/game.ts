@@ -18,8 +18,8 @@ import { planTeamOrders } from './ai-planner';
 import { createRng } from './rng';
 import { clampPathLength, validPoints } from './path-orders';
 import {
-  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, LURKER_WAKE_RADIUS, STALL_DISTANCE, distanceToExtraction, planningFrame, spawnPursuers, unitsInZone, wakeLurkers,
-  type ExpeditionSetup,
+  EXPEDITION_MAP_WIDTH, EXPEDITION_MAP_HEIGHT, LURKER_WAKE_RADIUS, STALL_DISTANCE, distanceToExtraction, planningFrame, rescueSurvivors, spawnPursuers, unitsInZone, wakeLurkers,
+  type ExpeditionSetup, type Survivor,
 } from './expedition';
 import { NightVision } from './night';
 
@@ -98,11 +98,18 @@ export class GameEngine {
   /** Expedition: the planning view as the plan was confirmed, for the battle
    *  camera to start from (the drawer resets the stage when it's disabled). */
   private handoffView: { zoom: number; x: number; y: number } | null = null;
-  /** Expedition: the round in which a unit first reached the zone (the evac
-   *  lands at the end of the round after), and how many it took out. */
-  private evacCalledRound: number | null = null;
+  /** Expedition: the round at whose end the evac lands (set when the player
+   *  calls it), and how many it took out. */
+  private evacRound: number | null = null;
   private extracted = false;
   private extractedCount = 0;
+  /** Expedition: survivors still waiting, and those picked up so far. */
+  private survivors: Survivor[] = [];
+  private rescuedCount = 0;
+  /** Expedition: units rescued since the HUD last asked, for its banner. */
+  private rescueNews: Unit[] = [];
+  /** Expedition: the evac just left empty (nobody in the zone), for the HUD. */
+  private evacMissed = false;
   /** Night battle (vs AI only): limited sight, see src/night.ts. */
   private nightMode = false;
   private night: NightVision | null = null;
@@ -201,6 +208,7 @@ export class GameEngine {
       this.obstacles = this.expedition.obstacles;
       this.elevationZones = this.expedition.elevationZones;
       this.units = this.expedition.units;
+      this.survivors = [...(this.expedition.survivors ?? [])];
     } else if (this.hordeMap) {
       this.obstacles = this.hordeMap.obstacles;
       this.elevationZones = this.hordeMap.elevationZones;
@@ -257,6 +265,7 @@ export class GameEngine {
         this.renderer.renderBaseZones();
       }
       this.renderer.renderExtractionZone(this.expedition?.extraction ?? null);
+      this.renderer.renderSurvivors(this.expedition ? this.survivors : []);
       this.renderer.renderUnits(this.units);
 
       // Start ticker for rendering during planning
@@ -387,8 +396,9 @@ export class GameEngine {
     const best = this.expeditionBestY;
     this.expeditionBestY = best === null ? front : Math.min(best, front);
     if (this.roundNumber < 2 || best === null) return;
-    // Holding the zone for the evac is what the game asked for: no penalty
-    const stalled = this.evacCalledRound === null && best - front < STALL_DISTANCE;
+    // Holding the zone once the evac is called is what the game asked for: no
+    // penalty. Waiting there without calling it is a stall like any other
+    const stalled = this.evacRound === null && best - front < STALL_DISTANCE;
     const aliveRed = this.units.filter(u => u.alive && u.team === 'red').length;
     const arrivals = spawnPursuers(this.roundNumber, this.units, aliveRed, stalled, this.obstacles);
     this.units.push(...arrivals);
@@ -396,11 +406,15 @@ export class GameEngine {
   }
 
   /** Expedition: at a round's end once the evac is due, take out everyone in
-   *  the zone. With nobody inside it waits for the next round's end. */
+   *  the zone. With nobody inside it leaves empty and must be called again. */
   private tryEvac(): boolean {
     if (!this.expedition || this.evacStatus !== 'landing') return false;
     const aboard = unitsInZone(this.units, this.expedition.extraction);
-    if (aboard.length === 0) return false;
+    if (aboard.length === 0) {
+      this.evacRound = null;
+      this.evacMissed = true;
+      return false;
+    }
     this.extracted = true;
     this.extractedCount = aboard.length;
     this.endingBattle = true;
@@ -412,11 +426,73 @@ export class GameEngine {
     return true;
   }
 
-  /** Expedition evac: not called yet, called (lands after the next round),
-   *  or landing at the end of the current round. */
-  get evacStatus(): 'none' | 'inbound' | 'landing' {
-    if (this.evacCalledRound === null) return 'none';
-    return this.roundNumber > this.evacCalledRound ? 'landing' : 'inbound';
+  /** Expedition evac: not called yet, or landing at the end of the current
+   *  (or, while planning, the coming) round. */
+  get evacStatus(): 'none' | 'landing' {
+    return this.evacRound === null ? 'none' : 'landing';
+  }
+
+  /** Expedition: living units in the extraction zone right now. */
+  get unitsInExtraction(): number {
+    return this.expedition ? unitsInZone(this.units, this.expedition.extraction).length : 0;
+  }
+
+  /** Expedition: the evac can be called while planning, with a unit in the zone. */
+  get canCallEvac(): boolean {
+    return this.expedition !== null && this._phase === 'blue-planning' && this.evacRound === null && this.unitsInExtraction > 0;
+  }
+
+  /** Expedition, while planning: call the evac for the end of the coming
+   *  round, or (`false`) take back a call made this planning phase. Returns
+   *  whether the evac is now called. */
+  callEvac(on: boolean): boolean {
+    if (this._phase !== 'blue-planning' || !this.expedition) return this.evacRound !== null;
+    if (on && this.canCallEvac) this.evacRound = this.roundNumber;
+    // Only this planning phase's call can be taken back
+    else if (!on && this.evacRound === this.roundNumber) this.evacRound = null;
+    return this.evacRound !== null;
+  }
+
+  /** Expedition, while planning: whether the evac button shows, and as what. */
+  get evacButton(): 'hidden' | 'ready' | 'called' {
+    if (!this.expedition || this._phase !== 'blue-planning') return 'hidden';
+    if (this.evacRound === this.roundNumber) return 'called';
+    return this.canCallEvac ? 'ready' : 'hidden';
+  }
+
+  /** Expedition: survivors picked up so far, and how many are still waiting. */
+  get survivorsRescued(): number {
+    return this.rescuedCount;
+  }
+
+  get survivorsWaiting(): number {
+    return this.survivors.length;
+  }
+
+  /** Expedition: true once after the evac left empty, for the HUD. */
+  takeEvacMissed(): boolean {
+    const missed = this.evacMissed;
+    this.evacMissed = false;
+    return missed;
+  }
+
+  /** Expedition: units rescued since the last call, for the HUD. */
+  takeRescueNews(): Unit[] {
+    const news = this.rescueNews;
+    this.rescueNews = [];
+    return news;
+  }
+
+  /** Expedition: pick up survivors a unit has reached; they fight from now on
+   *  and take orders from the next planning phase. */
+  private checkRescues(): void {
+    if (!this.expedition || this.survivors.length === 0) return;
+    const rescued = rescueSurvivors(this.units, this.survivors);
+    if (rescued.length === 0) return;
+    this.units.push(...rescued);
+    this.rescuedCount += rescued.length;
+    this.rescueNews.push(...rescued);
+    this.renderer?.renderSurvivors(this.survivors);
   }
 
   /** Expedition: remember the squad's closest approach (while it lives; an
@@ -566,8 +642,10 @@ export class GameEngine {
 
     // Record replay frame after all state updates. Expedition has no replay
     // (and its long, crowded runs would pile up frames)
-    if (this.expedition) this.noteExpeditionProgress();
-    else this.recordFrame();
+    if (this.expedition) {
+      this.checkRescues();
+      this.noteExpeditionProgress();
+    } else this.recordFrame();
 
     if (this.checkCtfCapture()) return;
     if (this.checkElimination()) return;
@@ -876,9 +954,6 @@ export class GameEngine {
 
     if (this.expedition) {
       // Clearing the map doesn't win an expedition: only the evac does
-      if (this.evacCalledRound === null && unitsInZone(this.units, this.expedition.extraction).length > 0) {
-        this.evacCalledRound = this.roundNumber;
-      }
       if (blueAlive > 0) return false;
       this.endingBattle = true;
       this.endDelayTimer = END_DELAY_S;
@@ -1226,7 +1301,10 @@ export class GameEngine {
     this.pathDrawer = null;
     this.renderer?.effects?.clear();
     this.renderer?.clearCtfGraphics();
-    if (this.expedition) this.renderer?.renderExtractionZone(null);
+    if (this.expedition) {
+      this.renderer?.renderExtractionZone(null);
+      this.renderer?.renderSurvivors([]);
+    }
     this.renderer?.setNightView(null);
     this.renderer?.resetCamera();
   }
