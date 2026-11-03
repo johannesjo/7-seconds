@@ -459,8 +459,14 @@ function showRoundBanner(round: number, before: { blue: number; red: number }, a
   const parts: string[] = [];
   if (blueLost > 0) parts.push(`${vsComputer ? 'You' : 'Blue'} lost ${blueLost}`);
   if (redLost > 0) parts.push(`${vsComputer ? 'Enemy' : 'Red'} lost ${redLost}`);
-  if (expeditionActive && engine?.evacStatus === 'landing') {
-    parts.unshift('Nobody made the evac — it waits one more round');
+  if (expeditionActive && engine) {
+    if (engine.takeEvacMissed()) parts.unshift('The evac left empty — call it again');
+    const rescued = engine.takeRescueNews();
+    if (rescued.length > 0) parts.push(`${rescued.length} survivor${rescued.length === 1 ? '' : 's'} rescued`);
+    if (!expeditionZoneShown && engine.unitsInExtraction > 0) {
+      expeditionZoneShown = true;
+      parts.unshift('Zone reached — call the evac when ready');
+    }
   }
   const news = expeditionActive ? engine?.takePursuitNews() : null;
   if (news && news.count > 0) parts.push(`${news.count} more on your trail${news.stalled ? ' — you stalled' : ''}`);
@@ -584,7 +590,8 @@ function onGameEvent(
     }
     if (expeditionActive) {
       waveCounterEl.textContent = expeditionDistanceLabel();
-      checkExpeditionNews();
+      // Once a round has ended, its news goes in the round-end card instead
+      if (engine.phase === 'playing') checkExpeditionNews();
     }
 
     if (ctfActive && engine) {
@@ -1144,10 +1151,13 @@ let expeditionZoneShown = false;
 function expeditionDistanceLabel(): string {
   if (!engine) return '';
   if (engine.evacStatus === 'landing') return 'Evac lands this round · be in the zone';
-  const inZone = engine.unitsInExtraction;
-  if (inZone > 0) return `${inZone} of ${engine.getAliveCount().blue} in the zone · call the evac`;
   const waiting = engine.survivorsWaiting;
   const sos = waiting > 0 ? ` · ${waiting} SOS` : '';
+  const inZone = engine.unitsInExtraction;
+  if (inZone > 0) {
+    const hint = engine.phase === 'blue-planning' ? ' · call the evac' : '';
+    return `${inZone} of ${engine.getAliveCount().blue} in the zone${hint}${sos}`;
+  }
   return `${distanceToExtraction(engine.getUnits(), extractionZone())} m to extraction${sos}`;
 }
 
@@ -1179,8 +1189,8 @@ function syncEvacButton(): void {
   const inZone = engine!.unitsInExtraction;
   const alive = engine!.getAliveCount().blue;
   evacBtn.textContent = state === 'called'
-    ? `Evac called · ${inZone} of ${alive} aboard if they hold`
-    : alive > inZone ? `Call evac (${alive - inZone} not in the zone)` : 'Call evac';
+    ? `Evac called · ${inZone}/${alive} in`
+    : alive > inZone ? `Call evac · ${inZone}/${alive} in` : 'Call evac';
 }
 
 evacBtn.addEventListener('click', () => {
@@ -1261,7 +1271,8 @@ function showExpeditionResult(result: BattleResult): void {
       : fastest ? '🏆 New best: fastest!'
       : `Best: ${record.bestOut} out · ${record.bestRounds} rounds`;
   } else {
-    resultRecordEl.textContent = before.bestRounds > 0 ? `Best: ${before.bestOut} out · ${before.bestRounds} rounds` : '';
+    resultRecordEl.textContent = before.bestOut > 0 ? `Best: ${before.bestOut} out · ${before.bestRounds} rounds`
+      : before.bestRounds > 0 ? `Best: ${before.bestRounds} rounds` : '';
   }
 
   rematchBtn.textContent = 'New expedition';
@@ -2580,7 +2591,7 @@ document.addEventListener('pointerdown', () => audio.unlock(), { capture: true }
 document.addEventListener('keydown', () => audio.unlock(), { capture: true });
 document.addEventListener('click', event => {
   const button = (event.target as Element | null)?.closest?.('button, .upgrade-card');
-  if (button && button !== confirmBtn) audio.play('ui');
+  if (button && button !== confirmBtn && button !== evacBtn) audio.play('ui');
 }, { capture: true });
 
 // Initialize renderer and show battlefield preview behind start screen

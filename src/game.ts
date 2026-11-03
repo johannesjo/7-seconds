@@ -108,6 +108,8 @@ export class GameEngine {
   private rescuedCount = 0;
   /** Expedition: units rescued since the HUD last asked, for its banner. */
   private rescueNews: Unit[] = [];
+  /** Expedition: the evac just left empty (nobody in the zone), for the HUD. */
+  private evacMissed = false;
   /** Night battle (vs AI only): limited sight, see src/night.ts. */
   private nightMode = false;
   private night: NightVision | null = null;
@@ -404,11 +406,15 @@ export class GameEngine {
   }
 
   /** Expedition: at a round's end once the evac is due, take out everyone in
-   *  the zone. With nobody inside it waits for the next round's end. */
+   *  the zone. With nobody inside it leaves empty and must be called again. */
   private tryEvac(): boolean {
     if (!this.expedition || this.evacStatus !== 'landing') return false;
     const aboard = unitsInZone(this.units, this.expedition.extraction);
-    if (aboard.length === 0) return false;
+    if (aboard.length === 0) {
+      this.evacRound = null;
+      this.evacMissed = true;
+      return false;
+    }
     this.extracted = true;
     this.extractedCount = aboard.length;
     this.endingBattle = true;
@@ -461,6 +467,13 @@ export class GameEngine {
 
   get survivorsWaiting(): number {
     return this.survivors.length;
+  }
+
+  /** Expedition: true once after the evac left empty, for the HUD. */
+  takeEvacMissed(): boolean {
+    const missed = this.evacMissed;
+    this.evacMissed = false;
+    return missed;
   }
 
   /** Expedition: units rescued since the last call, for the HUD. */

@@ -386,7 +386,12 @@
       border: 2px solid #3ccf7a;
       border-radius: 4px;
       cursor: pointer;
-      z-index: 12;
+      white-space: nowrap;
+      max-width: calc(100vw - 32px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      /* Over the unit-info panel, which can sit at the same height */
+      z-index: 13;
     }
     #evac-btn.active { display: block; }
     #evac-btn[aria-pressed="true"] { background: #3ccf7a; color: #0b1a10; }

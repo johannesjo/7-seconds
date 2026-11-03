@@ -338,23 +338,27 @@ describe('evac', () => {
     engine.stop();
   });
 
-  it('waiting in the zone without calling it counts as a stall; holding for a called evac does not', () => {
+  it('waiting in the zone without calling it counts as a stall', () => {
     const waiting = setup([createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 100 })]);
     playRound(waiting);
     expect(waiting.takePursuitNews()?.stalled).toBe(true);
     waiting.stop();
+  });
 
-    // Nobody inside when it lands: the called evac waits, and holding isn't a stall
-    const holding = setup([
-      createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 100 }),
-    ]);
-    holding.callEvac(true);
-    holding.getUnits()[0].pos = { x: 500, y: 600 };
-    playRound(holding);
-    expect(holding.wasExtracted).toBe(false);
-    expect(holding.evacStatus).toBe('landing');
-    expect(holding.takePursuitNews()?.stalled).toBe(false);
-    holding.stop();
+  it('leaves empty when nobody is in the zone, and can be called again', () => {
+    const engine = setup([createUnit('blue_a', 'soldier', 'blue', { x: 500, y: 100 })]);
+    engine.callEvac(true);
+    engine.getUnits()[0].pos = { x: 500, y: 600 };
+    playRound(engine);
+    expect(engine.wasExtracted).toBe(false);
+    expect(engine.evacStatus).toBe('none');
+    expect(engine.takeEvacMissed()).toBe(true);
+    expect(engine.takeEvacMissed()).toBe(false);
+    // The missed evac no longer shields the squad from the stall penalty
+    expect(engine.takePursuitNews()?.stalled).toBe(true);
+    engine.getUnits()[0].pos = { x: 500, y: 100 };
+    expect(engine.callEvac(true)).toBe(true);
+    engine.stop();
   });
 
   it('picks up survivors during a round, and they count toward the haul', () => {
