@@ -13,7 +13,8 @@ import {
 } from './horde-waves';
 import { getHordeRecord, recordHordeProgress, recordHordeClear, type HordeRecord } from './horde-stats';
 import {
-  generateExpeditionMap, createExpeditionSquad, spawnLurkers, distanceToExtraction, getExpeditionRecord, recordExtraction,
+  generateExpeditionMap, createExpeditionSquad, spawnLurkers, placeSurvivors, distanceToExtraction, getExpeditionRecord, recordExtraction,
+  expeditionStars, SURVIVOR_COUNT,
   extractionZone,
 } from './expedition';
 import { ReplayPlayer } from './replay';
@@ -66,6 +67,7 @@ const speedToggle = document.getElementById('speed-toggle') as HTMLButtonElement
 const planningOverlay = document.getElementById('planning-overlay')!;
 const planningLabel = document.getElementById('planning-label')!;
 const confirmBtn = document.getElementById('confirm-btn')!;
+const evacBtn = document.getElementById('evac-btn')!;
 const planningInstructions = document.getElementById('planning-instructions')!;
 const skipTutorialBtn = document.getElementById('skip-tutorial-btn')!;
 const unitInfo = document.getElementById('unit-info')!;
@@ -458,8 +460,7 @@ function showRoundBanner(round: number, before: { blue: number; red: number }, a
   if (blueLost > 0) parts.push(`${vsComputer ? 'You' : 'Blue'} lost ${blueLost}`);
   if (redLost > 0) parts.push(`${vsComputer ? 'Enemy' : 'Red'} lost ${redLost}`);
   if (expeditionActive && engine?.evacStatus === 'landing') {
-    checkEvacCall();
-    parts.unshift('Evac lands at the end of this round — be in the zone');
+    parts.unshift('Nobody made the evac — it waits one more round');
   }
   const news = expeditionActive ? engine?.takePursuitNews() : null;
   if (news && news.count > 0) parts.push(`${news.count} more on your trail${news.stalled ? ' — you stalled' : ''}`);
@@ -511,6 +512,7 @@ function onPhaseChange(phase: TurnPhase): void {
     planningOverlay.classList.remove('active');
     confirmBtn.classList.remove('active');
   }
+  syncEvacButton();
 
   // Cover screen — skip in horde mode (no red planning)
   coverScreen.classList.toggle('active', phase === 'cover' && !hordeActive && !expeditionActive);
@@ -582,7 +584,7 @@ function onGameEvent(
     }
     if (expeditionActive) {
       waveCounterEl.textContent = expeditionDistanceLabel();
-      checkEvacCall();
+      checkExpeditionNews();
     }
 
     if (ctfActive && engine) {
@@ -1136,44 +1138,76 @@ function expeditionDead(): number {
   return engine.expeditionKills;
 }
 
-/** Last evac state shown, to announce the call once. */
-let expeditionEvacShown: 'none' | 'inbound' | 'landing' = 'none';
+/** Whether the squad has reached the zone yet, to announce it once. */
+let expeditionZoneShown = false;
 
 function expeditionDistanceLabel(): string {
-  const status = engine?.evacStatus ?? 'none';
-  if (status === 'inbound') return 'Evac called · lands after next round';
-  if (status === 'landing') return 'Evac lands this round · be in the zone';
-  const units = engine?.getUnits() ?? [];
-  return `${distanceToExtraction(units, extractionZone())} m to extraction`;
+  if (!engine) return '';
+  if (engine.evacStatus === 'landing') return 'Evac lands this round · be in the zone';
+  const inZone = engine.unitsInExtraction;
+  if (inZone > 0) return `${inZone} of ${engine.getAliveCount().blue} in the zone · call the evac`;
+  const waiting = engine.survivorsWaiting;
+  const sos = waiting > 0 ? ` · ${waiting} SOS` : '';
+  return `${distanceToExtraction(engine.getUnits(), extractionZone())} m to extraction${sos}`;
 }
 
-/** Announce the evac call the moment a unit reaches the zone. */
-function checkEvacCall(): void {
-  const status = engine?.evacStatus ?? 'none';
-  if (status === expeditionEvacShown) return;
-  const firstCall = expeditionEvacShown === 'none';
-  expeditionEvacShown = status;
-  if (firstCall) {
-    flashBanner('Evac called', 'It lands at the end of next round. Hold the zone — everyone inside gets out.');
+/** Announce rescues, and the zone the first time a unit reaches it. */
+function checkExpeditionNews(): void {
+  if (!engine) return;
+  const rescued = engine.takeRescueNews();
+  if (rescued.length > 0) {
+    const what = rescued.length === 1 ? `A ${rescued[0].type}` : `${rescued.length} survivors`;
+    flashBanner('Survivor rescued', `${what} joined the squad. Get them out too.`);
+    audio.play('upgrade');
+    pulse('medium');
+    return;
+  }
+  if (!expeditionZoneShown && engine.unitsInExtraction > 0) {
+    expeditionZoneShown = true;
+    flashBanner('Zone reached', 'Call the evac when planning. It lands at that round\'s end and leaves with whoever is inside. Waiting grows the horde.');
     audio.play('upgrade');
     pulse('heavy');
   }
 }
 
+/** The evac button shows while planning with a unit in the zone. */
+function syncEvacButton(): void {
+  const state = expeditionActive && engine ? engine.evacButton : 'hidden';
+  evacBtn.classList.toggle('active', state !== 'hidden');
+  evacBtn.setAttribute('aria-pressed', String(state === 'called'));
+  if (state === 'hidden') return;
+  const inZone = engine!.unitsInExtraction;
+  const alive = engine!.getAliveCount().blue;
+  evacBtn.textContent = state === 'called'
+    ? `Evac called · ${inZone} of ${alive} aboard if they hold`
+    : alive > inZone ? `Call evac (${alive - inZone} not in the zone)` : 'Call evac';
+}
+
+evacBtn.addEventListener('click', () => {
+  if (!engine || !expeditionActive) return;
+  const called = engine.callEvac(engine.evacButton !== 'called');
+  syncEvacButton();
+  planningLabel.textContent = `Expedition · ${expeditionDistanceLabel()}`;
+  waveCounterEl.textContent = expeditionDistanceLabel();
+  audio.play(called ? 'upgrade' : 'confirm');
+  pulse(called ? 'heavy' : 'light');
+});
+
 function startExpedition(): void {
   nightActive = false;
   expeditionActive = true;
-  expeditionEvacShown = 'none';
+  expeditionZoneShown = false;
   lastReplayData = null;
   engine?.stop();
   applyTheme();
 
   const map = generateExpeditionMap();
-  const units = [...createExpeditionSquad(map.obstacles), ...spawnLurkers(map)];
+  const { survivors, guards } = placeSurvivors(map);
+  const units = [...createExpeditionSquad(map.obstacles), ...spawnLurkers(map), ...guards];
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode: true,
     cinematic: !getSettings().reducedMotion,
-    expedition: { ...map, units },
+    expedition: { ...map, units, survivors },
     onInspectUnit: showUnitInfo,
   });
 
@@ -1191,19 +1225,20 @@ function startExpedition(): void {
     : 'Drag from a unit to draw its path. Drag the map to look around; scroll to zoom.';
   engine.startBattle();
   waveCounterEl.textContent = expeditionDistanceLabel();
-  flashBanner('Expedition', 'Reach the extraction zone to call the evac. Don\'t stall — the horde follows.');
+  flashBanner('Expedition', 'Reach the extraction zone and call the evac. SOS: stranded survivors join you, but their guards wake. Don\'t stall — the horde follows.');
 }
 
 function showExpeditionResult(result: BattleResult): void {
   const won = engine?.wasExtracted ?? false;
   const out = engine?.extractedUnits ?? 0;
+  const rescued = engine?.survivorsRescued ?? 0;
   const kills = expeditionDead();
   const closest = engine?.closestToExtraction ?? 0;
   const before = getExpeditionRecord();
   engine?.stop();
   const rounds = currentRound;
   if (won) {
-    setResultHeading('Extracted', `${out} of ${result.blueTotal} made it out`, 'var(--color-result-horde-win)');
+    setResultHeading('Extracted', `${out} of ${result.blueTotal} made it out · ${expeditionStars(out)}`, 'var(--color-result-horde-win)');
   } else {
     setResultHeading('Overrun', closest > 0 ? `Got within ${closest} m of extraction` : 'Fell at the extraction zone', 'var(--color-result-red)');
   }
@@ -1213,16 +1248,20 @@ function showExpeditionResult(result: BattleResult): void {
   resultStatsEl.innerHTML = [
     `${rounds} round${rounds === 1 ? '' : 's'}`,
     won ? `Extracted: ${out}/${result.blueTotal}${result.blueAlive > out ? ` (${result.blueAlive - out} left behind)` : ''}` : `Survivors: 0/${result.blueTotal}`,
+    `Rescued: ${rescued}/${SURVIVOR_COUNT}`,
     `Enemies killed: ${kills}`,
   ].join('<br>');
 
   if (won) {
-    const record = recordExtraction(rounds);
-    resultRecordEl.textContent = before.bestRounds === 0 || rounds < before.bestRounds
-      ? '🏆 New best!'
-      : `Best: ${record.bestRounds} rounds`;
+    const record = recordExtraction(rounds, out);
+    const mostOut = out > before.bestOut;
+    const fastest = before.bestRounds === 0 || rounds < before.bestRounds;
+    resultRecordEl.textContent = mostOut && fastest ? '🏆 New best: most out and fastest!'
+      : mostOut ? '🏆 New best: most out!'
+      : fastest ? '🏆 New best: fastest!'
+      : `Best: ${record.bestOut} out · ${record.bestRounds} rounds`;
   } else {
-    resultRecordEl.textContent = before.bestRounds > 0 ? `Best: ${before.bestRounds} rounds` : '';
+    resultRecordEl.textContent = before.bestRounds > 0 ? `Best: ${before.bestOut} out · ${before.bestRounds} rounds` : '';
   }
 
   rematchBtn.textContent = 'New expedition';
@@ -1347,7 +1386,8 @@ function refreshMenuMeta(): void {
       : '';
   }
   const expedition = getExpeditionRecord();
-  expeditionBadge.textContent = expedition.bestRounds > 0 ? `best ${expedition.bestRounds} rounds` : 'new';
+  expeditionBadge.textContent = expedition.bestOut > 0 ? `best ${expedition.bestOut} out`
+    : expedition.bestRounds > 0 ? `best ${expedition.bestRounds} rounds` : 'new';
   const horde = getHordeRecord();
   hordeBadge.hidden = horde.bestWave === 0;
   hordeBadge.textContent = `best wave ${horde.bestWave}`;
@@ -1532,6 +1572,7 @@ newBattleBtn.addEventListener('click', () => {
 
   expeditionActive = false;
   expeditionDeadAtRoundStart = 0;
+  evacBtn.classList.remove('active');
 
   // Reset horde state
   hordeActive = false;
