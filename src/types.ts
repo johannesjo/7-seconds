@@ -62,7 +62,8 @@ export interface Unit {
    *  HUNKER_SETUP_S — reaching it means hunkered. Carries across rounds. */
   hunkerSetup?: number;
   /** This round's move ended stuck short of its last point rather than
-   *  completed, so the soldier can't hunker until next round. */
+   *  completed, so the soldier can't hunker until next round. "Stuck" is any
+   *  stall, so crowding onto one endpoint counts too, not only walls. */
   pathBlocked?: boolean;
 }
 

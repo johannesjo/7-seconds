@@ -22,5 +22,5 @@ export function hunkerProgress(unit: Unit): number {
 }
 
 export function isHunkered(unit: Unit): boolean {
-  return (unit.hunkerSetup ?? 0) >= HUNKER_SETUP_S - EPSILON;
+  return unit.type === 'soldier' && (unit.hunkerSetup ?? 0) >= HUNKER_SETUP_S - EPSILON;
 }

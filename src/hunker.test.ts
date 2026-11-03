@@ -55,13 +55,16 @@ describe('hunker setup', () => {
     const sniper = createUnit('s', 'sniper', 'blue', { x: 100, y: 100 });
     for (let i = 0; i < SETUP_TICKS * 2; i++) updateHunker(sniper, DT);
     expect(isHunkered(sniper)).toBe(false);
+    sniper.hunkerSetup = HUNKER_SETUP_S; // e.g. from a malformed state
+    expect(isHunkered(sniper)).toBe(false);
   });
 
   it('sets up after finishing its path, not while walking it', () => {
     // 50px at speed 100 is ~0.5s of walking.
     const path: PathList = [{ unitId: 'b', waypoints: [{ x: 500, y: 850 }] }];
-    expect(find(run(quiet(), path, 60), 'b').hunkerSetup ?? 0).toBeLessThan(HUNKER_SETUP_S);
-    expect(find(run(quiet(), path, 60), 'b').hunkerSetup ?? 0).toBeGreaterThan(0);
+    const setting = find(run(quiet(), path, 60), 'b').hunkerSetup ?? 0;
+    expect(setting).toBeGreaterThan(0);
+    expect(setting).toBeLessThan(HUNKER_SETUP_S);
     const done = find(run(quiet(), path, 120), 'b');
     expect(Math.abs(done.y - 850)).toBeLessThan(2); // arrival counts within 2px
     expect(done.hunkerSetup).toBe(HUNKER_SETUP_S);

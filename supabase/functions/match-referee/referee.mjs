@@ -79,7 +79,7 @@ function updateHunker(unit, dt) {
   unit.hunkerSetup = moving ? 0 : Math.min(HUNKER_SETUP_S, (unit.hunkerSetup ?? 0) + dt);
 }
 function isHunkered(unit) {
-  return (unit.hunkerSetup ?? 0) >= HUNKER_SETUP_S - EPSILON;
+  return unit.type === "soldier" && (unit.hunkerSetup ?? 0) >= HUNKER_SETUP_S - EPSILON;
 }
 
 // src/units.ts

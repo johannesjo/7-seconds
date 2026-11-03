@@ -664,6 +664,7 @@ export class Renderer {
           nose.stroke({ width: 1.5, color: this.theme.shieldGoldBright, alpha: 0.4 * integrity });
         }
       }
+      // A freshly drawn path will cancel the hunker on the first tick.
       if (unit.type === 'soldier') this.drawHunkerArc(container.getChildAt(3) as Graphics, unit);
       // Rotate body with the gun for person-shaped units
       if (unit.type !== 'blade') {
@@ -843,7 +844,7 @@ export class Renderer {
    *  is hunkered — it spans the cone that gets the damage reduction. */
   private drawHunkerArc(g: Graphics, unit: Unit): void {
     g.clear();
-    const progress = hunkerProgress(unit);
+    const progress = unit.waypoints.length > 0 ? 0 : hunkerProgress(unit);
     if (progress <= 0) return;
     g.rotation = unit.gunAngle;
     const half = FLANK_ANGLE_THRESHOLD * progress;
