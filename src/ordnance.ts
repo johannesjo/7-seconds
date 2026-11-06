@@ -18,6 +18,10 @@ export interface OrdnanceHit {
   angle: number;
   damage: number;
   flanked: boolean;
+  /** The mortar or rocketeer that fired it (for highlights only). */
+  sourceId?: string;
+  /** HP the target actually lost. */
+  dealt?: number;
 }
 
 export interface Explosion {
@@ -78,6 +82,7 @@ export function fireMortar(mortar: Unit, target: Unit, dt: number): Projectile[]
     team: mortar.team,
     maxRange: Infinity,
     distanceTraveled: 0,
+    ownerId: mortar.id,
   }];
 }
 
@@ -112,12 +117,13 @@ export function launchRocket(unit: Unit): Projectile | null {
     // Slack for a launch point that drifted from where the path was drawn.
     maxRange: ROCKET_MAX_PATH + 100,
     distanceTraveled: 0,
+    ownerId: unit.id,
   };
 }
 
 /** Damage and knock back every enemy of `team` within the blast. Damage falls
  *  off linearly from the centre to `edgeDamage` × `damage` at the rim. */
-function explode(pos: Vec2, radius: number, damage: number, edgeDamage: number, team: Team, units: Unit[], hits: OrdnanceHit[]): void {
+function explode(pos: Vec2, radius: number, damage: number, edgeDamage: number, team: Team, units: Unit[], hits: OrdnanceHit[], sourceId?: string): void {
   for (const u of units) {
     if (!u.alive || u.team === team) continue;
     const d = dist(pos, u.pos);
@@ -131,7 +137,7 @@ function explode(pos: Vec2, radius: number, damage: number, edgeDamage: number, 
     applyDamage(u, dealt);
     hits.push({
       pos: { x: u.pos.x, y: u.pos.y }, targetId: u.id, killed: before > 0 && !u.alive,
-      team, angle, damage: dealt, flanked: false,
+      team, angle, damage: dealt, flanked: false, sourceId, dealt: before - u.hp,
     });
   }
 }
@@ -150,7 +156,7 @@ export function updateOrdnance(
     const radius = p.blastRadius ?? 0;
     explosions.push({ pos: { x: at.x, y: at.y }, radius, team: p.team });
     // Rockets are aimed by hand and burst at full strength; shells fall off.
-    explode(at, radius, p.damage, p.kind === 'shell' ? MORTAR_EDGE_DAMAGE : 1, p.team, units, hits);
+    explode(at, radius, p.damage, p.kind === 'shell' ? MORTAR_EDGE_DAMAGE : 1, p.team, units, hits, p.ownerId);
   };
 
   for (const p of projectiles) {

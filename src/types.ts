@@ -79,6 +79,9 @@ export interface Projectile {
   trail?: Vec2[];
   piercing?: boolean;
   hitIds?: Set<string>;
+  /** The unit that fired it. Only credits hits for highlights; never read by
+   *  the rules. */
+  ownerId?: string;
   knockback?: number;
   /** Ordnance: area-damage projectiles with their own flight rules.
    *  shell — mortar round arcing over obstacles to a fixed landing point;

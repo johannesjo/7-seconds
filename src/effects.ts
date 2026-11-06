@@ -3,6 +3,7 @@ import type { Renderer as PixiRenderer } from 'pixi.js';
 import { Vec2, Team, ReplayEvent } from './types';
 import { Theme, NIGHT_THEME } from './theme';
 import { FLANK_DAMAGE_MULTIPLIER, MAP_WIDTH, MAP_HEIGHT } from './constants';
+import { multiKillLabel } from './highlights';
 
 /** Gameplay moments the UI layer turns into sound, vibration and camera shake.
  *  Emitted for live battles and replays alike, since both draw through here. */
@@ -12,13 +13,16 @@ export type FeedbackCue =
   | { type: 'hit'; damage: number }
   | { type: 'kill' }
   | { type: 'explosion'; radius: number }
-  | { type: 'shield-break' };
+  | { type: 'shield-break' }
+  | { type: 'multi-kill'; count: number };
 
 /** Damage at or above which a bullet reads as a heavy (sniper) shot. */
 const HEAVY_SHOT_DAMAGE = 25;
 
 interface Effect {
   update(dt: number): boolean; // false = expired
+  /** Drop it early (see EffectsManager.clearTransient). */
+  destroy?(): void;
 }
 
 class ImpactBurst implements Effect {
@@ -476,6 +480,223 @@ class BloodParticle implements Effect {
   }
 }
 
+/** One planned route shown as the round starts: a move, or a drawn rocket. */
+export interface PlanRoute {
+  team: Team;
+  points: Vec2[];
+  kind: 'move' | 'rocket';
+  /** The viewer's own order: drawn quieter than the opponent's. */
+  own: boolean;
+}
+
+/** Both sides' orders, revealed as the round starts so you can see what the
+ *  other side planned. Draws on, holds, then fades while the units move off. */
+class PlanReveal implements Effect {
+  private gfx = new Graphics();
+  private age = 0;
+  private static readonly DRAW_S = 0.35;
+  private static readonly HOLD_S = 1.0;
+  private static readonly FADE_S = 0.8;
+  private readonly lengths: number[];
+
+  constructor(
+    container: Container,
+    private routes: PlanRoute[],
+    private colors: Record<Team, number>,
+    private rocketColor: number,
+    private animate: boolean,
+  ) {
+    this.lengths = routes.map(r => polylineLength(r.points));
+    container.addChild(this.gfx);
+    this.draw();
+  }
+
+  /** Whether the lines are fully drawn (after that only the alpha changes). */
+  private complete = false;
+
+  private draw(): void {
+    const fadeStart = PlanReveal.DRAW_S + PlanReveal.HOLD_S;
+    this.gfx.alpha = 1 - Math.max(0, Math.min(1, (this.age - fadeStart) / PlanReveal.FADE_S));
+    if (this.complete) return;
+    const reveal = this.animate ? Math.min(1, this.age / PlanReveal.DRAW_S) : 1;
+    // Ease out so the lines shoot from the units and settle
+    const shown = 1 - (1 - reveal) * (1 - reveal);
+    this.complete = shown >= 1;
+    const alpha = 1;
+    this.gfx.clear();
+    this.routes.forEach((route, i) => {
+      const pts = truncatePolyline(route.points, this.lengths[i] * shown);
+      if (pts.length < 2) return;
+      const rocket = route.kind === 'rocket';
+      const color = rocket ? this.rocketColor : this.colors[route.team];
+      if (route.own) {
+        this.gfx.moveTo(pts[0].x, pts[0].y);
+        for (const p of pts.slice(1)) this.gfx.lineTo(p.x, p.y);
+        this.gfx.stroke({ width: 1.5, color, alpha: 0.4 * alpha });
+      } else {
+        dashPolyline(this.gfx, pts, rocket ? 4 : 8, rocket ? 5 : 5);
+        this.gfx.stroke({ width: rocket ? 2 : 2.5, color, alpha: 0.85 * alpha });
+      }
+      if (shown < 1) return;
+      const end = pts[pts.length - 1];
+      if (rocket) {
+        // Where the rocket will burst
+        this.gfx.circle(end.x, end.y, 9);
+        this.gfx.stroke({ width: 2, color, alpha: (route.own ? 0.4 : 0.9) * alpha });
+        return;
+      }
+      // Arrowhead at the destination
+      const prev = pts[pts.length - 2];
+      const a = Math.atan2(end.y - prev.y, end.x - prev.x);
+      const size = route.own ? 5 : 7;
+      this.gfx.moveTo(end.x - Math.cos(a - 0.5) * size, end.y - Math.sin(a - 0.5) * size);
+      this.gfx.lineTo(end.x, end.y);
+      this.gfx.lineTo(end.x - Math.cos(a + 0.5) * size, end.y - Math.sin(a + 0.5) * size);
+      this.gfx.stroke({ width: route.own ? 1.5 : 2.5, color, alpha: (route.own ? 0.4 : 0.9) * alpha });
+    });
+  }
+
+  update(dt: number): boolean {
+    if (this.gfx.destroyed) return false;
+    this.age += dt;
+    if (this.age >= PlanReveal.DRAW_S + PlanReveal.HOLD_S + PlanReveal.FADE_S) {
+      this.gfx.destroy();
+      return false;
+    }
+    this.draw();
+    return true;
+  }
+
+  destroy(): void {
+    if (!this.gfx.destroyed) this.gfx.destroy();
+  }
+}
+
+function polylineLength(points: Vec2[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  return total;
+}
+
+/** The first `length` of a polyline. */
+function truncatePolyline(points: Vec2[], length: number): Vec2[] {
+  if (points.length === 0) return [];
+  const out = [points[0]];
+  let left = length;
+  for (let i = 1; i < points.length && left > 0; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    if (d <= left) {
+      out.push(b);
+      left -= d;
+    } else {
+      const t = d > 0 ? left / d : 0;
+      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      left = 0;
+    }
+  }
+  return out;
+}
+
+/** Add dashes along a polyline to `gfx`'s current path (stroke it after). */
+function dashPolyline(gfx: Graphics, points: Vec2[], dash: number, gap: number): void {
+  let on = true;
+  let left = dash;
+  for (let i = 1; i < points.length; i++) {
+    let a = points[i - 1];
+    const b = points[i];
+    let d = Math.hypot(b.x - a.x, b.y - a.y);
+    while (d > 0) {
+      const step = Math.min(left, d);
+      const t = step / d;
+      const next = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      if (on) {
+        gfx.moveTo(a.x, a.y);
+        gfx.lineTo(next.x, next.y);
+      }
+      d -= step;
+      left -= step;
+      a = next;
+      if (left <= 1e-6) {
+        on = !on;
+        left = on ? dash : gap;
+      }
+    }
+  }
+}
+
+/** "DOUBLE KILL" and up: pops in big, then drifts up and fades. A longer
+ *  chain upgrades the team's callout in place rather than stacking another. */
+class MultiKillCallout implements Effect {
+  private text: Text;
+  private age = 0;
+  private readonly duration = 1.2;
+  private static readonly POP = 1.35;
+  private y0: number;
+
+  constructor(container: Container, pos: Vec2, label: string, fill: string, outline: number) {
+    this.text = new Text({
+      text: label,
+      style: {
+        fontSize: 18,
+        fontFamily: 'monospace',
+        fontWeight: 'bold',
+        letterSpacing: 1,
+        fill,
+        stroke: { color: outline, width: 4 },
+      },
+    });
+    this.text.anchor.set(0.5);
+    container.addChild(this.text);
+    this.y0 = 0;
+    this.place(pos);
+  }
+
+  private place(pos: Vec2): void {
+    // Room for the pop's peak scale, so the text never pokes off the map
+    const margin = (this.text.width / this.text.scale.x) * MultiKillCallout.POP / 2 + 6;
+    this.text.x = Math.max(margin, Math.min(MAP_WIDTH - margin, pos.x));
+    this.y0 = Math.max(24, pos.y - 34);
+    this.layout();
+  }
+
+  /** A longer chain: new label, restart the pop. */
+  upgrade(pos: Vec2, label: string): void {
+    this.text.text = label;
+    this.age = 0;
+    this.place(pos);
+  }
+
+  get alive(): boolean {
+    return !this.text.destroyed;
+  }
+
+  private layout(): void {
+    const t = this.age / this.duration;
+    // Pop: overshoot then settle to 1× in the first 0.15 s
+    const pop = this.age < 0.15 ? MultiKillCallout.POP - (this.age / 0.15) * (MultiKillCallout.POP - 1) : 1;
+    this.text.scale.set(pop);
+    this.text.y = this.y0 - Math.max(0, t - 0.5) * 30;
+    this.text.alpha = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
+  }
+
+  update(dt: number): boolean {
+    if (this.text.destroyed) return false;
+    this.age += dt;
+    if (this.age >= this.duration) {
+      this.text.destroy();
+      return false;
+    }
+    this.layout();
+    return true;
+  }
+
+  destroy(): void {
+    if (!this.text.destroyed) this.text.destroy();
+  }
+}
+
 export class EffectsManager {
   private container: Container;
   /** Stains accumulate for a whole battle. Kept as vector Graphics, every frame
@@ -490,6 +711,7 @@ export class EffectsManager {
   private theme: Theme = NIGHT_THEME;
   private cueTime = 0;
   private flankCueTimes = new Map<string, number>();
+  private callouts: Record<Team, MultiKillCallout | null> = { blue: null, red: null };
   onCue: ((cue: FeedbackCue) => void) | null = null;
 
   /** The ground-stain layer, which sits right above the terrain. */
@@ -552,6 +774,32 @@ export class EffectsManager {
     const tipY = pos.y + Math.sin(angle) * (radius + 4);
     this.effects.push(new MuzzleFlash(this.container, { x: tipX, y: tipY }, this.theme.muzzleFlash, this.theme.muzzleCore));
     this.onCue?.(weapon ? { type: 'launch', weapon } : { type: 'shot', heavy: damage >= HEAVY_SHOT_DAMAGE });
+  }
+
+  /** Show both sides' orders as the round starts. `animate` draws the lines
+   *  on; without it (reduced motion) they appear whole. */
+  addPlanReveal(routes: PlanRoute[], animate: boolean): void {
+    if (routes.length === 0) return;
+    this.effects.push(new PlanReveal(this.container, routes,
+      { blue: this.theme.blue, red: this.theme.red }, this.theme.bomber, animate));
+  }
+
+  /** "DOUBLE KILL", "TRIPLE KILL"…: a longer chain upgrades the callout
+   *  already showing for that team. */
+  addMultiKillCallout(pos: Vec2, count: number, team: Team): void {
+    const label = multiKillLabel(count);
+    if (!label) return;
+    const text = label.toUpperCase();
+    const current = this.callouts[team];
+    if (current?.alive) {
+      current.upgrade(pos, text);
+    } else {
+      const color = team === 'blue' ? this.theme.blueKill : this.theme.redKill;
+      const callout = new MultiKillCallout(this.container, pos, text, color, this.theme.bg);
+      this.callouts[team] = callout;
+      this.effects.push(callout);
+    }
+    this.onCue?.({ type: 'multi-kill', count });
   }
 
   addRoundStartFlash(width: number, height: number): void {
@@ -663,6 +911,17 @@ export class EffectsManager {
     this.stainTexture = null;
   }
 
+  /** Drop the round's plan reveal and multi-kill callouts. Effects don't age
+   *  while planning, so these would otherwise hang over the next orders. */
+  clearTransient(): void {
+    this.effects = this.effects.filter(e => {
+      if (!(e instanceof PlanReveal || e instanceof MultiKillCallout)) return true;
+      e.destroy();
+      return false;
+    });
+    this.callouts = { blue: null, red: null };
+  }
+
   clear(): void {
     // Destroy, not just detach — detached Graphics keep their GPU buffers alive
     for (const child of this.container.removeChildren()) child.destroy();
@@ -671,6 +930,7 @@ export class EffectsManager {
     this.effects = [];
     this.cueTime = 0;
     this.flankCueTimes.clear();
+    this.callouts = { blue: null, red: null };
   }
 
   destroy(): void {

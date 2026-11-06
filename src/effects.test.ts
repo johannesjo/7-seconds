@@ -136,3 +136,31 @@ describe('EffectsManager hit flash', () => {
     expect(shape.tint).toBe(0x3366ff);
   });
 });
+
+describe('EffectsManager round-transient effects', () => {
+  const effectLayer = (stage: Container) => stage.children[1] as Container;
+
+  // Callouts are pixi Text, which needs a DOM canvas to measure; the plan
+  // reveal stands in for both kinds of round-transient effect here.
+  it('clearTransient drops the plan reveal but keeps other effects', () => {
+    const stage = new Container();
+    const fx = new EffectsManager(stage);
+    fx.addPlanReveal([{ team: 'red', kind: 'move', own: false, points: [{ x: 10, y: 10 }, { x: 100, y: 200 }] }], false);
+    fx.addExplosion({ x: 80, y: 80 }, 40);
+    expect(effectLayer(stage).children.length).toBe(2);
+
+    fx.clearTransient();
+    expect(effectLayer(stage).children.length).toBe(1);
+    fx.update(1 / 60); // and it's gone from the update list too
+    expect(effectLayer(stage).children.length).toBe(1);
+    fx.clear();
+  });
+
+  it('the plan reveal fades out and frees itself', () => {
+    const stage = new Container();
+    const fx = new EffectsManager(stage);
+    fx.addPlanReveal([{ team: 'blue', kind: 'rocket', own: true, points: [{ x: 10, y: 10 }, { x: 100, y: 200 }] }], true);
+    for (let t = 0; t < 3; t += 1 / 60) fx.update(1 / 60);
+    expect(effectLayer(stage).children.length).toBe(0);
+  });
+});

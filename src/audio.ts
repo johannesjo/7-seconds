@@ -11,7 +11,7 @@ const rand = createRng(Date.now());
 export type Sfx =
   | 'ui' | 'draw' | 'confirm' | 'tick' | 'round-start' | 'round-end'
   | 'shot' | 'heavy-shot' | 'mortar' | 'rocket' | 'hit' | 'kill' | 'explosion'
-  | 'shield-break' | 'victory' | 'defeat' | 'upgrade';
+  | 'shield-break' | 'victory' | 'defeat' | 'upgrade' | 'multi-kill';
 
 export type MusicMood = 'off' | 'calm' | 'tense';
 
@@ -163,6 +163,13 @@ class AudioEngine {
       case 'upgrade':
         [659, 880, 1175].forEach((f, i) => this.tone(now + i * 0.06, 'sine', f, f, 0.18, 0.25));
         break;
+      case 'multi-kill': {
+        // A rising stab, one note per kill in the chain (intensity = chain length)
+        const notes = Math.min(5, Math.max(2, Math.round(intensity)));
+        [392, 494, 587, 740, 880].slice(0, notes)
+          .forEach((f, i) => this.tone(now + i * 0.045, 'square', f, f * 1.02, 0.1, 0.12));
+        break;
+      }
     }
   }
 
