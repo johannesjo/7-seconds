@@ -10,6 +10,8 @@ interface ProjectileHit {
   angle: number;
   damage: number;
   flanked: boolean;
+  /** The shooter, when known (for highlights only). */
+  sourceId?: string;
 }
 
 /** The final absorbed frontal hit. This is not a damage or kill result. */
@@ -887,6 +889,7 @@ interface AoeHit {
   killed: boolean;
   team: Team;
   damage: number;
+  sourceId: string;
 }
 
 /** Blade AoE: damage and knock back all enemies within range. */
@@ -924,6 +927,7 @@ export function bladeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
         killed: wasBefore > 0 && !enemy.alive,
         team: unit.team,
         damage: scaledDamage,
+        sourceId: unit.id,
       });
 
       // Knockback — apply velocity impulse away from blade
@@ -1043,6 +1047,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     maxRange,
     distanceTraveled: 0,
     piercing: unit.piercing ?? unit.type === 'sniper',
+    ownerId: unit.id,
   }];
 }
 
@@ -1137,6 +1142,7 @@ export function updateProjectiles(
           angle: projAngle,
           flanked,
           damage: actualDamage,
+          sourceId: p.ownerId,
         });
 
         if (p.piercing) {

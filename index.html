@@ -515,6 +515,8 @@
     #winner-sub { font-size: 15px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.7; }
     #winner-sub:empty, #result-record:empty { display: none; }
     #result-screen .stats { font-size: 16px; opacity: 0.85; }
+    #result-screen .result-highlights { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--color-btn-border); font-size: 14px; line-height: 1.6; }
+    #result-screen .result-highlights div:first-child { font-weight: bold; }
     #result-record { font-size: 13px; opacity: 0.75; }
     #result-screen .buttons { display: flex; flex-direction: column; align-items: stretch; gap: 10px; margin-top: 8px; width: min(280px, 100%); }
     #result-screen button {
@@ -544,6 +546,9 @@
       align-items: center;
       gap: 4px;
       padding: 12px 28px;
+      width: max-content;
+      max-width: calc(100% - 32px);
+      box-sizing: border-box;
       background: var(--color-card-bg);
       border: 1px solid var(--color-btn-border);
       border-radius: 8px;
@@ -555,6 +560,8 @@
     #round-banner.show { display: flex; animation: bannerInOut 1.6s ease forwards; }
     #round-banner-title { font-size: 22px; letter-spacing: 3px; text-transform: uppercase; }
     #round-banner-detail { font-size: 13px; opacity: 0.8; }
+    #round-banner-highlight { font-size: 14px; font-weight: bold; letter-spacing: 0.5px; color: var(--color-planning-blue); }
+    #round-banner-highlight[hidden] { display: none; }
     @keyframes bannerInOut {
       0% { opacity: 0; transform: translate(-50%, -40%) scale(0.92); }
       12% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -898,7 +905,7 @@
     <div id="battle-note" role="status" aria-live="polite"></div>
 
     <div id="count-in" aria-hidden="true"></div>
-    <div id="round-banner" role="status" aria-live="polite"><strong id="round-banner-title"></strong><span id="round-banner-detail"></span></div>
+    <div id="round-banner" role="status" aria-live="polite"><strong id="round-banner-title"></strong><span id="round-banner-detail"></span><span id="round-banner-highlight" hidden></span></div>
 
     <div id="planning-overlay">
       <span id="planning-label">Blue Planning</span>

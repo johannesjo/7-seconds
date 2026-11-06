@@ -11,14 +11,14 @@ const rand = createRng(Date.now());
 export type Sfx =
   | 'ui' | 'draw' | 'confirm' | 'tick' | 'round-start' | 'round-end'
   | 'shot' | 'heavy-shot' | 'mortar' | 'rocket' | 'hit' | 'kill' | 'explosion'
-  | 'shield-break' | 'victory' | 'defeat' | 'upgrade';
+  | 'shield-break' | 'victory' | 'defeat' | 'upgrade' | 'multi-kill';
 
 export type MusicMood = 'off' | 'calm' | 'tense';
 
 /** Minimum gap between two plays of the same sound, so a volley of ten shots
  *  in one frame reads as a burst rather than a wall of noise. */
 const MIN_GAP_S: Partial<Record<Sfx, number>> = {
-  shot: 0.035, 'heavy-shot': 0.05, hit: 0.03, kill: 0.05, draw: 0.07, explosion: 0.06, tick: 0.2,
+  shot: 0.035, 'heavy-shot': 0.05, 'multi-kill': 0.1, hit: 0.03, kill: 0.05, draw: 0.07, explosion: 0.06, tick: 0.2,
 };
 const SFX_VOLUME = 0.55;
 const MUSIC_VOLUME = 0.16;
@@ -163,6 +163,13 @@ class AudioEngine {
       case 'upgrade':
         [659, 880, 1175].forEach((f, i) => this.tone(now + i * 0.06, 'sine', f, f, 0.18, 0.25));
         break;
+      case 'multi-kill': {
+        // A rising stab, one note per kill in the chain (intensity = chain length)
+        const notes = Math.min(5, Math.max(2, Math.round(intensity)));
+        [392, 494, 587, 740, 880].slice(0, notes)
+          .forEach((f, i) => this.tone(now + i * 0.045, 'square', f, f * 1.02, 0.1, 0.12));
+        break;
+      }
     }
   }
 

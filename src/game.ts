@@ -22,6 +22,8 @@ import {
   type ExpeditionSetup, type Survivor,
 } from './expedition';
 import { NightVision } from './night';
+import { HighlightTracker, type HitSource, type Tally } from './highlights';
+import type { PlanRoute } from './effects';
 
 const FIXED_DT = 1 / 60;
 
@@ -31,6 +33,10 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
 const HIT_STOP = { scale: 0.15, seconds: 0.06 };
 /** The final kill plays out in slow motion with the camera pushed in. */
 const FINAL_KILL = { scale: 0.35, delay: 1.5, zoom: 1.3 };
+/** A multi-kill plays out in a short slow-motion beat (real seconds). */
+const MULTI_KILL = { scale: 0.3, seconds: 0.45 };
+/** Red units the chase AI steers; their waypoints are no plan to reveal. */
+const CHASE_TYPES: ReadonlySet<UnitType> = new Set(['zombie', 'shielder', 'bomber']);
 /** Plain end-of-battle pause when there's no final-kill moment. */
 const END_DELAY_S = 0.6;
 
@@ -83,8 +89,10 @@ export class GameEngine {
   private difficulty: Difficulty = 'normal';
   private layoutIndex?: number;
   private composition?: { type: UnitType; count: number }[];
+  private hitStopTimer = 0;
   private slowMoTimer = 0;
-  private slowMoScale = 1;
+  /** Kills, damage and multi-kills, for callouts and the recap. */
+  private highlights = new HighlightTracker();
   private finalSlowMo = false;
   private lastKillPos: Vec2 | null = null;
   private expedition: ExpeditionSetup | null = null;
@@ -367,6 +375,8 @@ export class GameEngine {
       }
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
+      this.revealPlans();
+      this.highlights.startRound();
       this.roundTimer = ROUND_DURATION_S;
       this.idleTime = 0;
       this.accumulator = 0;
@@ -537,6 +547,35 @@ export class GameEngine {
     if (blue.length === 0) return;
     const frame = planningFrame(blue.map(u => u.pos), drawer.zoomLimit, MAP_WIDTH, MAP_HEIGHT);
     drawer.focusOn(frame.center, frame.zoom, battleView && battleView.zoom > 1.001 ? 450 : 800);
+  }
+
+  /** The team the local player commands, when the other side is the
+   *  computer or a remote player; null when two players share the screen. */
+  private get viewer(): Team | null {
+    return this.aiMode || this.onlineHostMode ? 'blue' : null;
+  }
+
+  /** As the round starts, flash both sides' orders so the player sees what
+   *  the other side planned. At night, only enemies in sight give theirs away. */
+  private revealPlans(): void {
+    const fx = this.renderer?.effects;
+    if (!fx) return;
+    const viewer = this.viewer;
+    const routes: PlanRoute[] = [];
+    for (const u of this.units) {
+      if (!u.alive || u.dormant) continue;
+      if (this.aiMode && u.team === 'red' && CHASE_TYPES.has(u.type)) continue;
+      if (viewer && u.team !== viewer && this.night && !this.night.canSee[viewer](u)) continue;
+      const own = u.team === viewer;
+      if (u.waypoints.length > 0) {
+        routes.push({ team: u.team, kind: 'move', own, points: [{ ...u.pos }, ...u.waypoints.map(p => ({ ...p }))] });
+      }
+      if (u.type === 'rocketeer' && !u.rocketFired && u.rocketPath && u.rocketPath.length > 0) {
+        const launch = u.waypoints[u.waypoints.length - 1] ?? u.pos;
+        routes.push({ team: u.team, kind: 'rocket', own, points: [{ ...launch }, ...u.rocketPath.map(p => ({ ...p }))] });
+      }
+    }
+    fx.addPlanReveal(routes, this.cinematic);
   }
 
   /** A move that ended stuck only cancels hunkering for its own round. */
@@ -718,10 +757,11 @@ export class GameEngine {
           const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
           if (unitGfx) fx?.addHitFlash(unitGfx);
           fx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+          const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.damage, hit.killed, false);
           if (hit.killed) {
             fx?.addKillText(hit.pos, hit.team);
             fx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
-            this.noteKill(hit.pos);
+            this.noteKill(hit.pos, hit.team, streak);
           }
           this.replayEvents.push({
             frame: this.replayFrames.length,
@@ -851,6 +891,7 @@ export class GameEngine {
     for (const e of ordnance.explosions) this.recordExplosion(e);
     hits.push(...ordnance.hits);
     for (const shieldBreak of shieldBreaks) {
+      this.highlights.recordShieldBreak(shieldBreak.team);
       this.replayEvents.push({
         ...shieldBreak,
         frame: this.replayFrames.length,
@@ -884,11 +925,12 @@ export class GameEngine {
 
       const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
       const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
+      const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.damage, hit.killed, hit.flanked);
       fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
       if (hit.killed) {
         fx?.addKillText(hit.pos, hit.team);
         fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
-        this.noteKill(hit.pos);
+        this.noteKill(hit.pos, hit.team, streak);
       }
     }
   }
@@ -902,10 +944,12 @@ export class GameEngine {
           this.recordExplosion({ pos: { ...deadUnit.pos }, radius: 80, team: deadUnit.team });
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
+            // The blast hurts both sides; only enemies of the bomber count for it.
+            const streak = this.tallyHit(deadUnit.team, eh.targetId, undefined, eh.damage, eh.killed, false);
             if (eh.killed) {
               // Matches what a replay shows for the same kill event.
               this.renderer?.effects?.addKillText(eh.pos, deadUnit.team);
-              this.noteKill(eh.pos);
+              this.noteKill(eh.pos, deadUnit.team, streak);
             }
             this.replayEvents.push({
               frame: this.replayFrames.length,
@@ -1309,12 +1353,40 @@ export class GameEngine {
     this.renderer?.resetCamera();
   }
 
-  /** Remember where the latest kill happened and briefly freeze the action. */
-  private noteKill(pos: Vec2): void {
+  /** Credit a hit to the highlights. Hits on the dealer's own side (a
+   *  bomber's blast) aren't credited. Returns the kill chain it extends. */
+  private tallyHit(team: Team, targetId: string, sourceId: string | undefined, damage: number, killed: boolean, flanked: boolean): number {
+    const victim = this.units.find(u => u.id === targetId);
+    if (victim && victim.team === team) return 0;
+    const src = sourceId ? this.units.find(u => u.id === sourceId) : undefined;
+    const source: HitSource | undefined = src ? { id: src.id, type: src.type, team: src.team, boss: src.boss } : undefined;
+    return this.highlights.recordHit({ team, source, damage, killed, flanked }, this.elapsedTime);
+  }
+
+  /** Kills in one chain before it counts as a multi-kill: crowds of zombies
+   *  fall in pairs all the time, so Horde and Expedition ask for three. */
+  get multiKillMin(): number {
+    return this.hordeMode || this.expedition ? 3 : 2;
+  }
+
+  /** This round's and the whole battle's highlights so far. */
+  get roundTally(): Tally {
+    return this.highlights.round;
+  }
+
+  get battleTally(): Tally {
+    return this.highlights.battle;
+  }
+
+  /** Remember where the latest kill happened and briefly freeze the action;
+   *  a multi-kill gets a callout and a short slow-motion beat. */
+  private noteKill(pos: Vec2, team: Team, streak: number): void {
     this.lastKillPos = { x: pos.x, y: pos.y };
+    const multi = streak >= this.multiKillMin;
+    if (multi && !this.lockstepMode) this.renderer?.effects?.addMultiKillCallout(pos, streak, team);
     if (!this.cinematic || !this.renderer || this.lockstepMode) return;
-    this.slowMoScale = HIT_STOP.scale;
-    this.slowMoTimer = HIT_STOP.seconds;
+    this.hitStopTimer = HIT_STOP.seconds;
+    if (multi) this.slowMoTimer = MULTI_KILL.seconds;
   }
 
   /** Slow the battle's last moment down and push the camera in on it. */
@@ -1337,10 +1409,19 @@ export class GameEngine {
     this.onEvent('wave-clear');
   }
 
+  /** The cosmetic time scale for this frame: the slowest of a running
+   *  hit-stop and multi-kill slow motion. */
   private consumeSlowMo(rawDt: number): number {
-    if (this.slowMoTimer <= 0) return 1;
-    this.slowMoTimer -= rawDt;
-    return this.slowMoScale;
+    let scale = 1;
+    if (this.hitStopTimer > 0) {
+      this.hitStopTimer -= rawDt;
+      scale = Math.min(scale, HIT_STOP.scale);
+    }
+    if (this.slowMoTimer > 0) {
+      this.slowMoTimer -= rawDt;
+      scale = Math.min(scale, MULTI_KILL.scale);
+    }
+    return scale;
   }
 }
 

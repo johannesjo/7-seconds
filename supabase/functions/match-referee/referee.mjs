@@ -735,7 +735,8 @@ function bladeAoeAttack(unit, units, dt) {
         targetId: enemy.id,
         killed: wasBefore > 0 && !enemy.alive,
         team: unit.team,
-        damage: scaledDamage
+        damage: scaledDamage,
+        sourceId: unit.id
       });
       if (dist4 > 0) {
         const kbSpeed = knockback / 0.15;
@@ -823,7 +824,8 @@ function tryFireProjectile(unit, target, dt, elevationZones = []) {
     team: unit.team,
     maxRange,
     distanceTraveled: 0,
-    piercing: unit.piercing ?? unit.type === "sniper"
+    piercing: unit.piercing ?? unit.type === "sniper",
+    ownerId: unit.id
   }];
 }
 function updateProjectiles(projectiles, units, dt, obstacles = []) {
@@ -891,7 +893,8 @@ function updateProjectiles(projectiles, units, dt, obstacles = []) {
           team: p.team,
           angle: projAngle,
           flanked,
-          damage: actualDamage
+          damage: actualDamage,
+          sourceId: p.ownerId
         });
         if (p.piercing) {
           if (!p.hitIds) p.hitIds = /* @__PURE__ */ new Set();
@@ -1075,7 +1078,8 @@ function fireMortar(mortar, target, dt) {
     blastRadius: MORTAR_BLAST_RADIUS,
     team: mortar.team,
     maxRange: Infinity,
-    distanceTraveled: 0
+    distanceTraveled: 0,
+    ownerId: mortar.id
   }];
 }
 function rocketReady(unit) {
@@ -1101,10 +1105,11 @@ function launchRocket(unit) {
     team: unit.team,
     // Slack for a launch point that drifted from where the path was drawn.
     maxRange: ROCKET_MAX_PATH + 100,
-    distanceTraveled: 0
+    distanceTraveled: 0,
+    ownerId: unit.id
   };
 }
-function explode(pos, radius, damage, edgeDamage, team, units, hits) {
+function explode(pos, radius, damage, edgeDamage, team, units, hits, sourceId) {
   for (const u of units) {
     if (!u.alive || u.team === team) continue;
     const d = dist2(pos, u.pos);
@@ -1123,7 +1128,8 @@ function explode(pos, radius, damage, edgeDamage, team, units, hits) {
       team,
       angle,
       damage: dealt,
-      flanked: false
+      flanked: false,
+      sourceId
     });
   }
 }
@@ -1134,7 +1140,7 @@ function updateOrdnance(projectiles, units, dt, obstacles) {
   const burst = (p, at) => {
     const radius = p.blastRadius ?? 0;
     explosions.push({ pos: { x: at.x, y: at.y }, radius, team: p.team });
-    explode(at, radius, p.damage, p.kind === "shell" ? MORTAR_EDGE_DAMAGE : 1, p.team, units, hits);
+    explode(at, radius, p.damage, p.kind === "shell" ? MORTAR_EDGE_DAMAGE : 1, p.team, units, hits, p.ownerId);
   };
   for (const p of projectiles) {
     if (p.kind === "shell") {
@@ -1627,10 +1633,69 @@ var NightVision = class {
   }
 };
 
+// src/highlights.ts
+var MULTI_KILL_WINDOW_S = 0.8;
+function emptyTeam() {
+  return { kills: 0, damage: 0, flanks: 0, shieldBreaks: 0, bestStreak: 0 };
+}
+function createTally() {
+  return { units: /* @__PURE__ */ new Map(), teams: { blue: emptyTeam(), red: emptyTeam() } };
+}
+function addHit(tally, hit, streak) {
+  const team = tally.teams[hit.team];
+  team.damage += hit.damage;
+  if (hit.flanked) team.flanks++;
+  if (hit.killed) team.kills++;
+  team.bestStreak = Math.max(team.bestStreak, streak);
+  const src = hit.source;
+  if (!src) return;
+  let unit = tally.units.get(src.id);
+  if (!unit) {
+    unit = { id: src.id, type: src.type, team: src.team, boss: src.boss, kills: 0, damage: 0, flanks: 0 };
+    tally.units.set(src.id, unit);
+  }
+  unit.damage += hit.damage;
+  if (hit.flanked) unit.flanks++;
+  if (hit.killed) unit.kills++;
+}
+var HighlightTracker = class {
+  round = createTally();
+  battle = createTally();
+  streaks = {
+    blue: { count: 0, last: -Infinity },
+    red: { count: 0, last: -Infinity }
+  };
+  startRound() {
+    this.round = createTally();
+    this.streaks.blue = { count: 0, last: -Infinity };
+    this.streaks.red = { count: 0, last: -Infinity };
+  }
+  /** Record a hit at simulation time `time`. Returns the length of the kill
+   *  chain this hit extends (1 for a lone kill, 0 for a non-kill). */
+  recordHit(hit, time) {
+    let streak = 0;
+    if (hit.killed) {
+      const s = this.streaks[hit.team];
+      s.count = time - s.last <= MULTI_KILL_WINDOW_S ? s.count + 1 : 1;
+      s.last = time;
+      streak = s.count;
+    }
+    addHit(this.round, hit, streak);
+    addHit(this.battle, hit, streak);
+    return streak;
+  }
+  recordShieldBreak(team) {
+    this.round.teams[team].shieldBreaks++;
+    this.battle.teams[team].shieldBreaks++;
+  }
+};
+
 // src/game.ts
 var FIXED_DT = 1 / 60;
 var HIT_STOP = { scale: 0.15, seconds: 0.06 };
 var FINAL_KILL = { scale: 0.35, delay: 1.5, zoom: 1.3 };
+var MULTI_KILL = { scale: 0.3, seconds: 0.45 };
+var CHASE_TYPES = /* @__PURE__ */ new Set(["zombie", "shielder", "bomber"]);
 var END_DELAY_S = 0.6;
 var GameEngine = class _GameEngine {
   units = [];
@@ -1676,8 +1741,10 @@ var GameEngine = class _GameEngine {
   difficulty = "normal";
   layoutIndex;
   composition;
+  hitStopTimer = 0;
   slowMoTimer = 0;
-  slowMoScale = 1;
+  /** Kills, damage and multi-kills, for callouts and the recap. */
+  highlights = new HighlightTracker();
   finalSlowMo = false;
   lastKillPos = null;
   expedition = null;
@@ -1891,6 +1958,8 @@ var GameEngine = class _GameEngine {
       }
       this.pathDrawer?.disable();
       this.pathDrawer?.clearGraphics();
+      this.revealPlans();
+      this.highlights.startRound();
       this.roundTimer = ROUND_DURATION_S;
       this.idleTime = 0;
       this.accumulator = 0;
@@ -2035,6 +2104,33 @@ var GameEngine = class _GameEngine {
     const frame = planningFrame(blue.map((u) => u.pos), drawer.zoomLimit, MAP_WIDTH, MAP_HEIGHT);
     drawer.focusOn(frame.center, frame.zoom, battleView && battleView.zoom > 1.001 ? 450 : 800);
   }
+  /** The team the local player commands, when the other side is the
+   *  computer or a remote player; null when two players share the screen. */
+  get viewer() {
+    return this.aiMode || this.onlineHostMode ? "blue" : null;
+  }
+  /** As the round starts, flash both sides' orders so the player sees what
+   *  the other side planned. At night, only enemies in sight give theirs away. */
+  revealPlans() {
+    const fx = this.renderer?.effects;
+    if (!fx) return;
+    const viewer = this.viewer;
+    const routes = [];
+    for (const u of this.units) {
+      if (!u.alive || u.dormant) continue;
+      if (this.aiMode && u.team === "red" && CHASE_TYPES.has(u.type)) continue;
+      if (viewer && u.team !== viewer && this.night && !this.night.canSee[viewer](u)) continue;
+      const own = u.team === viewer;
+      if (u.waypoints.length > 0) {
+        routes.push({ team: u.team, kind: "move", own, points: [{ ...u.pos }, ...u.waypoints.map((p) => ({ ...p }))] });
+      }
+      if (u.type === "rocketeer" && !u.rocketFired && u.rocketPath && u.rocketPath.length > 0) {
+        const launch = u.waypoints[u.waypoints.length - 1] ?? u.pos;
+        routes.push({ team: u.team, kind: "rocket", own, points: [{ ...launch }, ...u.rocketPath.map((p) => ({ ...p }))] });
+      }
+    }
+    fx.addPlanReveal(routes, this.cinematic);
+  }
   /** A move that ended stuck only cancels hunkering for its own round. */
   clearBlockedPaths() {
     for (const u of this.units) u.pathBlocked = false;
@@ -2172,10 +2268,11 @@ var GameEngine = class _GameEngine {
           const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
           if (unitGfx) fx?.addHitFlash(unitGfx);
           fx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+          const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.damage, hit.killed, false);
           if (hit.killed) {
             fx?.addKillText(hit.pos, hit.team);
             fx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
-            this.noteKill(hit.pos);
+            this.noteKill(hit.pos, hit.team, streak);
           }
           this.replayEvents.push({
             frame: this.replayFrames.length,
@@ -2295,6 +2392,7 @@ var GameEngine = class _GameEngine {
     for (const e of ordnance.explosions) this.recordExplosion(e);
     hits.push(...ordnance.hits);
     for (const shieldBreak of shieldBreaks) {
+      this.highlights.recordShieldBreak(shieldBreak.team);
       this.replayEvents.push({
         ...shieldBreak,
         frame: this.replayFrames.length,
@@ -2325,11 +2423,12 @@ var GameEngine = class _GameEngine {
       });
       const victimTeam = hit.team === "blue" ? "red" : "blue";
       const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
+      const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.damage, hit.killed, hit.flanked);
       fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
       if (hit.killed) {
         fx?.addKillText(hit.pos, hit.team);
         fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
-        this.noteKill(hit.pos);
+        this.noteKill(hit.pos, hit.team, streak);
       }
     }
   }
@@ -2342,9 +2441,10 @@ var GameEngine = class _GameEngine {
           this.recordExplosion({ pos: { ...deadUnit.pos }, radius: 80, team: deadUnit.team });
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
+            const streak = this.tallyHit(deadUnit.team, eh.targetId, void 0, eh.damage, eh.killed, false);
             if (eh.killed) {
               this.renderer?.effects?.addKillText(eh.pos, deadUnit.team);
-              this.noteKill(eh.pos);
+              this.noteKill(eh.pos, deadUnit.team, streak);
             }
             this.replayEvents.push({
               frame: this.replayFrames.length,
@@ -2700,12 +2800,36 @@ var GameEngine = class _GameEngine {
     this.renderer?.setNightView(null);
     this.renderer?.resetCamera();
   }
-  /** Remember where the latest kill happened and briefly freeze the action. */
-  noteKill(pos) {
+  /** Credit a hit to the highlights. Hits on the dealer's own side (a
+   *  bomber's blast) aren't credited. Returns the kill chain it extends. */
+  tallyHit(team, targetId, sourceId, damage, killed, flanked) {
+    const victim = this.units.find((u) => u.id === targetId);
+    if (victim && victim.team === team) return 0;
+    const src = sourceId ? this.units.find((u) => u.id === sourceId) : void 0;
+    const source = src ? { id: src.id, type: src.type, team: src.team, boss: src.boss } : void 0;
+    return this.highlights.recordHit({ team, source, damage, killed, flanked }, this.elapsedTime);
+  }
+  /** Kills in one chain before it counts as a multi-kill: crowds of zombies
+   *  fall in pairs all the time, so Horde and Expedition ask for three. */
+  get multiKillMin() {
+    return this.hordeMode || this.expedition ? 3 : 2;
+  }
+  /** This round's and the whole battle's highlights so far. */
+  get roundTally() {
+    return this.highlights.round;
+  }
+  get battleTally() {
+    return this.highlights.battle;
+  }
+  /** Remember where the latest kill happened and briefly freeze the action;
+   *  a multi-kill gets a callout and a short slow-motion beat. */
+  noteKill(pos, team, streak) {
     this.lastKillPos = { x: pos.x, y: pos.y };
+    const multi = streak >= this.multiKillMin;
+    if (multi && !this.lockstepMode) this.renderer?.effects?.addMultiKillCallout(pos, streak, team);
     if (!this.cinematic || !this.renderer || this.lockstepMode) return;
-    this.slowMoScale = HIT_STOP.scale;
-    this.slowMoTimer = HIT_STOP.seconds;
+    this.hitStopTimer = HIT_STOP.seconds;
+    if (multi) this.slowMoTimer = MULTI_KILL.seconds;
   }
   /** Slow the battle's last moment down and push the camera in on it. */
   startFinalKillMoment() {
@@ -2725,10 +2849,19 @@ var GameEngine = class _GameEngine {
     this.renderer?.resetCamera();
     this.onEvent("wave-clear");
   }
+  /** The cosmetic time scale for this frame: the slowest of a running
+   *  hit-stop and multi-kill slow motion. */
   consumeSlowMo(rawDt) {
-    if (this.slowMoTimer <= 0) return 1;
-    this.slowMoTimer -= rawDt;
-    return this.slowMoScale;
+    let scale = 1;
+    if (this.hitStopTimer > 0) {
+      this.hitStopTimer -= rawDt;
+      scale = Math.min(scale, HIT_STOP.scale);
+    }
+    if (this.slowMoTimer > 0) {
+      this.slowMoTimer -= rawDt;
+      scale = Math.min(scale, MULTI_KILL.scale);
+    }
+    return scale;
   }
 };
 function adjustForDifficulty(composition, difficulty) {

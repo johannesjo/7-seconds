@@ -45,6 +45,7 @@ import { getDailyChallenge, getDailyResult, recordDailyResult, getDailyStreak, f
 import { getAiRecord, recordAiResult } from './stats';
 import { canRecordClips, startClipRecording, canShareClip, shareClip, downloadClip, type ClipRecording } from './clip';
 import type { FeedbackCue } from './effects';
+import { battleHighlights, createTally, mergeTally, roundHighlights, type Tally } from './highlights';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -86,6 +87,7 @@ const clipBtn = document.getElementById('clip-btn') as HTMLButtonElement;
 const roundBanner = document.getElementById('round-banner')!;
 const roundBannerTitle = document.getElementById('round-banner-title')!;
 const roundBannerDetail = document.getElementById('round-banner-detail')!;
+const roundBannerHighlight = document.getElementById('round-banner-highlight')!;
 const rematchBtn = document.getElementById('rematch-btn')!;
 const retryEncounterBtn = document.getElementById('retry-encounter-btn')!;
 const newBattleBtn = document.getElementById('new-battle-btn')!;
@@ -320,6 +322,8 @@ let hordePicksMade = 0;
 /** The cards on the upgrade screen, kept so a replay round trip can't re-deal them. */
 let hordeDealt: HordeUpgrade[] | null = null;
 let hordeScore = 0;
+/** Highlights over a whole Horde run (each wave is its own engine). */
+let hordeTally: Tally = createTally();
 /** The record as it stood when the run began, to spot a new personal best. */
 let hordeRecordAtStart: HordeRecord | null = null;
 /** True on the "Horde cleared" screen, until the player goes on or leaves. */
@@ -444,6 +448,10 @@ function handleFeedbackCue(cue: FeedbackCue): void {
       audio.play('shield-break');
       pulse('light');
       break;
+    case 'multi-kill':
+      audio.play('multi-kill', cue.count);
+      pulse('heavy');
+      break;
   }
 }
 
@@ -470,21 +478,44 @@ function showRoundBanner(round: number, before: { blue: number; red: number }, a
   }
   const news = expeditionActive ? engine?.takePursuitNews() : null;
   if (news && news.count > 0) parts.push(`${news.count} more on your trail${news.stalled ? ' — you stalled' : ''}`);
-  flashBanner(`Round ${round - 1} over`, parts.length > 0 ? parts.join(' · ') : 'No casualties');
+  const highlights = engine ? roundHighlights(engine.roundTally, vsComputer ? 'blue' : null, engine.multiKillMin) : [];
+  flashBanner(`Round ${round - 1} over`, parts.length > 0 ? parts.join(' · ') : 'No casualties', highlights.join(' · '));
   audio.play('round-end');
 }
 
-/** Show the between-rounds card briefly. */
-function flashBanner(title: string, detail: string): void {
+/** The between-rounds card stays up longer when it has highlights to read. */
+const ROUND_BANNER_HIGHLIGHT_MS = 2200;
+
+/** Show the between-rounds card briefly, with an optional highlight line. */
+function flashBanner(title: string, detail: string, highlight = ''): void {
   roundBannerTitle.textContent = title;
   roundBannerDetail.textContent = detail;
+  roundBannerHighlight.textContent = highlight;
+  roundBannerHighlight.hidden = !highlight;
+  const ms = highlight ? ROUND_BANNER_HIGHLIGHT_MS : ROUND_BANNER_MS;
+  roundBanner.style.animationDuration = `${ms}ms`;
   roundBanner.classList.remove('show');
   void roundBanner.offsetWidth; // restart the animation
   roundBanner.classList.add('show');
   // Timed here too: with reduced motion the card has no fade-out animation.
   window.clearTimeout(roundBannerTimer);
-  roundBannerTimer = window.setTimeout(hideRoundBanner, ROUND_BANNER_MS);
+  roundBannerTimer = window.setTimeout(hideRoundBanner, ms);
 }
+
+/** Add highlight lines (MVP, flanks, best multi-kill) under the result stats. */
+function appendResultHighlights(lines: string[]): void {
+  if (lines.length === 0) return;
+  const box = document.createElement('div');
+  box.className = 'result-highlights';
+  for (const line of lines) {
+    const row = document.createElement('div');
+    row.textContent = line;
+    box.append(row);
+  }
+  resultStatsEl.append(box);
+}
+
+const bossName = (id: keyof typeof BOSSES): string => BOSSES[id].name;
 
 function hideRoundBanner(): void {
   window.clearTimeout(roundBannerTimer);
@@ -625,6 +656,7 @@ function onGameEvent(
 
   if (event === 'wave-clear' && hordeActive) {
     captureReplayData();
+    mergeTally(hordeTally, engine!.battleTally);
     // Store surviving blue units
     hordeUnits = engine!.getUnits().filter(u => u.team === 'blue' && u.alive);
     healAllBlue(hordeUnits);
@@ -651,6 +683,7 @@ function onGameEvent(
 
     // Horde defeat
     if (hordeActive) {
+      if (engine) mergeTally(hordeTally, engine.battleTally);
       showHordeResult(false);
       return;
     }
@@ -698,6 +731,7 @@ function onGameEvent(
       `${aiMode ? 'Enemy' : 'Red'} survivors: ${result.redAlive}/${result.redTotal}`,
     ];
     resultStatsEl.innerHTML = statsLines.join('<br>');
+    if (engine) appendResultHighlights(battleHighlights(engine.battleTally, aiMode ? 'blue' : null, bossName));
 
     trackedBattleLive = false;
     if (dailyChallenge) {
@@ -937,6 +971,7 @@ function startHorde(): void {
   hordePicksMade = 0;
   hordeDealt = null;
   hordeScore = 0;
+  hordeTally = createTally();
   canContinueEndless = false;
   hordeRecordAtStart = getHordeRecord();
   lastReplayData = null;
@@ -1115,6 +1150,7 @@ function showHordeResult(victory: boolean): void {
   ];
   if (victory) lines.push(`Survivors: ${hordeUnits.filter(u => u.alive).length}`);
   resultStatsEl.innerHTML = lines.join('<br>');
+  appendResultHighlights(battleHighlights(hordeTally, 'blue'));
 
   const before = hordeRecordAtStart ?? getHordeRecord();
   const record = getHordeRecord();
@@ -1245,6 +1281,7 @@ function showExpeditionResult(result: BattleResult): void {
   const kills = expeditionDead();
   const closest = engine?.closestToExtraction ?? 0;
   const before = getExpeditionRecord();
+  const highlights = engine ? battleHighlights(engine.battleTally, 'blue') : [];
   engine?.stop();
   const rounds = currentRound;
   if (won) {
@@ -1261,6 +1298,7 @@ function showExpeditionResult(result: BattleResult): void {
     `Rescued: ${rescued}/${SURVIVOR_COUNT}`,
     `Enemies killed: ${kills}`,
   ].join('<br>');
+  appendResultHighlights(highlights);
 
   if (won) {
     const record = recordExtraction(rounds, out);

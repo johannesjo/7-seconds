@@ -13,8 +13,8 @@
 ## How It Works
 
 1. **Plan** — Draw movement paths for each of your units; right after drawing one, tap an enemy to make that unit focus its fire on it (tap again to clear; not yet in online play)
-2. **Fight** — Units follow their paths and auto-engage enemies within range
-3. **Repeat** — Survive multiple rounds until one side is eliminated
+2. **Fight** — Units follow their paths and auto-engage enemies within range; each round opens by flashing both sides' orders, so you see what the other side planned, and multi-kills get a callout and a slow-motion beat
+3. **Repeat** — Survive multiple rounds until one side is eliminated. The card between rounds and the result screen sum up the highlights: the MVP unit, flank hits and the best multi-kill
 
 Terrain matters: elevation grants range bonuses, obstacles block movement and line of sight, and flanking deals extra damage.
 
