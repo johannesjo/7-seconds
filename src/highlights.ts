@@ -1,7 +1,7 @@
 // Battle highlights: who did what, for the multi-kill callouts, the
 // between-rounds card and the result screen. Purely a record of hits the
 // simulation already produced; nothing here feeds back into the rules.
-import type { BossId, Team, UnitType } from './types';
+import type { Team, UnitType } from './types';
 
 /** Kills by one team this close together (simulation seconds) chain into a
  *  multi-kill. */
@@ -11,7 +11,6 @@ export interface UnitTally {
   id: string;
   type: UnitType;
   team: Team;
-  boss?: BossId;
   kills: number;
   damage: number;
   flanks: number;
@@ -36,13 +35,13 @@ export interface HitSource {
   id: string;
   type: UnitType;
   team: Team;
-  boss?: BossId;
 }
 
 export interface TallyHit {
   /** The team that dealt the hit. */
   team: Team;
   source?: HitSource;
+  /** HP the target actually lost. */
   damage: number;
   killed: boolean;
   flanked: boolean;
@@ -66,7 +65,7 @@ function addHit(tally: Tally, hit: TallyHit, streak: number): void {
   if (!src) return;
   let unit = tally.units.get(src.id);
   if (!unit) {
-    unit = { id: src.id, type: src.type, team: src.team, boss: src.boss, kills: 0, damage: 0, flanks: 0 };
+    unit = { id: src.id, type: src.type, team: src.team, kills: 0, damage: 0, flanks: 0 };
     tally.units.set(src.id, unit);
   }
   unit.damage += hit.damage;
@@ -160,8 +159,8 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
-function mvpName(u: UnitTally, teamLabel: boolean, bossName?: (id: BossId) => string): string {
-  const name = u.boss && bossName ? bossName(u.boss) : unitName(u.type);
+function mvpName(u: UnitTally, teamLabel: boolean): string {
+  const name = unitName(u.type);
   return teamLabel ? `${u.team === 'blue' ? 'Blue' : 'Red'} ${name.toLowerCase()}` : name;
 }
 
@@ -188,18 +187,15 @@ export function roundHighlights(tally: Tally, team: Team | null, multiKillMin = 
 }
 
 /** Highlight lines for the result screen, seen from `team`, or from both
- *  sides when null. */
-export function battleHighlights(
-  tally: Tally,
-  team: Team | null,
-  bossName?: (id: BossId) => string,
-): string[] {
+ *  sides when null. A chain shorter than `multiKillMin` isn't a highlight
+ *  (Horde never calls out a mere double). */
+export function battleHighlights(tally: Tally, team: Team | null, multiKillMin = 2): string[] {
   const lines: string[] = [];
   const mvp = findMvp(tally, team);
   if (mvp) {
     const parts = [plural(mvp.kills, 'kill'), `${Math.round(mvp.damage)} damage`];
     if (mvp.flanks > 0) parts.push(plural(mvp.flanks, 'flank hit'));
-    lines.push(`MVP: ${mvpName(mvp, !team, bossName)} · ${parts.join(' · ')}`);
+    lines.push(`MVP: ${mvpName(mvp, !team)} · ${parts.join(' · ')}`);
   }
 
   const teams: Team[] = team ? [team] : ['blue', 'red'];
@@ -212,7 +208,7 @@ export function battleHighlights(
   perTeam(t => t.shieldBreaks, 'Shields broken');
 
   const best = Math.max(...teams.map(t => tally.teams[t].bestStreak));
-  const label = multiKillLabel(best);
+  const label = best >= multiKillMin ? multiKillLabel(best) : null;
   if (label) {
     const who = team ? '' : ` (${teams.filter(t => tally.teams[t].bestStreak === best).map(t => (t === 'blue' ? 'Blue' : 'Red')).join(', ')})`;
     lines.push(`Best moment: ${label}${who}`);

@@ -18,7 +18,7 @@ export type MusicMood = 'off' | 'calm' | 'tense';
 /** Minimum gap between two plays of the same sound, so a volley of ten shots
  *  in one frame reads as a burst rather than a wall of noise. */
 const MIN_GAP_S: Partial<Record<Sfx, number>> = {
-  shot: 0.035, 'heavy-shot': 0.05, 'multi-kill': 0.1, hit: 0.03, kill: 0.05, draw: 0.07, explosion: 0.06, tick: 0.2,
+  shot: 0.035, 'heavy-shot': 0.05, hit: 0.03, kill: 0.05, draw: 0.07, explosion: 0.06, tick: 0.2,
 };
 const SFX_VOLUME = 0.55;
 const MUSIC_VOLUME = 0.16;

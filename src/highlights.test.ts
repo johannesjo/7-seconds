@@ -117,6 +117,13 @@ describe('battleHighlights', () => {
     ]);
   });
 
+  it('leaves out chains below the mode\'s multi-kill bar', () => {
+    const t = new HighlightTracker();
+    t.recordHit(kill(sniper), 1);
+    t.recordHit(kill(sniper), 1.1);
+    expect(battleHighlights(t.battle, 'blue', 3).some(l => l.startsWith('Best moment'))).toBe(false);
+  });
+
   it('shows both sides for two players', () => {
     const t = new HighlightTracker();
     t.recordHit(kill(sniper, { flanked: true }), 1);

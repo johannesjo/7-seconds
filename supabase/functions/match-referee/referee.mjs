@@ -736,7 +736,8 @@ function bladeAoeAttack(unit, units, dt) {
         killed: wasBefore > 0 && !enemy.alive,
         team: unit.team,
         damage: scaledDamage,
-        sourceId: unit.id
+        sourceId: unit.id,
+        dealt: wasBefore - enemy.hp
       });
       if (dist4 > 0) {
         const kbSpeed = knockback / 0.15;
@@ -775,7 +776,8 @@ function bomberExplode(bomber, allUnits) {
         pos: { x: u.pos.x, y: u.pos.y },
         targetId: u.id,
         killed: before > 0 && !u.alive,
-        damage: EXPLOSION_DAMAGE
+        damage: EXPLOSION_DAMAGE,
+        dealt: before - u.hp
       });
     }
   }
@@ -894,7 +896,8 @@ function updateProjectiles(projectiles, units, dt, obstacles = []) {
           angle: projAngle,
           flanked,
           damage: actualDamage,
-          sourceId: p.ownerId
+          sourceId: p.ownerId,
+          dealt: wasBefore - unit.hp
         });
         if (p.piercing) {
           if (!p.hitIds) p.hitIds = /* @__PURE__ */ new Set();
@@ -1129,7 +1132,8 @@ function explode(pos, radius, damage, edgeDamage, team, units, hits, sourceId) {
       angle,
       damage: dealt,
       flanked: false,
-      sourceId
+      sourceId,
+      dealt: before - u.hp
     });
   }
 }
@@ -1651,7 +1655,7 @@ function addHit(tally, hit, streak) {
   if (!src) return;
   let unit = tally.units.get(src.id);
   if (!unit) {
-    unit = { id: src.id, type: src.type, team: src.team, boss: src.boss, kills: 0, damage: 0, flanks: 0 };
+    unit = { id: src.id, type: src.type, team: src.team, kills: 0, damage: 0, flanks: 0 };
     tally.units.set(src.id, unit);
   }
   unit.damage += hit.damage;
@@ -1745,6 +1749,9 @@ var GameEngine = class _GameEngine {
   slowMoTimer = 0;
   /** Kills, damage and multi-kills, for callouts and the recap. */
   highlights = new HighlightTracker();
+  /** This frame's longest kill chain per team, called out once the frame's
+   *  steps have run so kills landing together give one escalated callout. */
+  pendingMultiKill = {};
   finalSlowMo = false;
   lastKillPos = null;
   expedition = null;
@@ -1913,6 +1920,8 @@ var GameEngine = class _GameEngine {
   setPhase(phase) {
     this._phase = phase;
     if (phase === "blue-planning") {
+      this.renderer?.effects?.clearTransient();
+      this.pendingMultiKill = {};
       const battleView = this.expedition ? this.renderer?.stageView() : void 0;
       if (this.expedition) this.spawnExpeditionPursuers();
       this.renderer?.resetCamera();
@@ -2105,9 +2114,10 @@ var GameEngine = class _GameEngine {
     drawer.focusOn(frame.center, frame.zoom, battleView && battleView.zoom > 1.001 ? 450 : 800);
   }
   /** The team the local player commands, when the other side is the
-   *  computer or a remote player; null when two players share the screen. */
+   *  computer, a tutorial dummy or a remote player; null when two players
+   *  share the screen. */
   get viewer() {
-    return this.aiMode || this.onlineHostMode ? "blue" : null;
+    return this.aiMode || this.practice || this.onlineHostMode ? "blue" : null;
   }
   /** As the round starts, flash both sides' orders so the player sees what
    *  the other side planned. At night, only enemies in sight give theirs away. */
@@ -2180,6 +2190,7 @@ var GameEngine = class _GameEngine {
       this.accumulator -= FIXED_DT;
       if (!this.running || this._phase !== "playing" || this.endingBattle) break;
     }
+    this.flushMultiKills();
     if (this.expedition && this._phase === "playing" && !this.endingBattle) {
       this.renderer?.followCamera(this.units.filter((u) => u.alive && u.team === "blue").map((u) => u.pos));
     }
@@ -2268,7 +2279,7 @@ var GameEngine = class _GameEngine {
           const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
           if (unitGfx) fx?.addHitFlash(unitGfx);
           fx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
-          const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.damage, hit.killed, false);
+          const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.dealt, hit.killed, false);
           if (hit.killed) {
             fx?.addKillText(hit.pos, hit.team);
             fx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
@@ -2423,7 +2434,7 @@ var GameEngine = class _GameEngine {
       });
       const victimTeam = hit.team === "blue" ? "red" : "blue";
       const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
-      const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.damage, hit.killed, hit.flanked);
+      const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.dealt ?? hit.damage, hit.killed, hit.flanked);
       fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
       if (hit.killed) {
         fx?.addKillText(hit.pos, hit.team);
@@ -2441,7 +2452,7 @@ var GameEngine = class _GameEngine {
           this.recordExplosion({ pos: { ...deadUnit.pos }, radius: 80, team: deadUnit.team });
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
-            const streak = this.tallyHit(deadUnit.team, eh.targetId, void 0, eh.damage, eh.killed, false);
+            const streak = this.tallyHit(deadUnit.team, eh.targetId, void 0, eh.dealt, eh.killed, false);
             if (eh.killed) {
               this.renderer?.effects?.addKillText(eh.pos, deadUnit.team);
               this.noteKill(eh.pos, deadUnit.team, streak);
@@ -2806,7 +2817,7 @@ var GameEngine = class _GameEngine {
     const victim = this.units.find((u) => u.id === targetId);
     if (victim && victim.team === team) return 0;
     const src = sourceId ? this.units.find((u) => u.id === sourceId) : void 0;
-    const source = src ? { id: src.id, type: src.type, team: src.team, boss: src.boss } : void 0;
+    const source = src ? { id: src.id, type: src.type, team: src.team } : void 0;
     return this.highlights.recordHit({ team, source, damage, killed, flanked }, this.elapsedTime);
   }
   /** Kills in one chain before it counts as a multi-kill: crowds of zombies
@@ -2822,14 +2833,25 @@ var GameEngine = class _GameEngine {
     return this.highlights.battle;
   }
   /** Remember where the latest kill happened and briefly freeze the action;
-   *  a multi-kill gets a callout and a short slow-motion beat. */
+   *  a multi-kill is queued for this frame's callout. */
   noteKill(pos, team, streak) {
     this.lastKillPos = { x: pos.x, y: pos.y };
-    const multi = streak >= this.multiKillMin;
-    if (multi && !this.lockstepMode) this.renderer?.effects?.addMultiKillCallout(pos, streak, team);
-    if (!this.cinematic || !this.renderer || this.lockstepMode) return;
-    this.hitStopTimer = HIT_STOP.seconds;
-    if (multi) this.slowMoTimer = MULTI_KILL.seconds;
+    if (!this.renderer || this.lockstepMode) return;
+    if (streak >= this.multiKillMin && streak > (this.pendingMultiKill[team]?.count ?? 0)) {
+      this.pendingMultiKill[team] = { pos: { x: pos.x, y: pos.y }, count: streak };
+    }
+    if (this.cinematic) this.hitStopTimer = HIT_STOP.seconds;
+  }
+  /** Call out this frame's multi-kills (one per team, at its longest chain)
+   *  and give them a short slow-motion beat. */
+  flushMultiKills() {
+    for (const team of ["blue", "red"]) {
+      const pending = this.pendingMultiKill[team];
+      if (!pending) continue;
+      this.renderer?.effects?.addMultiKillCallout(pending.pos, pending.count, team);
+      if (this.cinematic) this.slowMoTimer = MULTI_KILL.seconds;
+    }
+    this.pendingMultiKill = {};
   }
   /** Slow the battle's last moment down and push the camera in on it. */
   startFinalKillMoment() {

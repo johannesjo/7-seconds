@@ -324,6 +324,8 @@ let hordeDealt: HordeUpgrade[] | null = null;
 let hordeScore = 0;
 /** Highlights over a whole Horde run (each wave is its own engine). */
 let hordeTally: Tally = createTally();
+/** Horde's multi-kill bar (GameEngine.multiKillMin), for the run's recap. */
+const HORDE_MULTI_KILL_MIN = 3;
 /** The record as it stood when the run began, to spot a new personal best. */
 let hordeRecordAtStart: HordeRecord | null = null;
 /** True on the "Horde cleared" screen, until the player goes on or leaves. */
@@ -492,6 +494,8 @@ function flashBanner(title: string, detail: string, highlight = ''): void {
   roundBannerDetail.textContent = detail;
   roundBannerHighlight.textContent = highlight;
   roundBannerHighlight.hidden = !highlight;
+  // Blue is "you" against the computer; two players get a neutral color
+  roundBannerHighlight.classList.toggle('neutral', !(aiMode || hordeActive || expeditionActive));
   const ms = highlight ? ROUND_BANNER_HIGHLIGHT_MS : ROUND_BANNER_MS;
   roundBanner.style.animationDuration = `${ms}ms`;
   roundBanner.classList.remove('show');
@@ -515,7 +519,6 @@ function appendResultHighlights(lines: string[]): void {
   resultStatsEl.append(box);
 }
 
-const bossName = (id: keyof typeof BOSSES): string => BOSSES[id].name;
 
 function hideRoundBanner(): void {
   window.clearTimeout(roundBannerTimer);
@@ -731,7 +734,7 @@ function onGameEvent(
       `${aiMode ? 'Enemy' : 'Red'} survivors: ${result.redAlive}/${result.redTotal}`,
     ];
     resultStatsEl.innerHTML = statsLines.join('<br>');
-    if (engine) appendResultHighlights(battleHighlights(engine.battleTally, aiMode ? 'blue' : null, bossName));
+    if (engine) appendResultHighlights(battleHighlights(engine.battleTally, aiMode ? 'blue' : null, engine.multiKillMin));
 
     trackedBattleLive = false;
     if (dailyChallenge) {
@@ -1150,7 +1153,7 @@ function showHordeResult(victory: boolean): void {
   ];
   if (victory) lines.push(`Survivors: ${hordeUnits.filter(u => u.alive).length}`);
   resultStatsEl.innerHTML = lines.join('<br>');
-  appendResultHighlights(battleHighlights(hordeTally, 'blue'));
+  appendResultHighlights(battleHighlights(hordeTally, 'blue', HORDE_MULTI_KILL_MIN));
 
   const before = hordeRecordAtStart ?? getHordeRecord();
   const record = getHordeRecord();
@@ -1281,7 +1284,7 @@ function showExpeditionResult(result: BattleResult): void {
   const kills = expeditionDead();
   const closest = engine?.closestToExtraction ?? 0;
   const before = getExpeditionRecord();
-  const highlights = engine ? battleHighlights(engine.battleTally, 'blue') : [];
+  const highlights = engine ? battleHighlights(engine.battleTally, 'blue', engine.multiKillMin) : [];
   engine?.stop();
   const rounds = currentRound;
   if (won) {

@@ -21,6 +21,8 @@ const HEAVY_SHOT_DAMAGE = 25;
 
 interface Effect {
   update(dt: number): boolean; // false = expired
+  /** Drop it early (see EffectsManager.clearTransient). */
+  destroy?(): void;
 }
 
 class ImpactBurst implements Effect {
@@ -509,13 +511,18 @@ class PlanReveal implements Effect {
     this.draw();
   }
 
+  /** Whether the lines are fully drawn (after that only the alpha changes). */
+  private complete = false;
+
   private draw(): void {
-    const reveal = this.animate ? Math.min(1, this.age / PlanReveal.DRAW_S) : 1;
     const fadeStart = PlanReveal.DRAW_S + PlanReveal.HOLD_S;
-    const fade = Math.max(0, Math.min(1, (this.age - fadeStart) / PlanReveal.FADE_S));
-    const alpha = 1 - fade;
+    this.gfx.alpha = 1 - Math.max(0, Math.min(1, (this.age - fadeStart) / PlanReveal.FADE_S));
+    if (this.complete) return;
+    const reveal = this.animate ? Math.min(1, this.age / PlanReveal.DRAW_S) : 1;
     // Ease out so the lines shoot from the units and settle
     const shown = 1 - (1 - reveal) * (1 - reveal);
+    this.complete = shown >= 1;
+    const alpha = 1;
     this.gfx.clear();
     this.routes.forEach((route, i) => {
       const pts = truncatePolyline(route.points, this.lengths[i] * shown);
@@ -550,6 +557,7 @@ class PlanReveal implements Effect {
   }
 
   update(dt: number): boolean {
+    if (this.gfx.destroyed) return false;
     this.age += dt;
     if (this.age >= PlanReveal.DRAW_S + PlanReveal.HOLD_S + PlanReveal.FADE_S) {
       this.gfx.destroy();
@@ -557,6 +565,10 @@ class PlanReveal implements Effect {
     }
     this.draw();
     return true;
+  }
+
+  destroy(): void {
+    if (!this.gfx.destroyed) this.gfx.destroy();
   }
 }
 
@@ -620,6 +632,7 @@ class MultiKillCallout implements Effect {
   private text: Text;
   private age = 0;
   private readonly duration = 1.2;
+  private static readonly POP = 1.35;
   private y0: number;
 
   constructor(container: Container, pos: Vec2, label: string, fill: string, outline: number) {
@@ -641,7 +654,8 @@ class MultiKillCallout implements Effect {
   }
 
   private place(pos: Vec2): void {
-    const margin = this.text.width / 2 + 6;
+    // Room for the pop's peak scale, so the text never pokes off the map
+    const margin = (this.text.width / this.text.scale.x) * MultiKillCallout.POP / 2 + 6;
     this.text.x = Math.max(margin, Math.min(MAP_WIDTH - margin, pos.x));
     this.y0 = Math.max(24, pos.y - 34);
     this.layout();
@@ -660,8 +674,8 @@ class MultiKillCallout implements Effect {
 
   private layout(): void {
     const t = this.age / this.duration;
-    // Pop: overshoot to 1.35× then settle to 1× in the first 0.15 s
-    const pop = this.age < 0.15 ? 1.35 - (this.age / 0.15) * 0.35 : 1;
+    // Pop: overshoot then settle to 1× in the first 0.15 s
+    const pop = this.age < 0.15 ? MultiKillCallout.POP - (this.age / 0.15) * (MultiKillCallout.POP - 1) : 1;
     this.text.scale.set(pop);
     this.text.y = this.y0 - Math.max(0, t - 0.5) * 30;
     this.text.alpha = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
@@ -676,6 +690,10 @@ class MultiKillCallout implements Effect {
     }
     this.layout();
     return true;
+  }
+
+  destroy(): void {
+    if (!this.text.destroyed) this.text.destroy();
   }
 }
 
@@ -891,6 +909,17 @@ export class EffectsManager {
     this.stainSprite = null;
     this.stainTexture?.destroy(true);
     this.stainTexture = null;
+  }
+
+  /** Drop the round's plan reveal and multi-kill callouts. Effects don't age
+   *  while planning, so these would otherwise hang over the next orders. */
+  clearTransient(): void {
+    this.effects = this.effects.filter(e => {
+      if (!(e instanceof PlanReveal || e instanceof MultiKillCallout)) return true;
+      e.destroy();
+      return false;
+    });
+    this.callouts = { blue: null, red: null };
   }
 
   clear(): void {

@@ -20,6 +20,8 @@ export interface OrdnanceHit {
   flanked: boolean;
   /** The mortar or rocketeer that fired it (for highlights only). */
   sourceId?: string;
+  /** HP the target actually lost. */
+  dealt?: number;
 }
 
 export interface Explosion {
@@ -135,7 +137,7 @@ function explode(pos: Vec2, radius: number, damage: number, edgeDamage: number, 
     applyDamage(u, dealt);
     hits.push({
       pos: { x: u.pos.x, y: u.pos.y }, targetId: u.id, killed: before > 0 && !u.alive,
-      team, angle, damage: dealt, flanked: false, sourceId,
+      team, angle, damage: dealt, flanked: false, sourceId, dealt: before - u.hp,
     });
   }
 }

@@ -93,6 +93,9 @@ export class GameEngine {
   private slowMoTimer = 0;
   /** Kills, damage and multi-kills, for callouts and the recap. */
   private highlights = new HighlightTracker();
+  /** This frame's longest kill chain per team, called out once the frame's
+   *  steps have run so kills landing together give one escalated callout. */
+  private pendingMultiKill: Partial<Record<Team, { pos: Vec2; count: number }>> = {};
   private finalSlowMo = false;
   private lastKillPos: Vec2 | null = null;
   private expedition: ExpeditionSetup | null = null;
@@ -319,6 +322,10 @@ export class GameEngine {
     this._phase = phase;
 
     if (phase === 'blue-planning') {
+      // Effects don't age while planning: drop the round's plan reveal and
+      // callouts rather than leave them frozen over the new orders
+      this.renderer?.effects?.clearTransient();
+      this.pendingMultiKill = {};
       // Expedition: keep looking where the battle camera was
       const battleView = this.expedition ? this.renderer?.stageView() : undefined;
       if (this.expedition) this.spawnExpeditionPursuers();
@@ -550,9 +557,10 @@ export class GameEngine {
   }
 
   /** The team the local player commands, when the other side is the
-   *  computer or a remote player; null when two players share the screen. */
+   *  computer, a tutorial dummy or a remote player; null when two players
+   *  share the screen. */
   private get viewer(): Team | null {
-    return this.aiMode || this.onlineHostMode ? 'blue' : null;
+    return this.aiMode || this.practice || this.onlineHostMode ? 'blue' : null;
   }
 
   /** As the round starts, flash both sides' orders so the player sees what
@@ -645,6 +653,7 @@ export class GameEngine {
       // events don't re-fire and units don't move during the next planning phase
       if (!this.running || this._phase !== 'playing' || this.endingBattle) break;
     }
+    this.flushMultiKills();
 
     // Only while the round plays: a step may just have switched to planning,
     // whose view belongs to the pinch zoom
@@ -757,7 +766,7 @@ export class GameEngine {
           const unitGfx = this.renderer?.getUnitContainer(hit.targetId);
           if (unitGfx) fx?.addHitFlash(unitGfx);
           fx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
-          const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.damage, hit.killed, false);
+          const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.dealt, hit.killed, false);
           if (hit.killed) {
             fx?.addKillText(hit.pos, hit.team);
             fx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
@@ -925,7 +934,7 @@ export class GameEngine {
 
       const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
       const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
-      const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.damage, hit.killed, hit.flanked);
+      const streak = this.tallyHit(hit.team, hit.targetId, hit.sourceId, hit.dealt ?? hit.damage, hit.killed, hit.flanked);
       fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
       if (hit.killed) {
         fx?.addKillText(hit.pos, hit.team);
@@ -945,7 +954,7 @@ export class GameEngine {
           const explosionHits = bomberExplode(deadUnit, this.units);
           for (const eh of explosionHits) {
             // The blast hurts both sides; only enemies of the bomber count for it.
-            const streak = this.tallyHit(deadUnit.team, eh.targetId, undefined, eh.damage, eh.killed, false);
+            const streak = this.tallyHit(deadUnit.team, eh.targetId, undefined, eh.dealt, eh.killed, false);
             if (eh.killed) {
               // Matches what a replay shows for the same kill event.
               this.renderer?.effects?.addKillText(eh.pos, deadUnit.team);
@@ -1359,7 +1368,7 @@ export class GameEngine {
     const victim = this.units.find(u => u.id === targetId);
     if (victim && victim.team === team) return 0;
     const src = sourceId ? this.units.find(u => u.id === sourceId) : undefined;
-    const source: HitSource | undefined = src ? { id: src.id, type: src.type, team: src.team, boss: src.boss } : undefined;
+    const source: HitSource | undefined = src ? { id: src.id, type: src.type, team: src.team } : undefined;
     return this.highlights.recordHit({ team, source, damage, killed, flanked }, this.elapsedTime);
   }
 
@@ -1379,14 +1388,26 @@ export class GameEngine {
   }
 
   /** Remember where the latest kill happened and briefly freeze the action;
-   *  a multi-kill gets a callout and a short slow-motion beat. */
+   *  a multi-kill is queued for this frame's callout. */
   private noteKill(pos: Vec2, team: Team, streak: number): void {
     this.lastKillPos = { x: pos.x, y: pos.y };
-    const multi = streak >= this.multiKillMin;
-    if (multi && !this.lockstepMode) this.renderer?.effects?.addMultiKillCallout(pos, streak, team);
-    if (!this.cinematic || !this.renderer || this.lockstepMode) return;
-    this.hitStopTimer = HIT_STOP.seconds;
-    if (multi) this.slowMoTimer = MULTI_KILL.seconds;
+    if (!this.renderer || this.lockstepMode) return;
+    if (streak >= this.multiKillMin && streak > (this.pendingMultiKill[team]?.count ?? 0)) {
+      this.pendingMultiKill[team] = { pos: { x: pos.x, y: pos.y }, count: streak };
+    }
+    if (this.cinematic) this.hitStopTimer = HIT_STOP.seconds;
+  }
+
+  /** Call out this frame's multi-kills (one per team, at its longest chain)
+   *  and give them a short slow-motion beat. */
+  private flushMultiKills(): void {
+    for (const team of ['blue', 'red'] as const) {
+      const pending = this.pendingMultiKill[team];
+      if (!pending) continue;
+      this.renderer?.effects?.addMultiKillCallout(pending.pos, pending.count, team);
+      if (this.cinematic) this.slowMoTimer = MULTI_KILL.seconds;
+    }
+    this.pendingMultiKill = {};
   }
 
   /** Slow the battle's last moment down and push the camera in on it. */
