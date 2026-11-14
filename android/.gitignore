@@ -53,7 +53,8 @@ keystore.properties
 .cxx/
 
 # Google Services (e.g. APIs or Firebase)
-# google-services.json
+# Firebase config: kept out of git, CI writes it from the ANDROID_GOOGLE_SERVICES_JSON secret
+google-services.json
 
 # Freeline
 freeline.py
