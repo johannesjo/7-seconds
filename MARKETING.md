@@ -26,8 +26,8 @@ Before posting anywhere, know what makes 7 Seconds stand out:
 - **Zero friction** — playable instantly in a browser, no install needed
 - **7-second battles** — unique hook, easy to understand, great for short-form video
 - **Draw-to-command** — tactile, visual gameplay that looks great in clips
-- **Multiple modes** — PvP, vs AI, Horde, Capture the Flag
-- **Diverse unit types** — soldiers, blades, snipers, zombies, shielders, bombers
+- **Multiple modes** — vs AI, Daily challenge, Horde, Expedition, online (friend or random), Pass & Play
+- **Diverse unit types** — soldiers, snipers, blades, shielders, bombers, mortars, rocketeers
 - **Emergent chaos** — every battle plays out differently, generating shareable moments
 
 Your **elevator pitch**: _"Draw paths. Watch chaos. 7 seconds."_
@@ -73,7 +73,7 @@ Your game is inherently visual and chaotic — lean into that.
 1. **"Draw and watch" loops** — Show the planning phase, then the 7-second battle. The contrast between calm strategy and explosive action is your hook.
 2. **Clutch moments** — A single sniper taking out 5 units. A blade unit with momentum carving through an army. A bomber wiping a chokepoint.
 3. **Close calls** — Battles where the last unit standing wins with 1 HP.
-4. **Mode showcases** — Horde mode wave survival, CTF flag captures, AI outsmarting you.
+4. **Mode showcases** — Horde mode wave survival, Expedition evac runs, the Daily challenge, AI outsmarting you.
 5. **"Can you beat this?"** — Show a scenario and challenge viewers to do better.
 6. **Before/after** — Show two different path strategies on the same map and their wildly different outcomes.
 7. **Devlog content** — How units work, how the AI commander decides, how elevation affects combat.

@@ -4,34 +4,48 @@
 7 Seconds
 
 ## Short description
-Local multiplayer tactics: draw paths for your units, then watch them fight.
+Draw paths for your squad, then watch a 7-second battle unfold. Solo or online.
 
 ## Full description
 Draw paths for your units – then watch them fight for 7 seconds.
 
-7 Seconds is a local tactics game where you plan your troops' movements each round. Once both sides are ready, all orders execute simultaneously. Positioning, flanking, and team composition decide the outcome.
+7 Seconds is a tactics game you can play in a coffee break. Each round you plan your squad's moves by drawing their paths. Then both sides' orders run at the same time, and positioning, flanking and the right mix of units decide the fight.
 
 GAME MODES
-• PvP – Hotseat multiplayer on one device
-• Vs. AI – Play solo against the AI
-• Horde – Survive 15 waves of increasingly tough enemies and upgrade your squad between rounds
-• Capture the Flag – Grab the enemy flag and bring it to your base
+• Play vs AI – Easy, Normal or Hard, with your record and streak kept per difficulty
+• Daily challenge – The same map and armies for everyone, once a day. Share your result
+• Horde – Survive 15 waves of tougher and tougher enemies, picking upgrades between waves, then keep going in endless mode
+• Expedition – Cross a wide map, sneak past sleeping packs, rescue survivors and call the evac before the horde catches up
+• Online – Challenge a friend with a link and take turns at your own pace, or get matched with a random opponent
+• Pass & Play – Two players on one device
+• Tutorial – Five short lessons teach you the basics
 
 UNITS
-• Soldier – Versatile ranged fighter
-• Blade – Fast melee attacker with area damage
-• Sniper – Long range, piercing shots
-• Shielder – Blocks frontal attacks
-• Bomber – Chain explosion on death
+• Soldier – Balanced ranged fighter
+• Sniper – Long range and heavy, piercing shots, but fragile
+• Blade – Fast melee attacker that builds speed while charging
+• Shielder – Blocks shots from the front
+• Bomber – Explodes when killed, hurting everyone nearby
+• Mortar – Lobs shells over cover
+• Rocketeer – You draw its rocket's flight path
 
 TACTICAL DEPTH
 • Flanking deals 50% bonus damage
 • High ground extends your range
-• Line of sight and obstacles shape every fight
-• Multiple upgrade paths in Horde mode
+• Obstacles block movement and line of sight
+• Offline battles open each round by revealing both sides' plans, so you see what you were up against
 
 FEATURES
-• Local multiplayer on a single device
-• Replay system for every battle
-• No ads, no in-app purchases, no data collection
-• Completely free and open source
+• Watch a replay of every battle
+• Turn alerts for online matches
+• No ads, no in-app purchases
+• Online play stores only what a match needs; see the privacy policy
+
+<!--
+Before publishing:
+- Data safety form: online play stores match data, an anonymous account id and
+  push tokens (see public/privacy-policy.html). Don't declare "no data collected".
+- Ranked (Google Play Games) is left out because it stays hidden until the Play
+  Games ids are configured (docs/ranked.md). Add a line once it's live.
+- Capture the Flag is hidden in the menu, so it isn't listed.
+-->
