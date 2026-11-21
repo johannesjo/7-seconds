@@ -771,12 +771,11 @@ export function hasLineOfSight(a: Vec2, b: Vec2, obstacles: Obstacle[], padding 
 }
 
 /** The enemy `attacker` aims at: the nearest one in line of sight, else the
- *  nearest at all. `canSee` (night battles) limits it to enemies its team can
- *  see; when omitted every enemy counts, as in normal play. */
-export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null, obstacles: Obstacle[] = [], canSee?: (enemy: Unit) => boolean): Unit | null {
+ *  nearest at all. */
+export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string | null, obstacles: Obstacle[] = []): Unit | null {
   // Sleeping lurkers (Expedition only) are left alone so a squad can sneak
   // past; a focus order (focusTarget) still shoots one on purpose.
-  const enemies = allUnits.filter(u => u.alive && !u.dormant && u.team !== attacker.team && (!canSee || canSee(u)));
+  const enemies = allUnits.filter(u => u.alive && !u.dormant && u.team !== attacker.team);
   if (enemies.length === 0) return null;
 
   if (preferredId) {
@@ -807,26 +806,24 @@ export function findTarget(attacker: Unit, allUnits: Unit[], preferredId: string
 
 /** The living enemy this unit was ordered to focus, if any. A dead or missing
  *  focus clears the order, so the unit falls back to auto-targeting. */
-export function focusTarget(unit: Unit, allUnits: Unit[], canSee?: (enemy: Unit) => boolean): Unit | null {
+export function focusTarget(unit: Unit, allUnits: Unit[]): Unit | null {
   const id = unit.attackTargetId;
   if (!id) return null;
   const target = allUnits.find(u => u.id === id && u.alive && u.team !== unit.team) ?? null;
   if (!target) unit.attackTargetId = null;
-  // Night: an unseen focus is kept for when it shows up again.
-  if (target && canSee && !canSee(target)) return null;
   return target;
 }
 
 /** Who a gun unit shoots at (or faces). Focus fire never makes a unit hold
  *  its fire: it shoots its focus whenever it can, otherwise its usual target
  *  (the nearest enemy in sight) if it can hit that, and when it can hit
- *  neither it turns toward its focus (if seen) so its gun is already on it. */
-export function findCombatTarget(unit: Unit, allUnits: Unit[], obstacles: Obstacle[], elevationZones: ElevationZone[], canSee?: (enemy: Unit) => boolean): Unit | null {
+ *  neither it turns toward its focus so its gun is already on it. */
+export function findCombatTarget(unit: Unit, allUnits: Unit[], obstacles: Obstacle[], elevationZones: ElevationZone[]): Unit | null {
   const canShoot = (t: Unit) => isInRange(unit, t, elevationZones)
     && hasLineOfSight(unit.pos, t.pos, obstacles, unit.projectileRadius);
-  const focus = focusTarget(unit, allUnits, canSee);
+  const focus = focusTarget(unit, allUnits);
   if (focus && canShoot(focus)) return focus;
-  const nearest = findTarget(unit, allUnits, null, obstacles, canSee);
+  const nearest = findTarget(unit, allUnits, null, obstacles);
   if (nearest && canShoot(nearest)) return nearest;
   if (focus && hasLineOfSight(unit.pos, focus.pos, obstacles)) return focus;
   return nearest;

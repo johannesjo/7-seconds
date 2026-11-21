@@ -283,13 +283,6 @@ let trackedBattleLive = false;
 
 const DIFFICULTY_KEY = '7s-difficulty';
 const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
-/** Night battle (experimental vs-AI variant, see src/night.ts). */
-const NIGHT_KEY = '7s-night';
-let nightBattle = (() => {
-  try { return localStorage.getItem(NIGHT_KEY) === '1'; } catch { return false; }
-})();
-/** The battle being played is a night battle. */
-let nightActive = false;
 let difficulty: Difficulty = (() => {
   try {
     const saved = localStorage.getItem(DIFFICULTY_KEY);
@@ -746,13 +739,11 @@ function onGameEvent(
       resultRecordEl.textContent = `Daily #${dailyChallenge.number}${practice ? ' · practice run' : ''}`
         + (streak > 0 ? ` · ${streak}-day win streak` : '');
       shareResultBtn.style.display = '';
-    } else if (aiMode && !playingRetry && !nightActive) {
+    } else if (aiMode && !playingRetry) {
       const record = recordAiResult(difficulty, won);
       const best = won && record.streak === record.bestStreak && record.streak > 1 ? ' (best!)' : '';
       resultRecordEl.textContent = `${DIFFICULTY_LABELS[difficulty]} · ${record.wins}W – ${record.losses}L`
         + (record.streak > 0 ? ` · streak ${record.streak}${best}` : '');
-    } else if (nightActive) {
-      resultRecordEl.textContent = `Night battle · ${DIFFICULTY_LABELS[difficulty]} (not counted in your record)`;
     }
 
     rematchBtn.textContent = dailyChallenge ? 'Play again' : aiMode ? 'New encounter' : 'Rematch';
@@ -796,9 +787,7 @@ function startGame(retry = false): void {
   engine?.stop();
   applyTheme();
   const daily = tutorialLesson === null && aiMode ? dailyChallenge : null;
-  nightActive = nightBattle && tutorialLesson === null && aiMode && !daily;
   engine = new GameEngine(renderer!, onGameEvent, {
-    night: nightActive,
     aiMode: tutorialLesson === null && aiMode,
     practice: tutorialLesson === null ? undefined : createTutorialEncounter(tutorialLesson),
     initialState: encounter?.state,
@@ -813,9 +802,7 @@ function startGame(retry = false): void {
   tutorialFinished = false;
   planningOverlay.classList.toggle('tutorial', tutorialLesson !== null);
   planningInstructions.textContent = tutorialLesson === null
-    ? nightActive
-      ? 'Drag from a unit to draw its path. Night: you only see what your units see; faded enemies are where they were last seen.'
-      : 'Drag from a unit to draw its path. Then tap an enemy to focus its fire.'
+    ? 'Drag from a unit to draw its path. Then tap an enemy to focus its fire.'
     : TUTORIAL_LESSONS[tutorialLesson].instruction;
   confirmBtn.textContent = tutorialLesson === null ? 'Done' : 'Fight';
   rematchBtn.textContent = 'Rematch';
@@ -837,7 +824,6 @@ function resetRoundTracking(): void {
 }
 
 function startCtfGame(): void {
-  nightActive = false;
   lastReplayData = null;
   engine?.stop();
   applyTheme();
@@ -939,7 +925,7 @@ function forfeitTrackedBattle(): void {
   if (dailyChallenge) {
     const total = engine.getUnits().filter(u => u.team === 'blue').length;
     recordDailyResult({ date: dailyChallenge.date, won: false, rounds: currentRound, survivors: alive.blue, total });
-  } else if (!nightActive) {
+  } else {
     recordAiResult(difficulty, false);
   }
 }
@@ -962,7 +948,6 @@ function stopReplay(): void {
 // --- Horde mode functions ---
 
 function startHorde(): void {
-  nightActive = false;
   hordeActive = true;
   hordeWave = 0;
   hordeAppliedUpgrades = new Map();
@@ -1243,7 +1228,6 @@ evacBtn.addEventListener('click', () => {
 });
 
 function startExpedition(): void {
-  nightActive = false;
   expeditionActive = true;
   expeditionZoneShown = false;
   lastReplayData = null;
@@ -1406,13 +1390,6 @@ function closeDifficulty(): void {
 }
 
 document.getElementById('difficulty-back-btn')!.addEventListener('click', closeDifficulty);
-const nightToggle = document.getElementById('night-toggle')!;
-nightToggle.setAttribute('aria-pressed', String(nightBattle));
-nightToggle.addEventListener('click', () => {
-  nightBattle = !nightBattle;
-  nightToggle.setAttribute('aria-pressed', String(nightBattle));
-  try { localStorage.setItem(NIGHT_KEY, nightBattle ? '1' : '0'); } catch { /* unavailable */ }
-});
 for (const btn of difficultyButtons) {
   btn.addEventListener('click', async () => {
     difficulty = btn.dataset.difficulty as Difficulty;
