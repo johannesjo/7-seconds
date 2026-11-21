@@ -1,7 +1,7 @@
 {
-  "name": "master-space-master",
+  "name": "seven-seconds",
   "version": "1.5.1",
-  "description": "",
+  "description": "7 Seconds: draw your squad's paths, then watch 7 seconds of simultaneous combat.",
   "main": "index.js",
   "directories": {
     "doc": "docs"
@@ -34,7 +34,6 @@
     "@capacitor/core": "^8.1.0",
     "@capacitor/haptics": "^8.0.2",
     "@capacitor/local-notifications": "^8.0.2",
-    "@mlc-ai/web-llm": "^0.2.81",
     "@supabase/supabase-js": "^2.98.0",
     "pixi.js": "^8.16.0"
   },
