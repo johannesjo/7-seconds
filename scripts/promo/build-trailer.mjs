@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Cut the captured frames into a ~25 s silent trailer in three shapes:
+// Cut the captured frames into a ~15 s silent trailer in three shapes:
 // vertical 1080x1920 (Shorts, TikTok, Reddit mobile), square 1080x1080 (Reddit
 // feed) and landscape 1920x1080 (YouTube, which the Play promo video links to).
 //   node scripts/promo/build-trailer.mjs <battleDir> <hordeDir> <outDir>
@@ -29,8 +29,6 @@ const CLIPS = [
   { src: horde, from: horde.confirmFrame + 190, to: horde.confirmFrame + 340, speed: 1, caption: { title: 'One plan.<br>7 seconds.' } },
   { src: battle, from: 0, to: battle.confirmFrame, speed: 2.5, caption: { title: 'Draw their paths', sub: 'Drag from each unit' } },
   { src: battle, from: battle.confirmFrame, to: battle.bannerFrame + 70, speed: 1, caption: { title: 'Then both sides<br>move at once', sub: 'Flank for +50% damage' }, captionSeconds: 2.6 },
-  { src: horde, from: 0, to: horde.confirmFrame, speed: 1.5 },
-  { src: horde, from: horde.confirmFrame, to: horde.bannerFrame + 80, speed: 1, caption: { title: 'Survive the horde', sub: '15 waves, then endless' }, captionSeconds: 2.6 },
 ];
 
 // Offsets are tuned to seeds 49/7; another capture may end sooner.
