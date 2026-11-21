@@ -14,10 +14,12 @@
         sessionStorage.setItem('7s-stale-reload', String(Date.now()));
         location.reload();
       }
+      // Only code and styles: a missing image or sound mid-game (a network
+      // blip) must not reload and lose the battle.
       window.addEventListener('error', function(e) {
         var el = e.target;
-        var url = el && (el.src || el.href);
-        if (url && /\/assets\//.test(url)) reloadOnce();
+        var code = el && (el.tagName === 'SCRIPT' || (el.tagName === 'LINK' && /stylesheet|modulepreload/.test(el.rel)));
+        if (code && /\/assets\//.test(el.src || el.href)) reloadOnce();
       }, true);
       window.addEventListener('vite:preloadError', reloadOnce);
     })();

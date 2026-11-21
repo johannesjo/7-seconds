@@ -49,7 +49,8 @@ import { canRecordClips, startClipRecording, canShareClip, shareClip, downloadCl
 import type { FeedbackCue } from './effects';
 import { battleHighlights, createTally, mergeTally, roundHighlights, type Tally } from './highlights';
 
-// First, so errors anywhere below are reported too.
+// Before any game code below runs, so its errors are reported too (errors
+// while the imports above load are not caught).
 installErrorReporting();
 
 // DOM elements
