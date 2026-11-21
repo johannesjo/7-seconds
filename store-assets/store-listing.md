@@ -39,12 +39,15 @@ FEATURES
 • Watch a replay of every battle
 • Turn alerts for online matches
 • No ads, no in-app purchases
-• Online play stores only what a match needs; see the privacy policy
+• Solo and Pass & Play run entirely on your device; online play is covered by the privacy policy
 
 <!--
 Before publishing:
-- Data safety form: online play stores match data, an anonymous account id and
-  push tokens (see public/privacy-policy.html). Don't declare "no data collected".
+- Data safety form: declare everything public/privacy-policy.html lists for
+  online play: an anonymous account id, match data (plans, results), the
+  optional display name, the optional turn-alert email address, push/device
+  tokens, the Ranked profile (Play Games id, name, picture, rating) and IP
+  address. Don't declare "no data collected".
 - Ranked (Google Play Games) is left out because it stays hidden until the Play
   Games ids are configured (docs/ranked.md). Add a line once it's live.
 - Capture the Flag is hidden in the menu, so it isn't listed.
