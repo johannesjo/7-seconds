@@ -1,6 +1,6 @@
 {
   "name": "seven-seconds",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "7 Seconds: draw your squad's paths, then watch 7 seconds of simultaneous combat.",
   "main": "index.js",
   "directories": {
