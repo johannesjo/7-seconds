@@ -419,17 +419,19 @@ export class AsyncGameController {
   }
 
   /** Ask the referee to catch up on what the server owes (an AI commander's
-   *  move, a round whose plans are both in), at most every few seconds. */
-  private async catchUp(): Promise<void> {
+   *  move, a round whose plans are both in), at most every few seconds.
+   *  Returns whether a request went out (false while throttled). */
+  private async catchUp(): Promise<boolean> {
     const now = this.now();
-    if (now - this.lastAdvanceAt < ADVANCE_INTERVAL_MS) return;
+    if (now - this.lastAdvanceAt < ADVANCE_INTERVAL_MS) return false;
     this.lastAdvanceAt = now;
     const result = await this.io.advance(this.id);
-    if (this.destroyed) return;
+    if (this.destroyed) return true;
     if (result.match) this.setMatch(result.match);
     if (!result.ok && result.status === 426) this.markOutdated(result.message);
     else if (!result.ok && result.status === 409 && !result.match) this.showError(result.message);
     if (result.match) this.dirty = true;
+    return true;
   }
 
   /** Decide and perform the next step. Re-entrant calls are coalesced. */
@@ -535,8 +537,9 @@ export class AsyncGameController {
         // An AI commander plans at once; if it hasn't, the server owes a move.
         if (match.guestBot) await this.catchUp();
         else if (this.now() - this.lastIdleCheckAt >= IDLE_CHECK_MS) {
-          this.lastIdleCheckAt = this.now();
-          await this.catchUp();
+          // Count the check only once it was sent, not when throttled.
+          const sentAt = this.now();
+          if (await this.catchUp()) this.lastIdleCheckAt = sentAt;
         }
         return;
 

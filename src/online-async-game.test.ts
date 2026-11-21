@@ -372,6 +372,37 @@ describe('AsyncGameController', () => {
     hc.destroy();
   });
 
+  it('does not skip the idle check when a catch-up just ran', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    backend.holdResolution = true;
+    const env = fakePollEnv();
+    const host = makeHooks();
+    const io = backend.ioFor('host');
+    const advanceSpy = vi.spyOn(io, 'advance');
+    const hc = new AsyncGameController('m1', host.hooks, { io, watched: memWatch(), pollEnv: env });
+    await hc.start();
+    backend.plan('red', plan('r1'), 'guest');
+    await hc.submitPlan(plan('b1'));
+    await settle();
+    // Round 1 is played by a catch-up; round 2 then waits on the guest within
+    // the catch-up throttle, so the first idle check can't go out yet.
+    backend.holdResolution = false;
+    env.time += 9_000;
+    env.tick();
+    await settle();
+    await hc.onRoundPlayed(1);
+    await hc.submitPlan(plan('b2'));
+    await settle();
+    const before = advanceSpy.mock.calls.length;
+    // Past the throttle, the idle check still goes out instead of waiting 10 min.
+    env.time += 9_000;
+    env.tick();
+    await settle();
+    expect(advanceSpy.mock.calls.length).toBe(before + 1);
+    hc.destroy();
+  });
+
   it('asks the referee to play a round whose plans are both in', async () => {
     const backend = new FakeReferee('m1', 'host');
     backend.seat('guest');
