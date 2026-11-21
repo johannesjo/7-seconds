@@ -3,3 +3,7 @@
 # sessions for casual play, Google sessions for ranked. The gateway's legacy-only
 # JWT check would reject current (ES256) sessions.
 verify_jwt = false
+
+[functions.client-error]
+# Error reports come from every player, signed in to online play or not.
+verify_jwt = false

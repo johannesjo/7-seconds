@@ -15,7 +15,8 @@ Battleground uses a separate project and separate deployment credentials.
      including the database and referee tests against a PostgreSQL 16 service;
    - then, on `main` only, in the `supabase-production` environment: applies
      pending migrations with `scripts/apply-migrations.mjs` and deploys the
-     `match-referee` Edge Function with the Supabase CLI.
+     `match-referee` and `client-error` Edge Functions with the Supabase CLI.
+     `client-error` logs the game's uncaught errors (Edge Functions → client-error → Logs).
 2. **Web client:** tests, build, and the Pages deploy (plus itch.io when
    `ITCH_DEPLOY_ENABLED` is set). It runs only if the backend deployed, so a
    client never goes live before the server it needs.

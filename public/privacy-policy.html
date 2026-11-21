@@ -66,6 +66,11 @@
         <td>Stored on the server only after you turn turn alerts on. Turning them off removes the push subscription or device token. Device tokens unused for 60 days are deleted.</td>
       </tr>
       <tr>
+        <td>Error reports: the error message, where in the game's code it happened, the game version and whether it runs in a browser or the Android app</td>
+        <td>Finding and fixing crashes</td>
+        <td>Sent automatically when the game hits an unexpected error (at most five per session). Contains no player ID, name or device details. Kept only in the server's logs, which Supabase deletes after a few days.</td>
+      </tr>
+      <tr>
         <td>IP address</td>
         <td>Delivering requests to and from the server</td>
         <td>Not stored by us. Supabase and Cloudflare may log it as part of standard infrastructure operations (see below).</td>
@@ -85,7 +90,7 @@
     <li><strong>Google Play Games Services and Google Sign-In</strong> (Android, Ranked only) — verify your Play Games profile when you sign in to Ranked. <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.</li>
     <li><strong>Firebase Cloud Messaging</strong> (Android, only with turn alerts on) and your browser's push service (web, only with notifications on) — deliver turn notifications to your device.</li>
   </ul>
-  <p>No analytics, advertising, tracking, or telemetry services are used.</p>
+  <p>No analytics, advertising or tracking services are used. The only automatic report is the error report described above.</p>
 
   <h2>Cookies and Local Storage</h2>
   <p>The game does not use cookies. It uses browser localStorage to store:</p>

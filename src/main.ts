@@ -1,4 +1,5 @@
 import { Renderer } from './renderer';
+import { installErrorReporting } from './error-report';
 import { Capacitor } from '@capacitor/core';
 import { notifyLocalTurn } from './notify';
 import { GameEngine, type Difficulty } from './game';
@@ -47,6 +48,9 @@ import { getAiRecord, recordAiResult } from './stats';
 import { canRecordClips, startClipRecording, canShareClip, shareClip, downloadClip, type ClipRecording } from './clip';
 import type { FeedbackCue } from './effects';
 import { battleHighlights, createTally, mergeTally, roundHighlights, type Tally } from './highlights';
+
+// First, so errors anywhere below are reported too.
+installErrorReporting();
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
