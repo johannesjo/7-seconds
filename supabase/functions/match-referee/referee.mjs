@@ -1554,11 +1554,10 @@ function addHit(tally, hit, streak) {
   if (!src) return;
   let unit = tally.units.get(src.id);
   if (!unit) {
-    unit = { id: src.id, type: src.type, team: src.team, kills: 0, damage: 0, flanks: 0 };
+    unit = { id: src.id, type: src.type, team: src.team, kills: 0, damage: 0 };
     tally.units.set(src.id, unit);
   }
   unit.damage += hit.damage;
-  if (hit.flanked) unit.flanks++;
   if (hit.killed) unit.kills++;
 }
 var HighlightTracker = class {
