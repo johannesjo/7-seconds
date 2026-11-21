@@ -30,13 +30,12 @@ const MAX_REPORTS = 5;
 /** Everyday noise, not bugs: offline requests (Chrome, Safari, Firefox
  *  wording) and a harmless layout warning. Reporting them would use up the
  *  five reports before a real crash. */
-const NOISE = /^(Failed to fetch|Load failed|NetworkError|ResizeObserver loop)/;
+const NOISE = /^(Uncaught )?(TypeError: )?(Failed to fetch|Load failed|NetworkError|ResizeObserver loop)/;
 /** Cancelled requests and sound blocked until the first tap. */
 const NOISE_NAMES = new Set(['AbortError', 'NotAllowedError']);
 
-function isNoise(info: ErrorEventInfo): boolean {
-  const name = info.error instanceof Error || info.error instanceof DOMException ? info.error.name : '';
-  return !info.message || NOISE.test(info.message) || NOISE_NAMES.has(name);
+function isNoise(message: string, name: string): boolean {
+  return !message || NOISE.test(message) || NOISE_NAMES.has(name);
 }
 
 /** Turn browser error events into reports: each distinct error once, at most
@@ -46,9 +45,12 @@ export function createErrorReporter(opts: ReporterOptions): (info: ErrorEventInf
   return info => {
     // "Script error." with no file is a cross-origin script we can't see into.
     if (info.message === 'Script error.' || (info.filename && !info.filename.startsWith(opts.origin))) return;
-    if (isNoise(info)) return;
+    const name = info.error instanceof Error || info.error instanceof DOMException ? info.error.name : '';
+    // An error thrown without text is still a crash: name it by its type.
+    const text = info.message || name;
+    if (isNoise(text, name)) return;
     // Addresses can carry match ids or tokens.
-    const message = info.message.replace(/https?:\/\/\S+/g, '<url>').slice(0, 300);
+    const message = text.replace(/https?:\/\/\S+/g, '<url>').slice(0, 300);
     if (seen.has(message) || seen.size >= MAX_REPORTS) return;
     seen.add(message);
     const rawStack = info.error instanceof Error ? info.error.stack ?? '' : '';

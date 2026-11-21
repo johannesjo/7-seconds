@@ -48,12 +48,20 @@ describe('createErrorReporter', () => {
     const { send, report } = make();
     report({ message: 'Failed to fetch' });
     report({ message: 'Load failed' });
+    report({ message: 'TypeError: Failed to fetch' });
+    report({ message: 'Uncaught TypeError: Failed to fetch' });
     report({ message: 'NetworkError when attempting to fetch resource.' });
     report({ message: 'ResizeObserver loop completed with undelivered notifications.' });
     report({ message: 'aborted', error: new DOMException('aborted', 'AbortError') });
     report({ message: 'no autoplay', error: new DOMException('no autoplay', 'NotAllowedError') });
     report({ message: '' });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('still reports a crash whose error has no message, by its type', () => {
+    const { send, report } = make();
+    report({ message: '', error: new TypeError() });
+    expect(send.mock.calls[0][0].message).toBe('TypeError');
   });
 
   it('blanks web addresses in the message, which can carry ids or tokens', () => {

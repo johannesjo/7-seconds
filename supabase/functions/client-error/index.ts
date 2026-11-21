@@ -10,8 +10,9 @@ const clip = (value: unknown, max: number) => (typeof value === 'string' ? value
 
 Deno.serve(async req => {
   if (req.method !== 'POST') return new Response(null, { status: 405, headers: cors });
-  // Refuse an announced oversized body before reading it.
-  if (Number(req.headers.get('content-length')) > 4_000) return new Response(null, { status: 413, headers: cors });
+  // Refuse an announced oversized body before reading it (bytes: up to four
+  // per character, so the character limit below stays the real one).
+  if (Number(req.headers.get('content-length')) > 16_000) return new Response(null, { status: 413, headers: cors });
   const text = await req.text();
   if (text.length > 4_000) return new Response(null, { status: 413, headers: cors });
   let body: Record<string, unknown>;
