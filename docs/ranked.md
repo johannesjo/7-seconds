@@ -46,7 +46,9 @@ rated; matches with no winner (abandoned, other rules version) are not.
 AI commanders keep fixed ratings (Cadet Pip 1100, Major Flint 1300): their
 side of a result records 0, so nobody can pump or sink a commander with
 throwaway accounts. They are never on the ladder and have no rank. The
-commander rated closest to the player takes the seat.
+commander rated closest to the player takes the seat. Beating a commander lifts a player to at
+most 200 above its rating (so 1500 at most from AI wins); losses count in
+full (`seven_rating_delta`, migration 0008).
 
 Titles by rating: Recruit below 1050, then Corporal, Sergeant (1150, where
 everyone starts), Lieutenant (1250), Captain (1350), Major (1450), Colonel

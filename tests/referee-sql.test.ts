@@ -221,6 +221,31 @@ describeSql('referee database', () => {
     expect(run(`select count(*) from matches where ranked and status = 'open' and host_player = '${B}';`)).toBe('1');
   });
 
+  it('lifts a player at most 200 above an AI commander they beat, and still rates losses', () => {
+    const D = '00000000-0000-4000-8000-0000000000dd';
+    // No open human search to pair with: Dee must meet a commander.
+    run(`select seven_cancel(host_player, id) from matches where ranked and status = 'open';`);
+    run(`select seven_ranked_profile('${D}', 'pgsD', 'Dee', null); update ranked_profiles set rating = 1495, games = 20 where player = '${D}';`);
+    const vsFlint = (id: string) => {
+      run(`select seven_matchmake('${D}', '${id}', true, 3, ${STATE}, null);`);
+      // Rated closest to 1495: Major Flint, 1300.
+      expect(run(`select (seven_seat_bot('${id}', interval '0')).guest_name;`)).toBe('Major Flint (AI)');
+    };
+    // Worked by hand: K 32 against 1300 would give +8; the cap leaves +5 (to 1500).
+    vsFlint('rcap01');
+    run(`select seven_finish('rcap01', 'blue', 'battle');`);
+    expect(run(`select rating from ranked_profiles where player = '${D}';`)).toBe('1500');
+    // At the cap a win shows, and earns, nothing.
+    vsFlint('rcap02');
+    expect(JSON.parse(run(`select seven_ranked_view('${D}', 'rcap02');`)).stakes).toEqual({ win: 0, loss: -24 });
+    run(`select seven_finish('rcap02', 'blue', 'battle');`);
+    expect(run(`select rating, wins from ranked_profiles where player = '${D}';`)).toBe('1500|2');
+    // A loss still costs: 32 * (0 - 0.7597) = -24.
+    vsFlint('rcap03');
+    run(`select seven_finish('rcap03', 'red', 'battle');`);
+    expect(run(`select rating from ranked_profiles where player = '${D}';`)).toBe('1476');
+  });
+
   it('serves ranked overviews and the ladder without player ids', () => {
     const overview = run(`select seven_ranked_overview('${B}');`);
     const parsed = JSON.parse(overview);
