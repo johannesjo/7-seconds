@@ -69,4 +69,18 @@ describe('createErrorReporter', () => {
     report({ message: 'GET https://x.supabase.co/rest/v1/matches?id=eq.abc123 failed' });
     expect(send.mock.calls[0][0].message).toBe('GET <url> failed');
   });
+
+  it('blanks web addresses in the stack too, which repeats the message', () => {
+    const { send, report } = make();
+    const error = new Error('GET https://x.supabase.co/rest/v1/matches?id=eq.abc123 failed');
+    error.stack = `Error: ${error.message}\n    at load (${ORIGIN}/assets/index-abc.js:1:200)`;
+    report({ message: error.message, error });
+    expect(send.mock.calls[0][0].stack).toBe('Error: GET <url> failed\n    at load (/assets/index-abc.js:1:200)');
+  });
+
+  it('still reports a game file that failed to load', () => {
+    const { send, report } = make();
+    report({ message: 'TypeError: Failed to fetch dynamically imported module: /assets/recorder-x.js' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
 });

@@ -30,9 +30,12 @@ const MAX_REPORTS = 5;
 /** Everyday noise, not bugs: offline requests (Chrome, Safari, Firefox
  *  wording) and a harmless layout warning. Reporting them would use up the
  *  five reports before a real crash. */
-const NOISE = /^(Uncaught )?(TypeError: )?(Failed to fetch|Load failed|NetworkError|ResizeObserver loop)/;
+const NOISE = /^(Uncaught )?(TypeError: )?((Failed to fetch|Load failed)$|NetworkError when|ResizeObserver loop)/;
 /** Cancelled requests and sound blocked until the first tap. */
 const NOISE_NAMES = new Set(['AbortError', 'NotAllowedError']);
+
+/** Addresses can carry match ids or tokens. */
+const blankUrls = (text: string) => text.replace(/https?:\/\/\S+/g, '<url>');
 
 function isNoise(message: string, name: string): boolean {
   return !message || NOISE.test(message) || NOISE_NAMES.has(name);
@@ -49,12 +52,13 @@ export function createErrorReporter(opts: ReporterOptions): (info: ErrorEventInf
     // An error thrown without text is still a crash: name it by its type.
     const text = info.message || name;
     if (isNoise(text, name)) return;
-    // Addresses can carry match ids or tokens.
-    const message = text.replace(/https?:\/\/\S+/g, '<url>').slice(0, 300);
+    const message = blankUrls(text).slice(0, 300);
     if (seen.has(message) || seen.size >= MAX_REPORTS) return;
     seen.add(message);
     const rawStack = info.error instanceof Error ? info.error.stack ?? '' : '';
-    const stack = rawStack.split(opts.origin).join('').split('\n').slice(0, 8).join('\n').slice(0, 1500);
+    // The game's own files keep their path; any other address is blanked (V8
+    // repeats the message on the first line).
+    const stack = blankUrls(rawStack.split(opts.origin).join('')).split('\n').slice(0, 8).join('\n').slice(0, 1500);
     opts.send({ message, stack, version: opts.version, platform: opts.platform });
   };
 }
