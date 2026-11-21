@@ -17,6 +17,10 @@ Battleground uses a separate project and separate deployment credentials.
      pending migrations with `scripts/apply-migrations.mjs` and deploys the
      `match-referee` and `client-error` Edge Functions with the Supabase CLI.
      `client-error` logs the game's uncaught errors (Edge Functions → client-error → Logs).
+     Before the first store release with it, declare **Crash logs** (App info
+     and performance, not linked to the user, not shared) in Play Console →
+     Data safety, and remove email address there if it was declared for turn
+     alerts.
 2. **Web client:** tests, build, and the Pages deploy (plus itch.io when
    `ITCH_DEPLOY_ENABLED` is set). It runs only if the backend deployed, so a
    client never goes live before the server it needs.

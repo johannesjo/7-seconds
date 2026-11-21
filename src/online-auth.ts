@@ -35,7 +35,13 @@ export async function currentUserId(): Promise<string | null> {
 async function signIn(): Promise<string | null> {
   const client = getSupabaseClient();
   try {
-    const { data: { session } } = await client.auth.getSession();
+    const { data: { session }, error: sessionError } = await client.auth.getSession();
+    // A failed refresh (e.g. offline) keeps the stored session; signing in
+    // anonymously now would replace it and orphan the player's matches.
+    if (sessionError) {
+      dlog(`auth: session check failed: ${sessionError.message}`);
+      return null;
+    }
     if (session?.user) {
       dlog(`auth: existing session ${session.user.id.slice(0, 8)}`);
       return session.user.id;

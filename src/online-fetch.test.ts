@@ -28,6 +28,18 @@ describe('fetchWithTimeout', () => {
     await expect(pending).rejects.toThrow('aborted');
   });
 
+  it('leaves the deadline to a caller that sets its own', async () => {
+    // Ranked sign-in waits up to 60 s via its own signal; a 20 s cut would
+    // waste the single-use Play Games code.
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', hangingFetch());
+    let settled = false;
+    fetchWithTimeout(1000)('https://example.test', { signal: new AbortController().signal })
+      .catch(() => {}).finally(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(settled).toBe(false);
+  });
+
   it('passes a normal answer through', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok')));
     const res = await fetchWithTimeout(1000)('https://example.test');

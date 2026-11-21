@@ -24,6 +24,15 @@ describe('ensureAuth', () => {
     expect(await ensureAuth()).toBe('new-user');
   });
 
+  it('keeps the stored identity when the session check fails on a bad network', async () => {
+    // A failed token refresh leaves the stored session in place; a new
+    // anonymous user would orphan the player's matches.
+    getSession.mockResolvedValueOnce({ data: { session: null }, error: { message: 'Failed to fetch' } });
+
+    expect(await ensureAuth()).toBeNull();
+    expect(signInAnonymously).not.toHaveBeenCalled();
+  });
+
   it('shares one sign-in between concurrent callers', async () => {
     getSession.mockResolvedValue(noSession);
     signInAnonymously.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null });
