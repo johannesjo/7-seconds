@@ -89,3 +89,15 @@ After a battle, **Share clip** on the result screen plays the replay while recor
 Append `?record` to the URL to enable the built-in screen recorder. Press **R** during battle or replay to capture a WebM clip (max 15 seconds).
 
 Run `npm run video:capture` to regenerate the square and 9:16 mobile action clips in `store-assets/`. The Playwright-driven capture includes path drawing before the battle and requires `ffmpeg`/`ffprobe`.
+
+The Play Store screenshots, feature graphic (`store-assets/play/`) and trailers (`store-assets/trailer/`: vertical, square, landscape) come from `scripts/promo/`. Each step takes a few minutes; frames are ~4 MB each, so keep them outside the repo:
+
+```bash
+node scripts/promo/capture-battle.mjs 49 /tmp/promo/battle
+node scripts/promo/capture-horde.mjs 7 /tmp/promo/horde
+node scripts/promo/capture-stills.mjs /tmp/promo/stills
+node scripts/promo/build-store.mjs /tmp/promo/battle /tmp/promo/horde /tmp/promo/stills store-assets/play
+node scripts/promo/build-trailer.mjs /tmp/promo/battle /tmp/promo/horde store-assets/trailer
+```
+
+Playwright isn't a project dependency; point `PLAYWRIGHT_PATH` at an installed `playwright` or `playwright-core` if it isn't found globally.
