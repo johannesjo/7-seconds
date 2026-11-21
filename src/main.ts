@@ -41,6 +41,7 @@ import { createTutorialEncounter, TUTORIAL_LESSONS, tutorialObjectiveMet } from 
 import { audio } from './audio';
 import { pulse, setHapticsEnabled } from './haptics';
 import { getSettings, updateSettings, onSettingsChange, type Settings } from './settings';
+import { backTarget, shouldExit, type BackTarget } from './back-button';
 import { getDailyChallenge, getDailyResult, recordDailyResult, getDailyStreak, formatDailyShare, type DailyChallenge } from './daily';
 import { getAiRecord, recordAiResult } from './stats';
 import { canRecordClips, startClipRecording, canShareClip, shareClip, downloadClip, type ClipRecording } from './clip';
@@ -2521,6 +2522,49 @@ rankedBtn.addEventListener('click', openRankedScreen);
 
 // The Ranked button appears only in the Android app with Play Games configured.
 void rankedAvailable().then(available => { rankedBtn.style.display = available ? '' : 'none'; });
+
+// --- Android Back button ---------------------------------------------------
+
+let lastMenuBack: number | null = null;
+
+/** Called by MainActivity on Back. 'exit' closes the app; anything else keeps it
+ *  open. Gameplay ignores Back (see back-button.ts). */
+function handleAndroidBack(): 'handled' | 'exit' | 'ignored' {
+  const ageGate = document.getElementById('age-gate');
+  // "I'm under 13" replaces the whole page; nothing is left to go back to.
+  if (!ageGate) return 'exit';
+  const target = backTarget({
+    ageGate: ageGate.style.display === 'flex',
+    settings: settingsScreen.style.display === 'block',
+    difficulty: difficultyScreen.style.display === 'block',
+    matches: matchesScreen.style.display === 'block',
+    ranked: rankedScreen.isOpen,
+    lobby: onlineLobby.style.display === 'flex',
+    result: resultScreen.classList.contains('active'),
+    menu: promptScreen.classList.contains('active'),
+  });
+  if (target === 'none') return 'ignored';
+  if (target === 'menu') {
+    const now = Date.now();
+    if (shouldExit(now, lastMenuBack)) return 'exit';
+    lastMenuBack = now;
+    showToast('Press back again to exit');
+    return 'handled';
+  }
+  // The exit warning only counts for consecutive presses on the menu.
+  lastMenuBack = null;
+  const actions: Record<Exclude<BackTarget, 'none' | 'menu'>, () => void> = {
+    settings: closeSettings,
+    difficulty: closeDifficulty,
+    matches: () => matchesBackBtn.click(),
+    ranked: () => rankedScreen.close(),
+    lobby: () => onlineCancelBtn.click(),
+    result: () => newBattleBtn.click(),
+  };
+  actions[target]();
+  return 'handled';
+}
+(window as unknown as { sevenSecondsBack: typeof handleAndroidBack }).sevenSecondsBack = handleAndroidBack;
 
 // --- Turn alerts --------------------------------------------------------------
 

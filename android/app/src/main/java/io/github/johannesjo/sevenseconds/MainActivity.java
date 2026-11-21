@@ -38,15 +38,22 @@ public class MainActivity extends BridgeActivity {
         // TODO: remove clearCache once users have updated past the caching issue
         webView.clearCache(true);
 
-        // Handle back gesture / back button — allow WebView back navigation for
-        // sub-pages (privacy policy, terms) but prevent exiting the app
+        // Back: the page decides (src/back-button.ts). The game closes menus and
+        // dialogs, ignores Back during gameplay, and asks for a second press on
+        // the main menu; the offline page exits right away. Only pages without
+        // that hook (privacy policy, terms) use WebView history: a tapped turn
+        // alert also adds an entry, and going back there would reload the game.
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (webView.canGoBack()) {
-                    webView.goBack();
-                }
-                // Otherwise swallow — prevents accidental app exit
+                webView.evaluateJavascript(
+                    "window.sevenSecondsBack ? window.sevenSecondsBack() : 'nohook'",
+                    result -> {
+                        // Like the system Back on a root screen (Android 12+): background,
+                        // not destroy, so reopening is instant.
+                        if ("\"exit\"".equals(result)) moveTaskToBack(true);
+                        else if ("\"nohook\"".equals(result) && webView.canGoBack()) webView.goBack();
+                    });
             }
         });
 
