@@ -6,7 +6,7 @@ import { createArmy, createMissionArmy, createUnitFromState } from './units';
 import { generateBattlefield, generateHordeObstacles, generateHordeElevationZones } from './battlefield';
 import { BattleResult, TurnPhase, Unit, Obstacle, ElevationZone, ReplayData, Team, HordeUpgrade } from './types';
 import { HORDE_MAX_WAVES, ROUND_DURATION_S, MAP_HEIGHT, SHIELD_MAX_HITS } from './constants';
-import { pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
+import { HORDE_WAVES, pickUpgrades, healAllBlue, repositionBlueUnits, randomHordeStartingArmy, applyUpgradesToUnit } from './horde';
 import {
   buildWavePlan, rollPact, withCurse, spawnHordeWave, waveScore, describePlan, WAVE_MODIFIERS, BOSSES,
   type HordeWavePlan, type Pact,
@@ -141,6 +141,7 @@ const LOCAL_TURN_HINT = 'Keep this match open for alerts. Closing the app stops 
 const asyncFirstMoveBtn = document.getElementById('async-first-move-btn')!;
 const asyncForfeitBtn = document.getElementById('async-forfeit-btn')!;
 const asyncBackBtn = document.getElementById('async-back-btn')!;
+const planningExitBtn = document.getElementById('planning-exit-btn')!;
 const myMatchesBadge = document.getElementById('my-matches-badge')!;
 const matchesScreen = document.getElementById('matches-screen')!;
 const matchesStatus = document.getElementById('matches-status')!;
@@ -535,9 +536,10 @@ function onPhaseChange(phase: TurnPhase): void {
     if (tutorialLesson !== null) planningLabel.textContent = TUTORIAL_LESSONS[tutorialLesson].title;
     if (hordeActive && hordePlan) {
       const detail = describePlan(hordePlan);
-      planningLabel.textContent = `Wave ${hordePlan.wave}${detail ? ` · ${detail}` : ''}`;
+      const wave = hordePlan.wave <= HORDE_WAVES.length ? `Wave ${hordePlan.wave} of ${HORDE_WAVES.length}` : `Wave ${hordePlan.wave}`;
+      planningLabel.textContent = `${wave}${detail ? ` · ${detail}` : ''}`;
     }
-    if (expeditionActive) planningLabel.textContent = `Expedition · ${expeditionDistanceLabel()}`;
+    if (expeditionActive) planningLabel.textContent = expeditionDistanceLabel();
     planningLabel.style.color = color;
     planningOverlay.classList.add('active');
     confirmBtn.classList.add('active');
@@ -546,6 +548,9 @@ function onPhaseChange(phase: TurnPhase): void {
     planningOverlay.classList.remove('active');
     confirmBtn.classList.remove('active');
   }
+  // The HUD and its ✕ are hidden while planning; the tutorial and online
+  // matches have their own way back, every other mode gets this one.
+  planningExitBtn.style.display = planning && tutorialLesson === null && !onlineActive ? 'block' : 'none';
   syncEvacButton();
 
   // Cover screen — skip in horde mode (no red planning)
@@ -874,6 +879,7 @@ function startReplay(data: ReplayData): void {
   upgradeScreen.style.display = 'none';
   planningOverlay.classList.remove('active');
   confirmBtn.classList.remove('active');
+  planningExitBtn.style.display = 'none';
   battleHud.style.display = 'none';
 
   showScreen('battle');
@@ -1243,7 +1249,7 @@ evacBtn.addEventListener('click', () => {
   if (!engine || !expeditionActive) return;
   const called = engine.callEvac(engine.evacButton !== 'called');
   syncEvacButton();
-  planningLabel.textContent = `Expedition · ${expeditionDistanceLabel()}`;
+  planningLabel.textContent = expeditionDistanceLabel();
   waveCounterEl.textContent = expeditionDistanceLabel();
   audio.play(called ? 'upgrade' : 'confirm');
   pulse(called ? 'heavy' : 'light');
@@ -1597,6 +1603,7 @@ newBattleBtn.addEventListener('click', () => {
   engine = null;
   planningOverlay.classList.remove('active');
   confirmBtn.classList.remove('active');
+  planningExitBtn.style.display = 'none';
   coverScreen.classList.remove('active');
   roundTimerEl.textContent = '';
   lastReplayData = null;
@@ -1655,9 +1662,18 @@ newBattleBtn.addEventListener('click', () => {
 
 // Exit game button (in battle HUD)
 exitGameBtn.addEventListener('click', () => {
-  if (!confirm('Exit the current game?')) return;
+  if (!confirmLeaveBattle()) return;
   newBattleBtn.click();
 });
+planningExitBtn.addEventListener('click', () => {
+  if (!confirmLeaveBattle()) return;
+  newBattleBtn.click();
+});
+
+/** Leaving asks first; vs-AI and Daily battles say that it counts as a loss. */
+function confirmLeaveBattle(): boolean {
+  return confirm(trackedBattleLive ? 'Leave this battle? It counts as a loss.' : 'Exit the current game?');
+}
 
 // Replay button on result screen
 replayBtn.addEventListener('click', () => {
