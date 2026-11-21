@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>7 Seconds – offline</title>
+  <!-- Shown by the Android app when the game can't load (capacitor.config.ts errorPath). -->
+  <style>
+    body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 32px; box-sizing: border-box; background: #f5f0e0; color: #443322; font-family: 'Segoe UI', system-ui, sans-serif; text-align: center; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 2px; text-transform: uppercase; }
+    p { margin: 0; max-width: 300px; line-height: 1.5; }
+    button { margin-top: 8px; padding: 12px 28px; font: inherit; font-weight: bold; color: inherit; background: #ebe3cc; border: 1px solid #a89878; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Can't reach 7 Seconds</h1>
+  <p>7 Seconds needs an internet connection to start. Check your connection and try again in a moment.</p>
+  <button id="retry" type="button">Try again</button>
+  <script>
+    const GAME_URL = 'https://johannesjo.github.io/7-seconds/';
+    const retry = () => { location.href = GAME_URL; };
+    document.getElementById('retry').addEventListener('click', retry);
+    // Reconnecting brings the game back without a tap.
+    window.addEventListener('online', retry);
+    // Android Back (MainActivity) closes the app here instead of walking back
+    // into the failed load, which would just show this page again.
+    window.sevenSecondsBack = () => 'exit';
+  </script>
+</body>
+</html>
