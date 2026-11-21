@@ -45,8 +45,9 @@ FEATURES
 Before publishing:
 - Data safety form: declare everything public/privacy-policy.html lists for
   online play: an anonymous account id, match data (plans, results), the
-  optional display name, the optional turn-alert email address, push/device
-  tokens, the Ranked profile (Play Games id, name, picture, rating) and IP
+  optional display name, push/device tokens, the Ranked profile (Play Games
+  id, name, picture, rating), IP address and crash logs (anonymous error
+  reports). Turn alerts no longer use email, so don't declare an email
   address. Don't declare "no data collected".
 - Ranked (Google Play Games) is left out because it stays hidden until the Play
   Games ids are configured (docs/ranked.md). Add a line once it's live.
