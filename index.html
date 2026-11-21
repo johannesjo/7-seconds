@@ -3,6 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <script>
+    // A page cached from before a deploy names game files the deploy deleted.
+    // Reload once to fetch the current page; the timestamp stops a reload loop
+    // if a file is missing for another reason.
+    (function() {
+      function reloadOnce() {
+        var last = Number(sessionStorage.getItem('7s-stale-reload') || 0);
+        if (Date.now() - last < 60000) return;
+        sessionStorage.setItem('7s-stale-reload', String(Date.now()));
+        location.reload();
+      }
+      window.addEventListener('error', function(e) {
+        var el = e.target;
+        var url = el && (el.src || el.href);
+        if (url && /\/assets\//.test(url)) reloadOnce();
+      }, true);
+      window.addEventListener('vite:preloadError', reloadOnce);
+    })();
+  </script>
   <title>7 Seconds – draw paths, watch the battle</title>
   <meta name="description" content="A free tactical micro-strategy game. Draw paths for your units, then watch a 7-second battle unfold. Play vs AI, daily challenges, Horde and online – in your browser or on Android." />
   <meta name="theme-color" content="#f5f0e0" />

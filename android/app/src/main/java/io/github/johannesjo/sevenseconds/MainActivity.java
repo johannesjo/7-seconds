@@ -4,7 +4,6 @@ import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
@@ -32,11 +31,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(TurnAlertsPlugin.class);
         super.onCreate(savedInstanceState);
 
+        // The WebView's normal HTTP cache: launches revalidate files instead of
+        // downloading the whole game again. A page cached from before a deploy
+        // reloads itself if its files are gone (the guard in index.html).
         WebView webView = getBridge().getWebView();
-        WebSettings settings = webView.getSettings();
-        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        // TODO: remove clearCache once users have updated past the caching issue
-        webView.clearCache(true);
 
         // Back: the page decides (src/back-button.ts). The game closes menus and
         // dialogs, ignores Back during gameplay, and asks for a second press on
