@@ -39,7 +39,7 @@ FEATURES
 • Watch a replay of every battle
 • Turn alerts for online matches
 • No ads, no in-app purchases
-• Solo and Pass & Play run entirely on your device; online play is covered by the privacy policy
+• Solo and Pass & Play battles are played on your device; online play is covered by the privacy policy
 
 <!--
 Before publishing:
