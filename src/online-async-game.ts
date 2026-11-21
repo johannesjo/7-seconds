@@ -248,7 +248,7 @@ export class AsyncGameController {
     this.userId = await this.io.getUserId();
     if (this.destroyed) return false;
     if (!this.userId) {
-      this.showError('Online play is unavailable right now.');
+      this.showError('Couldn’t sign in to online play. Try again in a minute.');
       return false;
     }
 

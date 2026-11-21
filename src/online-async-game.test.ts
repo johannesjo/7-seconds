@@ -192,7 +192,7 @@ describe('AsyncGameController', () => {
     const spy = makeHooks();
     const c = new AsyncGameController('m1', spy.hooks, { io: { ...backend.ioFor('host'), getUserId: async () => null }, pollEnv: null });
     expect(await c.start()).toBe(false);
-    expect(spy.errors[0]).toMatch(/unavailable/);
+    expect(spy.errors[0]).toMatch(/sign in/);
   });
 
   it('does not call a match missing when it could not be loaded', async () => {
