@@ -4,7 +4,7 @@
 // one, and plays ranked matches through the same match referee. See docs/ranked.md.
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { SUPABASE_KEY, SUPABASE_URL } from './online';
+import { SUPABASE_GLOBAL, SUPABASE_KEY, SUPABASE_URL } from './online';
 import { callReferee, type OnlineSession } from './online-async';
 import { RULES_VERSION } from './online-plan';
 
@@ -16,7 +16,7 @@ const identity = registerPlugin<RankedIdentity>('RankedIdentity');
 
 let client: SupabaseClient | undefined;
 export function getRankedClient(): SupabaseClient {
-  return client ??= createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { storageKey: '7s-ranked-auth' } });
+  return client ??= createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { storageKey: '7s-ranked-auth' }, global: SUPABASE_GLOBAL });
 }
 
 /** The signed-in ranked user, or null. Never signs in by itself: ranked

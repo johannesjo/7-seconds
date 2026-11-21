@@ -33,10 +33,33 @@ export function safeUUID(): string {
 
 let sharedClient: SupabaseClient | null = null;
 
+/** A fetch that gives up after `ms`, also honouring the caller's own signal.
+ *  Without it a request on a dead connection (captive Wi-Fi, a stalled proxy)
+ *  never settles, and neither does the screen waiting on it. */
+export function fetchWithTimeout(ms: number): typeof fetch {
+  return (input, init = {}) => {
+    // A plain controller rather than AbortSignal.any/timeout, which older
+    // Android WebViews lack.
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const timer = setTimeout(abort, ms);
+    if (init.signal?.aborted) abort();
+    init.signal?.addEventListener('abort', abort, { once: true });
+    return fetch(input, { ...init, signal: controller.signal }).finally(() => {
+      clearTimeout(timer);
+      init.signal?.removeEventListener('abort', abort);
+    });
+  };
+}
+
+/** Options for every Supabase client: no HTTP request waits longer than the
+ *  referee's own 20 s limit (see online-async.ts). */
+export const SUPABASE_GLOBAL = { fetch: fetchWithTimeout(20_000) };
+
 /** Shared Supabase client — avoids duplicate WebSocket connections. */
 export function getSupabaseClient(): SupabaseClient {
   if (!sharedClient) {
-    sharedClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+    sharedClient = createClient(SUPABASE_URL, SUPABASE_KEY, { global: SUPABASE_GLOBAL });
   }
   return sharedClient;
 }
