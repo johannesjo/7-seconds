@@ -168,7 +168,7 @@ async function invokeOnce(session: OnlineSession, body: Record<string, unknown>)
 /** Call the match referee as `session`. Transient failures of repeatable
  *  actions are retried with backoff before they are reported. */
 export async function callReferee(session: OnlineSession, action: string, params: Record<string, unknown> = {}, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Promise<RefereeResult> {
-  if (!await session.ensureUser()) return { ok: false, status: 401, message: 'Online play is unavailable right now.' };
+  if (!await session.ensureUser()) return { ok: false, status: 401, message: 'Couldn’t sign in to online play. Try again in a minute.' };
   const body = { action, rules: RULES_VERSION, ...params };
   const attempts = REPEATABLE.has(action) ? 3 : 1;
   for (let attempt = 1; ; attempt++) {

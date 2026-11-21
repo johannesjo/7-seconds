@@ -757,14 +757,35 @@ function onGameEvent(
   }
 }
 
-async function initRenderer(): Promise<void> {
-  if (renderer) return;
+/** In-flight init, shared so concurrent callers (boot, age gate, menu) build one renderer. */
+let rendererInit: Promise<void> | null = null;
+
+function initRenderer(): Promise<void> {
+  rendererInit ??= createRenderer().catch(error => {
+    rendererInit = null;
+    throw error;
+  });
+  return rendererInit;
+}
+
+async function createRenderer(): Promise<void> {
   battleScreen.classList.add('active'); // visible before init so container has dimensions
-  renderer = new Renderer();
-  await renderer.init(pixiContainer);
+  // Assign only once init succeeds, so a failed init can't leave a half-built renderer behind.
+  const created = new Renderer();
+  await created.init(pixiContainer);
+  renderer = created;
   renderer.effects!.onCue = handleFeedbackCue;
   renderer.onPathDrawn = () => audio.play('draw');
   renderer.onZoomAvailable = showZoomHint;
+}
+
+/** Last-resort message when the game can't run at all; replaces the whole page. */
+function showFatalError(text: string): void {
+  const message = document.createElement('p');
+  message.setAttribute('role', 'alert');
+  message.textContent = text;
+  message.style.cssText = 'max-width:320px;margin:30vh auto 0;padding:0 16px;text-align:center;font-size:16px;line-height:1.5;';
+  document.body.replaceChildren(message);
 }
 
 function showPreview(): void {
@@ -2261,7 +2282,10 @@ async function startSearch(ranked: boolean): Promise<void> {
     return;
   }
   if (!result.ok) {
+    // Retitle the lobby so a failure doesn't read as a search still running.
     searchPanel.style.display = 'none';
+    onlineLobbyTitle.textContent = 'Can’t go online';
+    onlineCancelBtn.textContent = 'Back';
     setOnlineStatus(result.status === 0 ? 'Could not reach the online server. Check your connection and try again.' : result.message);
     return;
   }
@@ -2614,7 +2638,13 @@ document.addEventListener('click', event => {
 
 // Initialize renderer and show battlefield preview behind start screen
 (async () => {
-  await initRenderer();
+  try {
+    await initRenderer();
+  } catch (error) {
+    console.error('Renderer init failed', error);
+    showFatalError('7 Seconds can’t start its graphics on this device or browser. Try updating your browser, or play on another device.');
+    return;
+  }
   applyTheme();
   showPreview();
   showScreen('prompt');
