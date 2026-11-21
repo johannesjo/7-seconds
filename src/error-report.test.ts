@@ -43,4 +43,22 @@ describe('createErrorReporter', () => {
     report({ message: 'ext', filename: 'chrome-extension://abc/content.js' });
     expect(send).not.toHaveBeenCalled();
   });
+
+  it('skips everyday noise so it cannot use up the five reports', () => {
+    const { send, report } = make();
+    report({ message: 'Failed to fetch' });
+    report({ message: 'Load failed' });
+    report({ message: 'NetworkError when attempting to fetch resource.' });
+    report({ message: 'ResizeObserver loop completed with undelivered notifications.' });
+    report({ message: 'aborted', error: new DOMException('aborted', 'AbortError') });
+    report({ message: 'no autoplay', error: new DOMException('no autoplay', 'NotAllowedError') });
+    report({ message: '' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('blanks web addresses in the message, which can carry ids or tokens', () => {
+    const { send, report } = make();
+    report({ message: 'GET https://x.supabase.co/rest/v1/matches?id=eq.abc123 failed' });
+    expect(send.mock.calls[0][0].message).toBe('GET <url> failed');
+  });
 });

@@ -27,6 +27,18 @@ interface ReporterOptions {
 /** Most reports one session sends; a loop of errors must not flood the server. */
 const MAX_REPORTS = 5;
 
+/** Everyday noise, not bugs: offline requests (Chrome, Safari, Firefox
+ *  wording) and a harmless layout warning. Reporting them would use up the
+ *  five reports before a real crash. */
+const NOISE = /^(Failed to fetch|Load failed|NetworkError|ResizeObserver loop)/;
+/** Cancelled requests and sound blocked until the first tap. */
+const NOISE_NAMES = new Set(['AbortError', 'NotAllowedError']);
+
+function isNoise(info: ErrorEventInfo): boolean {
+  const name = info.error instanceof Error || info.error instanceof DOMException ? info.error.name : '';
+  return !info.message || NOISE.test(info.message) || NOISE_NAMES.has(name);
+}
+
 /** Turn browser error events into reports: each distinct error once, at most
  *  five a session, with the site's address cut from file paths. */
 export function createErrorReporter(opts: ReporterOptions): (info: ErrorEventInfo) => void {
@@ -34,7 +46,9 @@ export function createErrorReporter(opts: ReporterOptions): (info: ErrorEventInf
   return info => {
     // "Script error." with no file is a cross-origin script we can't see into.
     if (info.message === 'Script error.' || (info.filename && !info.filename.startsWith(opts.origin))) return;
-    const message = info.message.slice(0, 300);
+    if (isNoise(info)) return;
+    // Addresses can carry match ids or tokens.
+    const message = info.message.replace(/https?:\/\/\S+/g, '<url>').slice(0, 300);
     if (seen.has(message) || seen.size >= MAX_REPORTS) return;
     seen.add(message);
     const rawStack = info.error instanceof Error ? info.error.stack ?? '' : '';
@@ -61,7 +75,14 @@ export function installErrorReporting(): void {
   });
   window.addEventListener('error', e => report({ message: e.message, filename: e.filename, error: e.error }));
   window.addEventListener('unhandledrejection', e => {
-    const reason: unknown = e.reason;
-    report({ message: reason instanceof Error ? reason.message : String(reason), error: reason });
+    report({ message: rejectionMessage(e.reason), error: e.reason });
   });
+}
+
+/** A rejection's text; '' (not reported) for values without one, which
+ *  would all read "[object Object]". */
+function rejectionMessage(reason: unknown): string {
+  if (typeof reason === 'string') return reason;
+  const message: unknown = (reason as { message?: unknown } | null)?.message;
+  return typeof message === 'string' ? message : '';
 }
