@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Cut the captured frames into a ~15 s silent trailer in three shapes:
+// Cut the captured battle into a ~12 s silent trailer in three shapes:
 // vertical 1080x1920 (Shorts, TikTok, Reddit mobile), square 1080x1080 (Reddit
 // feed) and landscape 1920x1080 (YouTube, which the Play promo video links to).
-//   node scripts/promo/build-trailer.mjs <battleDir> <hordeDir> <outDir>
-// The frame dirs come from capture-battle.mjs and capture-horde.mjs.
+//   node scripts/promo/build-trailer.mjs <battleDir> [outDir]
+// The frame dir comes from capture-battle.mjs.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,25 +13,22 @@ import { FPS } from './browser.mjs';
 import { renderSlides } from './slides.mjs';
 import { SHAPES, backdrop, caption, endCard } from './trailer-cards.mjs';
 
-const [battleDir, hordeDir, outDir = 'store-assets/trailer'] = process.argv.slice(2);
-if (!battleDir || !hordeDir) throw new Error('usage: build-trailer.mjs <battleDir> <hordeDir> [outDir]');
+const [battleDir, outDir = 'store-assets/trailer'] = process.argv.slice(2);
+if (!battleDir) throw new Error('usage: build-trailer.mjs <battleDir> [outDir]');
 const marks = dir => ({ dir, ...JSON.parse(readFileSync(join(dir, 'marks.json'), 'utf8')) });
 const framePath = (dir, n) => join(dir, `${String(n).padStart(5, '0')}.png`);
 const battle = marks(battleDir);
-const horde = marks(hordeDir);
 const END_SECONDS = 3;
 const ICON = fileURLToPath(new URL('../../public/icon-512.png', import.meta.url));
 const FADE = 0.25;
 
 /** The edit: frame ranges [from, to) with playback speed and an optional caption. */
 const CLIPS = [
-  // Cold open on the swarm at its peak, so the first second already moves.
-  { src: horde, from: horde.confirmFrame + 190, to: horde.confirmFrame + 340, speed: 1, caption: { title: 'One plan.<br>7 seconds.' } },
   { src: battle, from: 0, to: battle.confirmFrame, speed: 2.5, caption: { title: 'Draw their paths', sub: 'Drag from each unit' } },
   { src: battle, from: battle.confirmFrame, to: battle.bannerFrame + 70, speed: 1, caption: { title: 'Then both sides<br>move at once', sub: 'Flank for +50% damage' }, captionSeconds: 2.6 },
 ];
 
-// Offsets are tuned to seeds 49/7; another capture may end sooner.
+// Offsets are tuned to seed 49; another capture may end sooner.
 for (const { src, to } of CLIPS) {
   if (!existsSync(framePath(src.dir, to - 1))) throw new Error(`clip needs frame ${to - 1} in ${src.dir}`);
 }

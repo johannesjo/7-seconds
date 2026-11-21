@@ -97,7 +97,7 @@ node scripts/promo/capture-battle.mjs 49 /tmp/promo/battle
 node scripts/promo/capture-horde.mjs 7 /tmp/promo/horde
 node scripts/promo/capture-stills.mjs /tmp/promo/stills
 node scripts/promo/build-store.mjs /tmp/promo/battle /tmp/promo/horde /tmp/promo/stills store-assets/play
-node scripts/promo/build-trailer.mjs /tmp/promo/battle /tmp/promo/horde store-assets/trailer
+node scripts/promo/build-trailer.mjs /tmp/promo/battle store-assets/trailer
 ```
 
 Playwright isn't a project dependency; point `PLAYWRIGHT_PATH` at an installed `playwright` or `playwright-core` if it isn't found globally.
