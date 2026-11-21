@@ -163,4 +163,14 @@ describe('EffectsManager round-transient effects', () => {
     for (let t = 0; t < 3; t += 1 / 60) fx.update(1 / 60);
     expect(effectLayer(stage).children.length).toBe(0);
   });
+
+  it('the plan reveal starts fading within a second and is gone by 1.5s', () => {
+    const stage = new Container();
+    const fx = new EffectsManager(stage);
+    fx.addPlanReveal([{ team: 'red', kind: 'move', own: false, points: [{ x: 10, y: 10 }, { x: 100, y: 200 }] }], true);
+    for (let i = 0; i < 54; i++) fx.update(1 / 60); // 0.9s
+    expect(effectLayer(stage).children[0].alpha).toBeLessThan(1);
+    for (let i = 0; i < 36; i++) fx.update(1 / 60); // 1.5s
+    expect(effectLayer(stage).children.length).toBe(0);
+  });
 });

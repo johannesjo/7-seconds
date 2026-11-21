@@ -495,8 +495,8 @@ class PlanReveal implements Effect {
   private gfx = new Graphics();
   private age = 0;
   private static readonly DRAW_S = 0.35;
-  private static readonly HOLD_S = 1.0;
-  private static readonly FADE_S = 0.8;
+  private static readonly HOLD_S = 0.4;
+  private static readonly FADE_S = 0.6;
   private readonly lengths: number[];
 
   constructor(
