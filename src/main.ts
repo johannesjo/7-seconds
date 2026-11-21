@@ -558,7 +558,10 @@ function onPhaseChange(phase: TurnPhase): void {
   syncEvacButton();
 
   // Cover screen — skip in horde mode (no red planning)
-  coverScreen.classList.toggle('active', phase === 'cover' && !hordeActive && !expeditionActive);
+  const covered = phase === 'cover' && !hordeActive && !expeditionActive;
+  coverScreen.classList.toggle('active', covered);
+  // Focus its button so Enter/Space hand over too; a click anywhere still does.
+  if (covered) document.getElementById('cover-continue-btn')!.focus();
 }
 
 function finishTutorialRound(): void {
@@ -911,11 +914,12 @@ function recordClip(): void {
   audio.unlock();
   startReplay(lastReplayData);
   clipRecording = startClipRecording(renderer.canvas, audio.stream, () => { void finishClip(); });
+  // At the top: the replay controls sit along the bottom edge.
   if (!clipRecording) {
-    showToast('Recording is not supported in this browser');
+    showToast('Recording is not supported in this browser', 'top');
     return;
   }
-  showToast('Recording clip… it will be ready when the replay ends');
+  showToast('Recording clip… it will be ready when the replay ends', 'top');
 }
 
 async function finishClip(): Promise<void> {

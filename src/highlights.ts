@@ -13,7 +13,6 @@ export interface UnitTally {
   team: Team;
   kills: number;
   damage: number;
-  flanks: number;
 }
 
 export interface TeamTally {
@@ -65,11 +64,10 @@ function addHit(tally: Tally, hit: TallyHit, streak: number): void {
   if (!src) return;
   let unit = tally.units.get(src.id);
   if (!unit) {
-    unit = { id: src.id, type: src.type, team: src.team, kills: 0, damage: 0, flanks: 0 };
+    unit = { id: src.id, type: src.type, team: src.team, kills: 0, damage: 0 };
     tally.units.set(src.id, unit);
   }
   unit.damage += hit.damage;
-  if (hit.flanked) unit.flanks++;
   if (hit.killed) unit.kills++;
 }
 
@@ -92,7 +90,6 @@ export function mergeTally(into: Tally, from: Tally): void {
     }
     prev.kills += u.kills;
     prev.damage += u.damage;
-    prev.flanks += u.flanks;
   }
 }
 
@@ -193,9 +190,8 @@ export function battleHighlights(tally: Tally, team: Team | null, multiKillMin =
   const lines: string[] = [];
   const mvp = findMvp(tally, team);
   if (mvp) {
-    const parts = [plural(mvp.kills, 'kill'), `${Math.round(mvp.damage)} damage`];
-    if (mvp.flanks > 0) parts.push(plural(mvp.flanks, 'flank hit'));
-    lines.push(`MVP: ${mvpName(mvp, !team)} · ${parts.join(' · ')}`);
+    // Flanks have their own line below; repeating them here wraps on phones.
+    lines.push(`MVP: ${mvpName(mvp, !team)} · ${plural(mvp.kills, 'kill')} · ${Math.round(mvp.damage)} damage`);
   }
 
   const teams: Team[] = team ? [team] : ['blue', 'red'];

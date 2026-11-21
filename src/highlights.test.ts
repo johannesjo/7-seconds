@@ -110,7 +110,7 @@ describe('battleHighlights', () => {
     t.recordHit(kill(sniper, { damage: 30 }), 1.4);
     t.recordShieldBreak('blue');
     expect(battleHighlights(t.battle, 'blue')).toEqual([
-      'MVP: Sniper · 2 kills · 75 damage · 1 flank hit',
+      'MVP: Sniper · 2 kills · 75 damage',
       'Flank hits: 1',
       'Shields broken: 1',
       'Best moment: Double kill',

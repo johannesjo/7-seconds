@@ -906,6 +906,11 @@
 
       --color-card-bg: #fbf7ec;
       --color-card-shadow: rgba(68,51,34,0.18);
+
+      /* Darker so result headings stay readable on the light card (>= 4:1) */
+      --color-result-blue: #1f6fd1;
+      --color-result-red: #c62828;
+      --color-result-horde-win: #b85c1e;
     }
     body.day-mode .replay-btn-upgrade { background: var(--color-btn-bg); color: var(--color-text-muted); border-color: var(--color-btn-border); opacity: 0.8; }
     body.day-mode #online-status { font-weight: bold; font-size: 18px; }
@@ -1066,7 +1071,7 @@
   </div>
 
   <div id="online-lobby" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;align-items:center;justify-content:safe center;gap:20px;background:var(--color-overlay-lobby);z-index:25;padding:calc(32px + var(--sat)) 32px calc(32px + var(--sab));overflow-y:auto">
-    <h2 id="online-lobby-title" style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:var(--color-online-title);margin:0">Online PvP</h2>
+    <h2 id="online-lobby-title" style="font-size:clamp(20px,6vw,28px);text-align:center;text-wrap:balance;letter-spacing:3px;text-transform:uppercase;color:var(--color-online-title);margin:0">Online PvP</h2>
     <div id="online-spinner" style="display:none;width:32px;height:32px;border:3px solid var(--color-online-spinner-bg);border-top-color:var(--color-online-spinner);border-radius:50%;animation:spin 0.8s linear infinite"></div>
     <p id="online-record" style="font-size:18px;color:var(--color-text-muted);letter-spacing:2px;margin:0;display:none"></p>
     <p id="online-status" style="font-size:16px;color:var(--color-online-status);margin:0">Creating room...</p>
@@ -1118,7 +1123,7 @@
   <div id="cover-screen">
     <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
       <span>Pass device to Red</span>
-      <span style="font-size:16px;opacity:0.5;letter-spacing:1px">Tap to continue</span>
+      <button id="cover-continue-btn" style="font:inherit;font-size:16px;opacity:0.5;letter-spacing:1px;background:none;border:none;color:inherit;text-transform:inherit;cursor:pointer">Tap to continue</button>
     </div>
   </div>
 
@@ -1140,7 +1145,7 @@
       <div class="buttons">
         <button id="endless-btn" class="result-primary" style="display:none">Keep going: Endless</button>
         <button id="rematch-btn" class="result-primary">Rematch</button>
-        <button id="retry-encounter-btn" style="display:none" title="Retry the same map and armies from round 1">Try another plan</button>
+        <button id="retry-encounter-btn" style="display:none" title="Retry the same map and armies from round 1">Retry this battle</button>
         <button id="share-result-btn" style="display:none">Share result</button>
         <button id="new-battle-btn">Back</button>
         <div class="result-secondary">
