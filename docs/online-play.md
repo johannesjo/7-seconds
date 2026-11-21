@@ -1,6 +1,6 @@
 # Online play
 
-> Status: **referee protocol (rules version 2).** All online play — friend
+> Status: **referee protocol (rules version 4).** All online play — friend
 > invites, random opponents, AI commanders and Ranked — runs through the
 > `match-referee` Edge Function on the shared Supabase project. Earlier
 > designs: [online PvP](plans/2026-03-07-online-pvp-design.md) (WebRTC),
@@ -140,8 +140,7 @@ The referee alerts the opponent when it's their move (`turn`), when a round
 was played (`round`), when they won or lost (`result`), when someone joined
 their match (`joined`) and when their opponent conceded (`forfeit`) — never an
 AI commander, and never the player who just acted. Channels: Web Push for
-browsers, Firebase Cloud Messaging for the Android app, and email if
-configured. See [turn-alerts.md](turn-alerts.md).
+browsers, Firebase Cloud Messaging for the Android app. See [turn-alerts.md](turn-alerts.md).
 
 ## Schema
 
@@ -151,12 +150,12 @@ configured. See [turn-alerts.md](turn-alerts.md).
 | `turns` | `(match_id, round, team)` | who has planned each round; plans once the round is played |
 | `match_plans` | `(match_id, round, team)` | plans held until both are in (service role only) |
 | `match_bots` | `player` | AI commanders and their fixed ranked ratings |
-| `players` | `id` | Web Push subscription and email for turn alerts (each player their own row) |
+| `players` | `id` | Web Push subscription for turn alerts (each player their own row) |
 | `push_devices` | `(player, token)` | Android FCM tokens (`seven_push_register`/`unregister`) |
 | `ranked_profiles`, `ranked_results` | | see [ranked.md](ranked.md) |
 
 Migrations live in `supabase/migrations`; `0004_referee.sql` holds every
-function above. The database functions are tested against a real PostgreSQL
+function above, and each later one a rules bump or a schema change. The database functions are tested against a real PostgreSQL
 16 (`tests/referee-sql.test.ts`), and the referee end to end over them
 (`tests/referee.test.ts`); both need `SEVEN_PG_URL` (see `tests/pg.ts`).
 
@@ -179,5 +178,5 @@ function above. The database functions are tested against a real PostgreSQL
 
 ## Deployment
 
-See [DEPLOYMENT.md](../DEPLOYMENT.md): migrations and the `match-referee`
-function deploy automatically from `main` before the web client.
+See [DEPLOYMENT.md](../DEPLOYMENT.md): migrations and the `match-referee` and
+`client-error` functions deploy automatically from `main` before the web client.
