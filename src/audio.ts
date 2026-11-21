@@ -2,6 +2,7 @@
  *  ships no audio assets. The context is created lazily and resumed on the
  *  first user gesture (browsers block audio until then). */
 
+import { renderGunshot, type GunKind } from './gunshot';
 import { createRng } from './rng';
 
 /** Own PRNG so sound variation never consumes Math.random, which the action
@@ -22,6 +23,7 @@ const MIN_GAP_S: Partial<Record<Sfx, number>> = {
 };
 const SFX_VOLUME = 0.55;
 const MUSIC_VOLUME = 0.16;
+const GUN_VARIANTS = 3;
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
@@ -31,7 +33,8 @@ class AudioEngine {
   private noiseBuf: AudioBuffer | null = null;
   private reverbIn: GainNode | null = null;
   private driveCurve: Float32Array | null = null;
-  private crackBuf: AudioBuffer | null = null;
+  /** Pre-rendered shot variants per gun, picked at random per play. */
+  private gunBufs: Record<GunKind, AudioBuffer[]> = { light: [], heavy: [] };
   /** Explosions still ringing, to cap their polyphony (and node count). */
   private activeExplosions = 0;
   private lastPlayed = new Map<Sfx, number>();
@@ -77,7 +80,8 @@ class AudioEngine {
       for (let i = 0; i < length; i++) data[i] = rand() * 2 - 1;
       this.reverbIn = this.createReverb(ctx);
       this.driveCurve = saturationCurve();
-      this.crackBuf = nWave(ctx);
+      // Deferred so rendering doesn't delay the tap that unlocked audio
+      window.setTimeout(() => this.renderGuns(ctx), 0);
       this.applyMood();
     }
     // iOS can also leave the context 'interrupted' (after a call or Siri)
@@ -181,10 +185,10 @@ class AudioEngine {
         this.chime(now + 0.12, 523, 0.6, 0.1);
         break;
       case 'shot':
-        this.suppressedShot(now, j, v * 0.85, false);
+        this.gunshot(now, 'light', 0.4 * v);
         break;
       case 'heavy-shot':
-        this.suppressedShot(now, j, v, true);
+        this.gunshot(now, 'heavy', 0.55 * v);
         break;
       case 'mortar':
         // Hollow tube "thoomp"
@@ -246,63 +250,50 @@ class AudioEngine {
     }
   }
 
-  /** A suppressed firearm: no loud bang, just the gas "pfft" through the
-   *  baffles, a short thump and the mechanical action, which on a suppressed
-   *  gun is a big part of what you hear. Light = a semi-auto whose action
-   *  clicks twice (carrier back, then locking forward). Heavy = a suppressed
-   *  bolt rifle: a supersonic bullet crack plus thump, with the bolt worked by
-   *  hand afterwards. Transients use ~0.5 ms attacks; real onsets are sharp. */
-  private suppressedShot(t: number, j: number, v: number, heavy: boolean): void {
-    const sharp = 0.0005;
-    if (heavy) {
-      this.noise(t, { type: 'bandpass', freq: 3000, q: 4, dur: 0.004, peak: 0.35 * v, attack: 0.0003 });
-      this.crack(t, 0.75 * v);
-      this.noise(t, { type: 'bandpass', freq: 600 * j, freqEnd: 200, q: 0.7, dur: 0.22, peak: 0.8 * v, attack: sharp, reverb: 0.22 });
-      this.thump(t, 115 * j, 50, 0.13, 0.55 * v, sharp);
-      // Bolt worked by hand: up-back, then forward and lock
-      this.clack(t + 0.3 + rand() * 0.03, 1900 * j, 0.28 * v);
-      this.clack(t + 0.42 + rand() * 0.03, 2300 * j, 0.32 * v);
-    } else {
-      this.noise(t, { type: 'highpass', freq: 3800, dur: 0.008, peak: 0.25 * v, attack: sharp });
-      this.noise(t, { type: 'bandpass', freq: 1250 * j, freqEnd: 520, q: 0.9, dur: 0.085, peak: 0.55 * v, attack: sharp, reverb: 0.12 });
-      this.thump(t, 160 * j, 70, 0.055, 0.32 * v, sharp);
-      // Carrier back, then slamming forward into battery
-      this.clack(t + 0.012 + rand() * 0.006, 2900 * j, 0.22 * v);
-      this.clack(t + 0.045 + rand() * 0.015, 2200 * j, 0.32 * v);
+  /** Render a few variants of each gun so rapid fire never repeats exactly.
+   *  One buffer per task, alternating guns, so a slow phone gets both guns
+   *  quickly and never freezes for the whole batch. */
+  // shortcut: renders on the main thread — move to a worker if low-end phones stutter
+  private renderGuns(ctx: AudioContext, step = 0): void {
+    if (step >= GUN_VARIANTS * 2) return;
+    const kind: GunKind = step % 2 === 0 ? 'light' : 'heavy';
+    try {
+      const data = renderGunshot(kind, ctx.sampleRate, rand);
+      const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
+      buf.getChannelData(0).set(data);
+      this.gunBufs[kind].push(buf);
+    } catch (err) {
+      console.error('Gunshot render failed; using the fallback shot', err);
+      return;
     }
+    window.setTimeout(() => this.renderGuns(ctx, step + 1), 0);
   }
 
-  /** A short metallic "chk": a tick, two resonances and some mid-range body.
-   *  Bandpass layers are narrow (and so lose a lot of energy), hence the
-   *  gain multipliers. */
-  private clack(t: number, freq: number, peak: number): void {
-    this.noise(t, { type: 'highpass', freq: 5000, dur: 0.005, peak: peak * 0.8, attack: 0.0003 });
-    this.noise(t, { type: 'bandpass', freq, q: 3.5, dur: 0.028, peak: peak * 2.2, attack: 0.0005 });
-    this.noise(t, { type: 'bandpass', freq: freq * 1.53, q: 5, dur: 0.02, peak: peak * 1.5, attack: 0.0005 });
-    this.osc(t, { type: 'triangle', freq: freq / 3.9, freqEnd: freq / 5.8, dur: 0.018, peak: peak * 0.9, attack: 0.0005 });
-  }
-
-  /** A sonic crack: a pre-built N-wave through a highpass. */
-  private crack(t: number, peak: number): void {
+  /** Play a pre-rendered suppressed shot (see gunshot.ts) with slight pitch
+   *  variation; a plain thump stands in until the buffers are rendered. */
+  private gunshot(t: number, kind: GunKind, gain: number): void {
+    const bufs = this.gunBufs[kind];
+    if (bufs.length === 0) {
+      // Plain muffled thump until the real shots are rendered (or if that failed)
+      this.thump(t, 150, 60, 0.06, gain * 0.6);
+      this.noise(t, { type: 'lowpass', freq: 1800, freqEnd: 400, dur: 0.07, peak: gain * 0.7 });
+      return;
+    }
     const ctx = this.ctx!;
-    if (!this.crackBuf) return;
     const src = ctx.createBufferSource();
-    src.buffer = this.crackBuf;
-    src.playbackRate.value = 0.9 + rand() * 0.2;
-    const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 1500;
-    const gain = ctx.createGain();
-    gain.gain.value = peak;
-    this.route(src.connect(hp).connect(gain), 0.25);
+    src.buffer = bufs[Math.floor(rand() * bufs.length)];
+    src.playbackRate.value = 0.94 + rand() * 0.12;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    this.route(src.connect(g), kind === 'heavy' ? 0.25 : 0.15);
     src.start(t);
   }
 
   /** A pitch-dropping low thump with a 2x partial so it still has body on
    *  phone speakers, which can't reproduce much below ~100 Hz. */
-  private thump(t: number, from: number, to: number, dur: number, peak: number, attack?: number): void {
-    this.osc(t, { type: 'sine', freq: from, freqEnd: to, dur, peak, attack });
-    this.osc(t, { type: 'sine', freq: from * 2, freqEnd: to * 2, dur: dur * 0.8, peak: peak * 0.4, attack });
+  private thump(t: number, from: number, to: number, dur: number, peak: number): void {
+    this.osc(t, { type: 'sine', freq: from, freqEnd: to, dur, peak });
+    this.osc(t, { type: 'sine', freq: from * 2, freqEnd: to * 2, dur: dur * 0.8, peak: peak * 0.4 });
   }
 
   /** Crack, deep boom, rolling rumble and scattered debris. Capped at a few
@@ -496,21 +487,6 @@ function saturationCurve(): Float32Array {
     curve[i] = Math.tanh(x * 2.5) / Math.tanh(2.5);
   }
   return curve;
-}
-
-/** A supersonic bullet's N-wave: a near-instant rise, a ~0.4 ms linear
- *  swing to negative, then a fast decay back to zero. */
-function nWave(ctx: AudioContext): AudioBuffer {
-  const sr = ctx.sampleRate;
-  const len = Math.ceil(sr * 0.004);
-  const buf = ctx.createBuffer(1, len, sr);
-  const d = buf.getChannelData(0);
-  const swing = Math.max(2, Math.round(sr * 0.0004));
-  for (let i = 0; i < len; i++) {
-    if (i < swing) d[i] = 1 - (2 * i) / swing;
-    else d[i] = -Math.exp(-(i - swing) / (sr * 0.0006));
-  }
-  return buf;
 }
 
 export const audio = new AudioEngine();
