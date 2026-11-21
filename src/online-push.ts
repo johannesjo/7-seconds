@@ -120,10 +120,7 @@ export async function setTurnNotifications(enabled: boolean): Promise<boolean> {
     if (!webPush) return false;
     row.web_push = webPush;
   } else {
-    // Off means off: also an email address left from older versions.
     row.web_push = null;
-    row.notify_email = false;
-    row.email = null;
   }
   const { error } = await getSupabaseClient().from('players').upsert(row);
   if (error) {

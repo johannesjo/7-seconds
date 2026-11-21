@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js';
 
 const getSession = vi.fn();
 const signInAnonymously = vi.fn();
@@ -27,10 +28,19 @@ describe('ensureAuth', () => {
   it('keeps the stored identity when the session check fails on a bad network', async () => {
     // A failed token refresh leaves the stored session in place; a new
     // anonymous user would orphan the player's matches.
-    getSession.mockResolvedValueOnce({ data: { session: null }, error: { message: 'Failed to fetch' } });
+    getSession.mockResolvedValueOnce({ data: { session: null }, error: new AuthRetryableFetchError('Failed to fetch', 0) });
 
     expect(await ensureAuth()).toBeNull();
     expect(signInAnonymously).not.toHaveBeenCalled();
+  });
+
+  it('signs in again at once when the server rejected the stored session', async () => {
+    // supabase-js has already deleted that session; waiting would only fail
+    // the player's next online action too.
+    getSession.mockResolvedValueOnce({ data: { session: null }, error: new AuthApiError('Invalid Refresh Token', 400, 'refresh_token_not_found') });
+    signInAnonymously.mockResolvedValueOnce({ data: { user: { id: 'fresh' } }, error: null });
+
+    expect(await ensureAuth()).toBe('fresh');
   });
 
   it('shares one sign-in between concurrent callers', async () => {

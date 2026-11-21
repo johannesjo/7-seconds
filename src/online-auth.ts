@@ -1,3 +1,4 @@
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { getSupabaseClient } from './online';
 import { dlog } from './online-debug';
 
@@ -36,9 +37,10 @@ async function signIn(): Promise<string | null> {
   const client = getSupabaseClient();
   try {
     const { data: { session }, error: sessionError } = await client.auth.getSession();
-    // A failed refresh (e.g. offline) keeps the stored session; signing in
-    // anonymously now would replace it and orphan the player's matches.
-    if (sessionError) {
+    // A refresh that failed on the network keeps the stored session; signing in
+    // anonymously now would replace it and orphan the player's matches. A
+    // rejected refresh token has already deleted it, so sign in fresh.
+    if (isAuthRetryableFetchError(sessionError)) {
       dlog(`auth: session check failed: ${sessionError.message}`);
       return null;
     }

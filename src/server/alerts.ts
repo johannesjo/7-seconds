@@ -1,5 +1,5 @@
 // What the referee tells an absent player, and how. Pure: the Edge Function
-// supplies the senders (Web Push, Firebase Cloud Messaging, email).
+// supplies the senders (Web Push, Firebase Cloud Messaging).
 
 export type AlertKind = 'joined' | 'turn' | 'round' | 'result' | 'forfeit';
 

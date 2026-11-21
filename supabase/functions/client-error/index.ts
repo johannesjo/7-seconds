@@ -14,6 +14,7 @@ Deno.serve(async req => {
   if (text.length > 4_000) return new Response(null, { status: 413, headers: cors });
   let body: Record<string, unknown>;
   try { body = JSON.parse(text); } catch { return new Response(null, { status: 400, headers: cors }); }
+  if (!body || typeof body !== 'object') return new Response(null, { status: 400, headers: cors });
   // One line per report, so the log view can be filtered and counted.
   console.error('client error', JSON.stringify({
     message: clip(body.message, 300),

@@ -13,7 +13,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.98.0';
 import webpush from 'npm:web-push@3.6.7';
 // @ts-types="./referee.d.mts"
 import {
-  handleReferee, StoreError, verifyPlayGames, fcmMessage, webPushPayload, alertText,
+  handleReferee, StoreError, verifyPlayGames, fcmMessage, webPushPayload,
   type Alert, type RefereeStore, type MatchRow,
 } from './referee.mjs';
 
