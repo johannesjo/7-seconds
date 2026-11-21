@@ -81,7 +81,6 @@ Set with `supabase secrets set --project-ref puoxmqovckvfoqyihasl NAME=value`.
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push (already set for the old `notify-turn`) |
 | `FCM_SERVICE_ACCOUNT` | Android turn alerts |
 | `GOOGLE_WEB_CLIENT_ID`, `GOOGLE_WEB_CLIENT_SECRET`, `PGS_APP_ID` | Ranked |
-| `RESEND_API_KEY`, `NOTIFY_FROM_EMAIL` | email alerts (optional) |
 | `NOTIFY_APP_URL` | the link in alerts (default: the GitHub Pages site) |
 
 ## Rules changes

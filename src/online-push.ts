@@ -103,35 +103,6 @@ async function getWebPushSubscription(): Promise<PushSubscriptionJSON | null> {
   }
 }
 
-export function isValidEmail(email: string): boolean {
-  return email.length <= 254 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
-}
-
-/** Silent row setup; never changes an existing opt-out or asks for permission. */
-export async function registerTurnNotifications(opts: { email?: string } = {}): Promise<boolean> {
-  const uid = await ensureAuth();
-  if (!uid) return false;
-  const row: Record<string, unknown> = { id: uid };
-  if (opts.email !== undefined) {
-    const email = opts.email.trim();
-    if (email && !isValidEmail(email)) return false;
-    row.email = email || null;
-    row.notify_email = !!email;
-  }
-  const { data: saved } = await getSupabaseClient().from('players')
-    .select('notify_push, web_push').eq('id', uid).maybeSingle();
-  if (saved?.notify_push && saved.web_push) {
-    const webPush = await getWebPushSubscription();
-    if (webPush) row.web_push = webPush;
-  }
-  const { error } = await getSupabaseClient().from('players').upsert(row);
-  if (error) {
-    dlog(`push: upsert players failed ${error.message}`);
-    return false;
-  }
-  return true;
-}
-
 /** Opt in after permission and a usable local/browser notification channel. */
 export async function setTurnNotifications(enabled: boolean): Promise<boolean> {
   if (await closedAppAlerts()) {

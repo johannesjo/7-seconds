@@ -35,11 +35,9 @@ on Android.
 - **Android app without Firebase** (a build without `google-services.json`,
   or a phone without Google Play services): local notifications from a match
   left open in the background, as before. Closing the app stops these.
-- **Email** (optional, off in production): set `RESEND_API_KEY` and
-  `NOTIFY_FROM_EMAIL` on the function and verify a sender domain in Resend.
-  Addresses in `players.email` are not verified, so anyone could have alerts
-  sent to someone else's address; add a confirmation step before turning
-  email on.
+- **Email**: removed. Addresses in `players.email` were never verified, so
+  anyone could have had alerts sent to someone else's address. Bringing email
+  back needs a confirmation step first.
 
 ## Owner setup
 

@@ -86,25 +86,6 @@ async function sendWebPush(subscription: { endpoint?: string } | null, alert: Al
   await webpush.sendNotification(subscription as webpush.PushSubscription, webPushPayload(APP_URL, alert), { TTL: 7 * 24 * 3600 });
 }
 
-async function sendEmail(to: string, alert: Alert): Promise<void> {
-  const key = env('RESEND_API_KEY');
-  if (!key) return;
-  const { title, body } = alertText(alert);
-  const link = new URL(APP_URL);
-  link.searchParams.set('amatch', alert.match);
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: env('NOTIFY_FROM_EMAIL') || '7 Seconds <onboarding@resend.dev>',
-      to, subject: `${title} — 7 Seconds`,
-      html: `<p>${body.replace(/[<>&]/g, '')} <a href="${link}">Open the match</a>.</p>`,
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) throw new Error(`Email send failed (${res.status})`);
-}
-
 // Firebase Cloud Messaging (HTTP v1) for the Android app: a service-account JWT
 // exchanged for an hour-long access token, cached across requests.
 interface ServiceAccount { client_email: string; private_key: string; project_id: string }
@@ -165,12 +146,13 @@ async function sendFcm(account: ServiceAccount, alert: Alert, token: string, ret
 
 async function sendAlert(alert: Alert): Promise<void> {
   const [contact, devices] = await Promise.all([
-    checked(db.from('players').select('email, web_push, notify_email, notify_push').eq('id', alert.player).maybeSingle()),
+    checked(db.from('players').select('web_push, notify_push').eq('id', alert.player).maybeSingle()),
     checked(db.from('push_devices').select('token').eq('player', alert.player)),
   ]);
   const jobs: Promise<unknown>[] = [];
   if (contact?.notify_push && contact.web_push) jobs.push(sendWebPush(contact.web_push, alert));
-  if (contact?.notify_email && contact.email) jobs.push(sendEmail(contact.email, alert));
+  // No email: addresses in players.email are unverified, so alerts could be
+  // aimed at someone else's inbox. Add a confirmation step before bringing it back.
   const account = devices?.length ? serviceAccount() : null;
   if (account && devices) {
     jobs.push((async () => {
