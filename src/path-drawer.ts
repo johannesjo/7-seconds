@@ -193,6 +193,8 @@ export class PathDrawer {
   private labelContainer: Container;
   private labelPool: Text[] = [];
   private labelIndex = 0;
+  /** Each path's end time label, so hover can hide the one it redraws. */
+  private endLabels = new Map<Unit, Text>();
   private hoverLabel: Text;
   private onZoneHighlight: ((pos: Vec2 | null) => void) | null = null;
   onInspectUnit: ((unit: Unit | null) => void) | null = null;
@@ -663,6 +665,7 @@ export class PathDrawer {
   renderPaths(): void {
     this.gfx.clear();
     this.labelIndex = 0;
+    this.endLabels.clear();
     // What each path covers this round, for the wake rings
     const reachedPaths: Vec2[][] = [];
 
@@ -709,6 +712,7 @@ export class PathDrawer {
       timeLabel.style.fill = overLimit ? this.theme.labelWarn : this.theme.labelFill;
       timeLabel.position.set(last.x, this.endLabelY(unit, last, overLimit));
       timeLabel.alpha = alpha;
+      this.endLabels.set(unit, timeLabel);
       if (overLimit) {
         const roundLabel = this.acquireLabel();
         roundLabel.text = `~${ROUND_DURATION_S}s`;
@@ -798,6 +802,11 @@ export class PathDrawer {
         this.hoverGfx.stroke();
       }
     }
+
+    // The hover label below redraws the hovered path's time; two copies smudge.
+    // Not while drawing (no hover) or once a hold is ready (it says "release to clear").
+    const redrawn = this.selectedUnit || this.press?.ready ? null : this.hoveredUnit;
+    for (const [unit, label] of this.endLabels) label.visible = unit !== redrawn;
 
     const teamColor = this.team === 'blue' ? this.theme.bluePath : this.theme.redPath;
     const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
