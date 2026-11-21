@@ -480,6 +480,14 @@
     /* Keep the map below the lesson text for the whole tutorial, so it doesn't jump between phases.
        Sized for the longest lesson text (3 lines here, 4 on phones). */
     #battle-screen:has(#planning-overlay.tutorial) #pixi-container { --map-top: 128px; }
+    /* Big screens have room to spare, and 17px reads small at desktop viewing distance.
+       The 820px box fits every lesson in 2 lines. */
+    @media (min-width: 1200px) and (min-height: 760px) {
+      #planning-overlay.tutorial { width: min(820px, calc(100% - 32px)); gap: 8px; }
+      #planning-overlay.tutorial #planning-label { font-size: 28px; }
+      #planning-overlay.tutorial #planning-instructions { font-size: 22px; line-height: 1.45; }
+      #battle-screen:has(#planning-overlay.tutorial) #pixi-container { --map-top: 140px; }
+    }
     #skip-tutorial-btn { display: none; }
     #planning-overlay.tutorial.active ~ #skip-tutorial-btn {
       display: block;
