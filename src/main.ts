@@ -1669,15 +1669,12 @@ newBattleBtn.addEventListener('click', () => {
   if (reopen === 'ranked') openRankedScreen();
 });
 
-// Exit game button (in battle HUD)
-exitGameBtn.addEventListener('click', () => {
-  if (!confirmLeaveBattle()) return;
-  newBattleBtn.click();
-});
-planningExitBtn.addEventListener('click', () => {
-  if (!confirmLeaveBattle()) return;
-  newBattleBtn.click();
-});
+// Exit ✕ in the battle HUD and while planning
+for (const btn of [exitGameBtn, planningExitBtn]) {
+  btn.addEventListener('click', () => {
+    if (confirmLeaveBattle()) newBattleBtn.click();
+  });
+}
 
 /** Leaving asks first; vs-AI and Daily battles say that it counts as a loss. */
 function confirmLeaveBattle(): boolean {

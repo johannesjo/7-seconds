@@ -9,9 +9,13 @@
     // if a file is missing for another reason.
     (function() {
       function reloadOnce() {
-        var last = Number(sessionStorage.getItem('7s-stale-reload') || 0);
-        if (Date.now() - last < 60000) return;
-        sessionStorage.setItem('7s-stale-reload', String(Date.now()));
+        // Without storage (blocked by the browser) there is no loop guard, so
+        // don't reload at all.
+        try {
+          var last = Number(sessionStorage.getItem('7s-stale-reload') || 0);
+          if (Date.now() - last < 60000) return;
+          sessionStorage.setItem('7s-stale-reload', String(Date.now()));
+        } catch (err) { return; }
         location.reload();
       }
       // Only code and styles: a missing image or sound mid-game (a network

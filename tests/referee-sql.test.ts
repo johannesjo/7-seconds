@@ -48,7 +48,8 @@ describeSql('referee database', () => {
       insert into matches(id, host_player, guest_player, initial_state, latest_state, status, rules) values
       ('rulew1', '${A}', '${B}', ${STATE}, ${STATE}, 'active', 3),
       ('rulew2', '${A}', null, ${STATE}, ${STATE}, 'open', 3),
-      ('rulew3', '${A}', '${B}', ${STATE}, ${STATE}, 'host_won', 3);` });
+      ('rulew3', '${A}', '${B}', ${STATE}, ${STATE}, 'host_won', 3);` }, { version: '0007', sql: `
+      insert into players(id, email, notify_email) values ('${A}', 'ann@example.test', true);` });
   });
   afterAll(() => db?.drop());
 
@@ -62,6 +63,11 @@ describeSql('referee database', () => {
       'rulev1|abandoned|version\nrulev2|abandoned|version\nrulev3|host_won|-');
     expect(run(`select id, status, coalesce(finish_reason, '-') from matches where id like 'rulew%' order by id;`)).toBe(
       'rulew1|abandoned|version\nrulew2|abandoned|version\nrulew3|host_won|-');
+  });
+
+  it('erases stored turn-alert emails and refuses new ones', () => {
+    expect(run(`select count(*) from players where email is not null or notify_email;`)).toBe('0');
+    expect(failure(`update players set email = 'ann@example.test' where id = '${A}';`, 'authenticated', A)).toMatch(/players_no_email/);
   });
 
   it('leaves clients no way to write matches, turns or plans', () => {
