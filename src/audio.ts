@@ -1,9 +1,12 @@
-/** Procedural sound effects and music, synthesized with WebAudio so the game
- *  ships no audio assets. The context is created lazily and resumed on the
- *  first user gesture (browsers block audio until then). */
+/** Sound effects and music, mostly synthesized with WebAudio. Guns are the
+ *  exception: synthesis never sounded like a real gun, so they use short CC0
+ *  recordings (see src/sfx/README.md). The context is created lazily and
+ *  resumed on the first user gesture (browsers block audio until then). */
 
-import { renderGunshot, type GunKind } from './gunshot';
 import { createRng } from './rng';
+import pistolUrl from './sfx/pistol.wav';
+import sniper1Url from './sfx/sniper-1.wav';
+import sniper2Url from './sfx/sniper-2.wav';
 
 /** Own PRNG so sound variation never consumes Math.random, which the action
  *  video capture seeds to reproduce a battle exactly. */
@@ -23,7 +26,9 @@ const MIN_GAP_S: Partial<Record<Sfx, number>> = {
 };
 const SFX_VOLUME = 0.55;
 const MUSIC_VOLUME = 0.16;
-const GUN_VARIANTS = 3;
+type GunKind = 'light' | 'heavy';
+/** Recorded shots per gun; several takes per gun are picked at random. */
+const GUN_SAMPLES: Record<GunKind, string[]> = { light: [pistolUrl], heavy: [sniper1Url, sniper2Url] };
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
@@ -33,7 +38,7 @@ class AudioEngine {
   private noiseBuf: AudioBuffer | null = null;
   private reverbIn: GainNode | null = null;
   private driveCurve: Float32Array | null = null;
-  /** Pre-rendered shot variants per gun, picked at random per play. */
+  /** Decoded gun recordings, filled once they've loaded. */
   private gunBufs: Record<GunKind, AudioBuffer[]> = { light: [], heavy: [] };
   /** Explosions still ringing, to cap their polyphony (and node count). */
   private activeExplosions = 0;
@@ -80,8 +85,7 @@ class AudioEngine {
       for (let i = 0; i < length; i++) data[i] = rand() * 2 - 1;
       this.reverbIn = this.createReverb(ctx);
       this.driveCurve = saturationCurve();
-      // Deferred so rendering doesn't delay the tap that unlocked audio
-      window.setTimeout(() => this.renderGuns(ctx), 0);
+      this.loadGuns(ctx);
       this.applyMood();
     }
     // iOS can also leave the context 'interrupted' (after a call or Siri)
@@ -185,10 +189,10 @@ class AudioEngine {
         this.chime(now + 0.12, 523, 0.6, 0.1);
         break;
       case 'shot':
-        this.gunshot(now, 'light', 0.4 * v);
+        this.gunshot(now, 'light', 0.3 * v);
         break;
       case 'heavy-shot':
-        this.gunshot(now, 'heavy', 0.55 * v);
+        this.gunshot(now, 'heavy', 0.75 * v);
         break;
       case 'mortar':
         // Hollow tube "thoomp"
@@ -250,31 +254,28 @@ class AudioEngine {
     }
   }
 
-  /** Render a few variants of each gun so rapid fire never repeats exactly.
-   *  One buffer per task, alternating guns, so a slow phone gets both guns
-   *  quickly and never freezes for the whole batch. */
-  // shortcut: renders on the main thread — move to a worker if low-end phones stutter
-  private renderGuns(ctx: AudioContext, step = 0): void {
-    if (step >= GUN_VARIANTS * 2) return;
-    const kind: GunKind = step % 2 === 0 ? 'light' : 'heavy';
-    try {
-      const data = renderGunshot(kind, ctx.sampleRate, rand);
-      const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
-      buf.getChannelData(0).set(data);
-      this.gunBufs[kind].push(buf);
-    } catch (err) {
-      console.error('Gunshot render failed; using the fallback shot', err);
-      return;
+  /** Fetch and decode the gun recordings in the background. */
+  private loadGuns(ctx: AudioContext): void {
+    for (const kind of ['light', 'heavy'] as const) {
+      for (const url of GUN_SAMPLES[kind]) {
+        fetch(url)
+          .then((res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.arrayBuffer();
+          })
+          .then((data) => ctx.decodeAudioData(data))
+          .then((buf) => { this.gunBufs[kind].push(buf); })
+          .catch((err: unknown) => console.error(`Gun sound ${url} failed to load; using the fallback`, err));
+      }
     }
-    window.setTimeout(() => this.renderGuns(ctx, step + 1), 0);
   }
 
-  /** Play a pre-rendered suppressed shot (see gunshot.ts) with slight pitch
-   *  variation; a plain thump stands in until the buffers are rendered. */
+  /** Play a recorded suppressed shot with slight pitch variation, so rapid
+   *  fire never repeats identically; a plain thump stands in until it loads. */
   private gunshot(t: number, kind: GunKind, gain: number): void {
     const bufs = this.gunBufs[kind];
     if (bufs.length === 0) {
-      // Plain muffled thump until the real shots are rendered (or if that failed)
+      // Until the recordings load (or if loading failed)
       this.thump(t, 150, 60, 0.06, gain * 0.6);
       this.noise(t, { type: 'lowpass', freq: 1800, freqEnd: 400, dur: 0.07, peak: gain * 0.7 });
       return;
@@ -285,7 +286,8 @@ class AudioEngine {
     src.playbackRate.value = 0.94 + rand() * 0.12;
     const g = ctx.createGain();
     g.gain.value = gain;
-    this.route(src.connect(g), kind === 'heavy' ? 0.25 : 0.15);
+    // No reverb send: the recordings already carry their own room
+    this.route(src.connect(g));
     src.start(t);
   }
 

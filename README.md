@@ -60,7 +60,7 @@ Every battle is fought on the same 360×640 map, whatever the device; the board 
 
 Zero runtime CSS frameworks. Two themes (paper day mode, dark night mode) via CSS custom properties.
 
-Sound effects and music are synthesized at runtime with WebAudio (no audio assets). Phones vibrate on kills and explosions (Capacitor Haptics on Android, the Vibration API on the web). Sound, music, vibration, reduced motion and theme are toggled from the main menu and saved locally; reduced motion follows the system setting by default.
+Sound effects and music are synthesized at runtime with WebAudio, except gunshots, which are short CC0 recordings (credits in `src/sfx/README.md`). Phones vibrate on kills and explosions (Capacitor Haptics on Android, the Vibration API on the web). Sound, music, vibration, reduced motion and theme are toggled from the main menu and saved locally; reduced motion follows the system setting by default.
 
 ## Development
 
