@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  AsyncGameController, withTimeout, IO_TIMEOUT_MS, ADVANCE_INTERVAL_MS,
+  AsyncGameController, withTimeout, IO_TIMEOUT_MS, ADVANCE_INTERVAL_MS, IDLE_CHECK_MS,
   type AsyncIO, type AsyncGameHooks, type PlayRoundInput, type PollEnv, type WatchStore,
 } from './online-async-game';
 import type { PathList } from './online-async-core';
@@ -344,6 +344,32 @@ describe('AsyncGameController', () => {
     await flush(); await flush();
     expect(advanceSpy).toHaveBeenCalledTimes(2);
     expect(host.plays.map(p => p.round)).toEqual([1, 2]);
+  });
+
+  it('asks the referee now and then whether a quiet human opponent has run out of time', async () => {
+    const backend = new FakeReferee('m1', 'host');
+    backend.seat('guest');
+    const env = fakePollEnv();
+    const host = makeHooks();
+    const io = backend.ioFor('host');
+    const advanceSpy = vi.spyOn(io, 'advance');
+    const hc = new AsyncGameController('m1', host.hooks, { io, watched: memWatch(), pollEnv: env });
+    await hc.start();
+    await hc.submitPlan(plan('b1'));
+    await settle();
+    // Waiting on the guest: one check right away (the server ends a match idle past its limit)...
+    expect(advanceSpy).toHaveBeenCalledTimes(1);
+    // ...then not on every poll...
+    env.time += IDLE_CHECK_MS / 2;
+    env.tick();
+    await settle();
+    expect(advanceSpy).toHaveBeenCalledTimes(1);
+    // ...but again once the check interval has passed.
+    env.time += IDLE_CHECK_MS;
+    env.tick();
+    await settle();
+    expect(advanceSpy).toHaveBeenCalledTimes(2);
+    hc.destroy();
   });
 
   it('asks the referee to play a round whose plans are both in', async () => {

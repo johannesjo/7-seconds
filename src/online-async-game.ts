@@ -148,6 +148,10 @@ export interface PollEnv {
 export const POLL_INTERVAL_MS = 15_000;
 /** Least time between two catch-up requests for the same match. */
 export const ADVANCE_INTERVAL_MS = 8_000;
+/** While waiting on a human, how often to let the referee end the match if
+ *  the opponent has been idle past its limit. The hourly server cleanup does
+ *  this too; this check means an open match never waits on that alone. */
+export const IDLE_CHECK_MS = 10 * 60_000;
 
 /** Default poll environment: real timers + Page Visibility, active only in a
  *  browser. In a headless/test context `document` is undefined and we return
@@ -221,6 +225,7 @@ export class AsyncGameController {
   /** The next planning prompt follows a failed submit (UI skips "your turn"). */
   private replanAfterError = false;
   private lastAdvanceAt = -Infinity;
+  private lastIdleCheckAt = -Infinity;
   private lastShownMatch: MatchRecord | null = null;
   /** onGameOver has been reported. */
   private over = false;
@@ -529,6 +534,10 @@ export class AsyncGameController {
         this.hooks.onAwaitOpponent(round, awaitingGuest, false);
         // An AI commander plans at once; if it hasn't, the server owes a move.
         if (match.guestBot) await this.catchUp();
+        else if (this.now() - this.lastIdleCheckAt >= IDLE_CHECK_MS) {
+          this.lastIdleCheckAt = this.now();
+          await this.catchUp();
+        }
         return;
 
       case 'resolve':
