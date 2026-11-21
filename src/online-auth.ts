@@ -1,7 +1,7 @@
 import { getSupabaseClient } from './online';
 import { dlog } from './online-debug';
 
-/** Cached promise so concurrent callers share a single sign-in attempt. */
+/** In-flight check, so concurrent callers share a single sign-in attempt. */
 let authPromise: Promise<string | null> | null = null;
 
 /** Ensure the shared Supabase client has an anonymous session.
@@ -12,7 +12,10 @@ let authPromise: Promise<string | null> | null = null;
  *  across reloads. Returns the user id, or null if auth is unavailable
  *  (e.g. anonymous sign-ins disabled, or offline). */
 export function ensureAuth(): Promise<string | null> {
-  if (!authPromise) authPromise = signIn();
+  // Re-check the stored session on every call rather than caching the id: if
+  // supabase-js drops the session (refresh token rejected after a long sleep),
+  // a cached id would leave every referee call failing until a reload.
+  if (!authPromise) authPromise = signIn().finally(() => { authPromise = null; });
   return authPromise;
 }
 
@@ -40,14 +43,12 @@ async function signIn(): Promise<string | null> {
     const { data, error } = await client.auth.signInAnonymously();
     if (error || !data.user) {
       dlog(`auth: anonymous sign-in failed: ${error?.message ?? 'no user'}`);
-      authPromise = null; // don't cache a failure — allow a later retry
       return null;
     }
     dlog(`auth: signed in anonymously ${data.user.id.slice(0, 8)}`);
     return data.user.id;
   } catch (e) {
     dlog(`auth: sign-in threw: ${e}`);
-    authPromise = null; // don't cache a failure — allow a later retry
     return null;
   }
 }
